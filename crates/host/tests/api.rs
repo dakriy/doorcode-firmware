@@ -264,6 +264,27 @@ fn write_boot(directory: &TempDir, image: &[u8]) {
 }
 
 #[test]
+fn the_web_keypad_page_is_served_at_the_root() {
+    let (_directory, address) = start(&[]);
+
+    let mut response = ureq::get(url(address, "/")).call().unwrap();
+    let content_type = response.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let page = response.body_mut().read_to_string().unwrap();
+    let keys: Vec<bool> = "123456789*0#"
+        .chars()
+        .map(|key| page.contains(&format!(r#"data-key="{key}""#)))
+        .collect();
+
+    assert_eq!(
+        (response.status().as_u16(), content_type.as_str(), keys),
+        (200, "text/html; charset=utf-8", vec![true; 12])
+    );
+}
+
+#[test]
 fn an_unknown_endpoint_is_not_found() {
     let (_directory, address) = start(&[]);
 

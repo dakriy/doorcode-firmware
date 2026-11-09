@@ -29,6 +29,16 @@ controller.
 
 Downloads trust the operating system's certificate roots.
 
+## Web keypad
+
+Open `http://127.0.0.1:8484/` (the `--listen` address) in a browser for a
+page that drives the control API: a keypad whose buttons, and the keyboard's
+digits, `*`, `#`, and Enter (as `#`), press keys; a field that types a whole
+entry; a door toggle; a signal slider and free-bytes field for the radio; a
+restart button; and a panel that reads `GET /state` once a second. The page
+is one HTML file with its style and script inline, served at `/` and
+`/index.html`, and loads nothing else.
+
 ## Control API
 
 Every answer is JSON. A request the host cannot do answers with an

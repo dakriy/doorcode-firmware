@@ -1,10 +1,12 @@
 //! The local HTTP JSON control API.
 
+use std::io::Cursor;
+
 use connectors::{DoorSensor, Event, Radio, Storage};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tiny_http::{Header, Request, Response, Server};
+use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::live::NotRunning;
 use crate::run::Device;
@@ -20,6 +22,10 @@ const ROUTES: &[(&str, &str, Handler)] = &[
     ("POST", "/radio", radio),
     ("POST", "/restart", restart),
 ];
+
+/// The web keypad page, served at both of these paths.
+const PAGE: &str = include_str!("../static/index.html");
+const PAGE_PATHS: &[&str] = &["/", "/index.html"];
 
 /// Why a request was not done.
 #[derive(Debug)]
@@ -39,18 +45,29 @@ impl From<NotRunning> for Failure {
 /// Answers requests until the server stops.
 pub(crate) fn serve(server: &Server, device: &Device) {
     for mut request in server.incoming_requests() {
-        let (status, body) = match answer(device, &mut request) {
-            Ok(body) => (200, body),
-            Err(failure) => failed(failure),
+        let response = match is_page(&request) {
+            true => respond(200, "text/html; charset=utf-8", PAGE.to_owned()),
+            false => api_response(answer(device, &mut request)),
         };
-        let header =
-            Header::from_bytes("Content-Type", "application/json").expect("a valid header");
-        let response = Response::from_string(body.to_string())
-            .with_status_code(status)
-            .with_header(header);
         // A client that went away needs no answer.
         let _ = request.respond(response);
     }
+}
+
+fn is_page(request: &Request) -> bool {
+    *request.method() == Method::Get && PAGE_PATHS.contains(&request.url())
+}
+
+fn api_response(answer: Result<Value, Failure>) -> Response<Cursor<Vec<u8>>> {
+    let (status, body) = answer.map_or_else(failed, |body| (200, body));
+    respond(status, "application/json", body.to_string())
+}
+
+fn respond(status: u16, content_type: &str, body: String) -> Response<Cursor<Vec<u8>>> {
+    let header = Header::from_bytes("Content-Type", content_type).expect("a valid header");
+    Response::from_string(body)
+        .with_status_code(status)
+        .with_header(header)
 }
 
 fn answer(device: &Device, request: &mut Request) -> Result<Value, Failure> {

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doorcode host</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 720px; background: #f4f4f4; color: #222; }
+  h1 { font-size: 1.2em; margin: 0 0 12px; }
+  main { display: flex; flex-wrap: wrap; gap: 16px; }
+  section { flex: 1 1 300px; background: #fff; border-radius: 8px; padding: 12px; }
+  .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .keypad button { font-size: 1.6em; padding: 14px 0; }
+  .pressed { background: #9cf; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .row input[type=text], .row input[type=number] { flex: 1; min-width: 0; }
+  .row input[type=range] { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+  dt { color: #666; }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  .released { background: #fc6; font-weight: bold; }
+  #error { color: #b00; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<h1>Doorcode host</h1>
+<p id="error"></p>
+<main>
+  <section>
+    <div class="keypad">
+      <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button>
+      <button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button>
+      <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button>
+      <button data-key="*">*</button><button data-key="0">0</button><button data-key="#">#</button>
+    </div>
+    <form class="row" id="type">
+      <input type="text" id="entry" placeholder="1234#" aria-label="Keys to type">
+      <button>Type</button>
+    </form>
+    <div class="row">
+      <button id="door">Open door</button>
+      <button id="restart">Restart</button>
+    </div>
+    <div class="row">
+      <label for="signal">Signal</label>
+      <input type="range" id="signal" min="-100" max="-30" value="-60">
+      <output id="signal-value">-60 dBm</output>
+    </div>
+    <div class="row">
+      <label for="free">Free bytes</label>
+      <input type="number" id="free" min="0" value="180000">
+    </div>
+  </section>
+  <section>
+    <dl>
+      <dt>Phase</dt><dd id="phase"></dd>
+      <dt>Connection</dt><dd id="connection"></dd>
+      <dt>Door id</dt><dd id="door_id"></dd>
+      <dt>Mode now</dt><dd id="mode"></dd>
+      <dt>Strike</dt><dd id="strike_released"></dd>
+      <dt>Door</dt><dd id="door_open"></dd>
+      <dt>Entry</dt><dd id="entry_shown"></dd>
+      <dt>Last check</dt><dd id="last_check"></dd>
+      <dt>Last reply</dt><dd id="last_reply"></dd>
+      <dt>Update</dt><dd id="update"></dd>
+      <dt>Firmware</dt><dd id="firmware_version"></dd>
+      <dt>Hardware id</dt><dd id="hardware_id"></dd>
+      <dt>Bytes in</dt><dd id="bytes_in"></dd>
+      <dt>Bytes out</dt><dd id="bytes_out"></dd>
+    </dl>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let doorOpen = false;
+let radioShown = false;
+
+async function request(path, options) {
+  try {
+    const response = await fetch(path, options);
+    return await response.json();
+  } catch (error) {
+    $("error").textContent = String(error);
+    return null;
+  }
+}
+
+async function post(path, body) {
+  const answer = await request(path, { method: "POST", body: JSON.stringify(body) });
+  if (answer) $("error").textContent = answer.error || "";
+}
+
+function press(key) {
+  const button = document.querySelector(`[data-key="${key}"]`);
+  button.classList.add("pressed");
+  setTimeout(() => button.classList.remove("pressed"), 150);
+  post("/keys", { keys: key });
+}
+
+function showSignal() {
+  $("signal-value").textContent = $("signal").value + " dBm";
+}
+
+function sendRadio() {
+  showSignal();
+  post("/radio", { signal: Number($("signal").value), free_bytes: Number($("free").value) });
+}
+
+const text = (value) => (value === null || value === undefined ? "—" : String(value));
+
+function show(state) {
+  for (const field of ["phase", "connection", "door_id", "mode", "update", "firmware_version", "hardware_id", "bytes_in", "bytes_out"]) {
+    $(field).textContent = text(state[field]);
+  }
+  $("strike_released").textContent = state.strike_released ? "released" : "locked";
+  $("strike_released").classList.toggle("released", state.strike_released === true);
+  $("entry_shown").textContent = state.entry || "—";
+  $("last_check").textContent = state.last_check ? `#${state.last_check.request_id} ${state.last_check.digits}` : "—";
+  const reply = state.last_reply;
+  $("last_reply").textContent = reply ? `#${reply.request_id} ${reply.allow ? "allow" : "deny"} ${reply.strike_ms} ms` : "—";
+  doorOpen = state.door_open === true;
+  $("door_open").textContent = doorOpen ? "open" : "closed";
+  $("door").textContent = doorOpen ? "Close door" : "Open door";
+  if (!radioShown && state.free_bytes !== undefined) {
+    radioShown = true;
+    if (state.signal !== null) $("signal").value = state.signal;
+    showSignal();
+    $("free").value = state.free_bytes;
+  }
+}
+
+async function poll() {
+  const state = await request("/state");
+  if (state) show(state);
+}
+
+document.querySelectorAll("[data-key]").forEach((button) => {
+  button.addEventListener("click", () => press(button.dataset.key));
+});
+$("type").addEventListener("submit", (event) => {
+  event.preventDefault();
+  post("/keys", { keys: $("entry").value });
+  $("entry").value = "";
+});
+$("door").addEventListener("click", () => post("/door", { open: !doorOpen }).then(poll));
+$("restart").addEventListener("click", () => post("/restart", {}));
+$("signal").addEventListener("change", sendRadio);
+$("signal").addEventListener("input", showSignal);
+$("free").addEventListener("change", sendRadio);
+document.addEventListener("keydown", (event) => {
+  if (event.target instanceof HTMLInputElement || event.ctrlKey || event.metaKey || event.altKey) return;
+  const key = event.key === "Enter" ? "#" : event.key;
+  if (!/^[0-9*#]$/.test(key)) return;
+  event.preventDefault();
+  press(key);
+});
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
