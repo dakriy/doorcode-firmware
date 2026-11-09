@@ -184,6 +184,7 @@ and by running on the bench board, not by the gates below. See
 | --- | --- |
 | `verify-fast` | `make verify-fast` |
 | `verify-mutation` | `make verify-mutation` |
+| `verify-mutation-diff` | `make verify-mutation-diff BASE=<git ref>` (default `HEAD~1`) |
 | `verify-integration` | `make verify-integration` |
 | `verify-all` | `make verify-all` |
 
@@ -191,6 +192,13 @@ Runtime budget for `verify-fast` tests: 10 seconds, measured over the
 entrypoint suite and the fast connector tests, excluding compilation
 (`scripts/check-coverage.sh`). Override with `FAST_BUDGET_SECONDS` only to
 lower it.
+
+`verify-mutation-diff` runs only the mutants in code touched by
+`git diff BASE` (uncommitted changes included) under the same survivor gate,
+for quick iteration while working. It is not the gate: the full
+`verify-mutation` must pass before a change is finished. Both keep
+cargo-mutants' scratch copies in `target/mutants-tmp`, so an interrupted run
+leaves nothing outside the repository and `cargo clean` removes it.
 
 Slow connector test prerequisites: None yet. When a connector needs a local
 service, its slow test starts a container and this section names the image.

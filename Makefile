@@ -16,7 +16,7 @@ FIRMWARE_DOCKER = docker run --rm -u root \
 # The image's login shell resets PATH, so the cargo bin dir is exported per command.
 FIRMWARE_ENV = export PATH=/home/esp/.cargo/bin:$$PATH;
 
-.PHONY: verify-fast verify-mutation verify-integration verify-all \
+.PHONY: verify-fast verify-mutation verify-mutation-diff verify-integration verify-all \
 	fmt lint build check-imports check-complexity test-fast coverage dead-code duplicates \
 	firmware-build firmware-flash firmware-check
 
@@ -27,6 +27,11 @@ verify-fast: fmt lint check-imports check-complexity coverage dead-code duplicat
 ## verify-mutation: mutation testing of application code; no survivor allowed.
 verify-mutation:
 	@sh scripts/check-mutation.sh
+
+## verify-mutation-diff: the same gate over only the mutants in `git diff BASE`.
+BASE ?= HEAD~1
+verify-mutation-diff:
+	@MUTATION_DIFF_BASE='$(BASE)' sh scripts/check-mutation.sh
 
 ## verify-integration: slow connector tests only.
 verify-integration:
