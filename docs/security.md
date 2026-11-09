@@ -11,7 +11,14 @@ serviced in place by technicians.
   carries no secrets.
 - **One trusted CA.** A door verifies the broker and firmware downloads
   against the one CA it was provisioned or configured with, and trusts no
-  public roots (`protocol.md`).
+  public roots (`protocol.md`). Without a CA, a TLS connection or an
+  HTTPS download fails.
+- **Plain transports are for development.** A broker configured without
+  TLS (`broker_tls` false) and an `http://` download address need no CA and
+  carry credentials, codes, and images in the clear. They exist for
+  development setups on a trusted network, never for a deployed site. The
+  desktop host follows the same rule for plain addresses, and trusts the
+  operating system's roots for HTTPS downloads.
 - **Anti-rollback.** Planned.
 - **No secure boot.** Secure Boot V2 requires ESP32 revision 3 silicon, and
   V1 is deprecated.

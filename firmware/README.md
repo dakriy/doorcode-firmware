@@ -79,8 +79,9 @@ file"), or from a door's page for a board meant for that door, and save it
 as `firmware/provisioning.json`. `generated_at` and `server.device_url` are
 not used: an update command carries its full download address. That
 address must present a certificate from `broker.ca_pem`, the one CA the
-board trusts (`docs/protocol.md`). Git ignores it, since it holds
-secrets. The desktop host reads the same file.
+board trusts (`docs/protocol.md`), unless it is plain `http://`, which a
+development setup may use with an empty `ca_pem`. Git ignores the file,
+since it holds secrets. The desktop host reads the same file.
 
 The values reach the board two ways, as the same NVS entries in the
 `doorcode` namespace (each a blob; `config` is the configuration message in
@@ -130,16 +131,20 @@ for size so an image fits.
 - **Broker.** Each connection is an esp-mqtt client: MQTT 3.1.1, QoS 1
   for every publication, subscription, and will, clean session, and TLS
   verified against the provisioned CA unless the broker is configured
-  without TLS. The client never reconnects on its own; the application
-  does. Opening and closing clients happens on a thread of its own, since
-  closing one waits for its task, and publications are queued for the
-  client's task to send, so the event loop never waits on the network.
+  without TLS, which is for development setups only. The client never
+  reconnects on its own; the application does. Opening and closing
+  clients happens on a thread of its own, since closing one waits for its
+  task, and publications are queued for the client's task to send, so the
+  event loop never waits on the network.
   Messages longer than the 4 KB receive buffer arrive in pieces and are
   put back together before they are delivered.
 - **Downloads** run on a thread each, over HTTPS verified against the same
-  CA, and hand the body to the event loop in 4 KB chunks, waiting while
-  the event queue is backed up. ESP-IDF's HTTP client log is off, since it
-  would print the address, which may carry a one-time token.
+  CA, and fail when no CA is stored. An `http://` address downloads
+  without TLS and without a CA, leaving the CA store alone; like plain
+  MQTT, that is for development setups only. Downloads hand the body to
+  the event loop in 4 KB chunks, waiting while the event queue is backed
+  up. ESP-IDF's HTTP client log is off, since it would print the address,
+  which may carry a one-time token.
 - **Randomness** comes from the hardware generator, which is true random
   while Wi-Fi runs.
 - **Time.** Milliseconds come from `esp_timer`. Unix time comes from SNTP

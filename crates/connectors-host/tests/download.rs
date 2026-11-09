@@ -1,13 +1,14 @@
-//! Connector suite for HTTPS downloads. Each test serves one response from
-//! an HTTPS server on 127.0.0.1 in the test process, whose certificate a CA
-//! made by the test signed; that runs in milliseconds, so those tests are
-//! fast. The test that asks the system's name resolver is slow.
+//! Connector suite for downloads. Each test serves one response from an
+//! HTTPS server on 127.0.0.1 in the test process, whose certificate a CA
+//! made by the test signed, or from a plain HTTP one; that runs in
+//! milliseconds, so those tests are fast. The test that asks the system's
+//! name resolver is slow.
 
 #[path = "support/pki.rs"]
 mod pki;
 
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
 
@@ -37,16 +38,36 @@ fn serve_once(pki: &pki::Pki, status: u16, body: Vec<u8>, path: &str) -> String 
         let (socket, _) = listener.accept().unwrap();
         let connection = ServerConnection::new(Arc::new(config)).unwrap();
         // A client that does not trust the server ends the handshake.
-        let _ = respond(StreamOwned::new(connection, socket), status, &body);
+        let _ = respond_tls(StreamOwned::new(connection, socket), status, &body);
     });
     format!("https://127.0.0.1:{port}{path}")
 }
 
-fn respond(
-    stream: StreamOwned<ServerConnection, std::net::TcpStream>,
+/// Serves one `status` response carrying `body` over plain HTTP, and
+/// returns the address of `path` on it.
+fn serve_plain_once(status: u16, body: Vec<u8>, path: &str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (socket, _) = listener.accept().unwrap();
+        respond(socket, status, &body).unwrap().flush().unwrap();
+    });
+    format!("http://127.0.0.1:{port}{path}")
+}
+
+fn respond_tls(
+    stream: StreamOwned<ServerConnection, TcpStream>,
     status: u16,
     body: &[u8],
 ) -> std::io::Result<()> {
+    let mut stream = respond(stream, status, body)?;
+    stream.conn.send_close_notify();
+    stream.flush()
+}
+
+/// Reads the request's head and writes the response, handing the stream
+/// back for the caller to close.
+fn respond<S: Read + Write>(stream: S, status: u16, body: &[u8]) -> std::io::Result<S> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     while line != "\r\n" {
@@ -60,8 +81,7 @@ fn respond(
     );
     stream.write_all(head.as_bytes())?;
     stream.write_all(body)?;
-    stream.conn.send_close_notify();
-    stream.flush()
+    Ok(stream)
 }
 
 /// Every transfer event until the download completes or fails.
@@ -182,6 +202,31 @@ fn without_a_provisioned_ca_the_system_roots_decide() {
         [Transfer::Failed(
             "io: invalid peer certificate: UnknownIssuer".to_owned()
         )]
+    );
+}
+
+#[test]
+fn a_plain_http_address_downloads_without_a_ca() {
+    let url = serve_plain_once(200, b"image".to_vec(), "/firmware/2.1.0?token=one-time");
+
+    let transfers = download_with(None, &url);
+
+    assert_eq!(
+        summary(transfers),
+        (Some(200), b"image".to_vec(), Transfer::Complete)
+    );
+}
+
+#[test]
+fn a_plain_http_address_downloads_whatever_ca_is_provisioned() {
+    let url = serve_plain_once(200, b"image".to_vec(), "/image");
+    let ca = pki::generate().ca_pem;
+
+    let transfers = download_with(Some(&ca), &url);
+
+    assert_eq!(
+        summary(transfers),
+        (Some(200), b"image".to_vec(), Transfer::Complete)
     );
 }
 

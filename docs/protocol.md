@@ -38,9 +38,12 @@ name on the site's reverse proxy, next to the public entrypoint people's
 browsers use. A door told to download from an address whose certificate
 does not chain to its CA fails the update and stays on the image it runs.
 
-The desktop host verifies downloads against the operating system's roots
-instead, and also downloads over plain HTTP, which a development server
-sends when its `device_url` is an `http://` address.
+A development server whose `device_url` is an `http://` address sends
+plain HTTP download addresses. The firmware downloads those without TLS
+and without consulting its CA, so a development board may be provisioned
+with no CA at all and a plain broker (`security.md`). The desktop host
+downloads plain HTTP the same way, and verifies HTTPS downloads against
+the operating system's roots instead.
 
 ## Configuration
 

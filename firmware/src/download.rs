@@ -1,6 +1,7 @@
-//! HTTPS downloads on ESP-IDF's HTTP client, each on a thread of its own so
-//! that the event loop keeps serving keys. The server's certificate must
-//! chain to the provisioned CA, the one stored for the broker. The address
+//! HTTP and HTTPS downloads on ESP-IDF's HTTP client, each on a thread of
+//! its own so that the event loop keeps serving keys. Over HTTPS the
+//! server's certificate must chain to the provisioned CA, the one stored for
+//! the broker; plain http, for development setups, needs no CA. The address
 //! is never part of what it reports or logs, since it may carry a one-time
 //! token.
 
@@ -32,6 +33,8 @@ const NETWORK_TIMEOUT: Duration = Duration::from_secs(10);
 /// ESP-IDF's HTTP client logs the address it could not parse under this
 /// tag.
 const HTTP_CLIENT_TAG: &CStr = c"HTTP_CLIENT";
+/// The start of an address fetched without TLS.
+const PLAIN_SCHEME: &str = "http://";
 
 pub(crate) struct EspDownload {
     events: EventSender,
@@ -45,7 +48,7 @@ impl EspDownload {
     }
 
     /// The stored CA, NUL-terminated as mbedTLS reads PEM; empty when none
-    /// is stored, which fails the download.
+    /// is stored, which fails an HTTPS download.
     fn ca(&self) -> Result<CString, DownloadError> {
         let stored = self
             .storage
@@ -53,17 +56,34 @@ impl EspDownload {
             .map_err(|error| DownloadError(error.to_string()))?;
         CString::new(stored.unwrap_or_default()).map_err(|error| DownloadError(error.to_string()))
     }
+
+    /// The CA to verify `url` against, and none for plain http.
+    fn ca_for(&self, url: &str) -> Result<Option<CString>, DownloadError> {
+        if plain_http(url) {
+            return Ok(None);
+        }
+        self.ca().map(Some)
+    }
 }
 
 impl Download for EspDownload {
     fn start(&self, url: &str) -> Result<(), DownloadError> {
-        let ca = self.ca()?;
+        let ca = self.ca_for(url)?;
         silence_client_log();
         let events = self.events.clone();
         let url = url.to_owned();
-        threads::spawn("download", STACK_BYTES, move || fetch(&url, &ca, &events))
-            .map_err(|error| DownloadError(error.to_string()))
+        threads::spawn("download", STACK_BYTES, move || {
+            fetch(&url, ca.as_deref(), &events)
+        })
+        .map_err(|error| DownloadError(error.to_string()))
     }
+}
+
+/// Whether `url` names plain http, which ESP-IDF's HTTP client recognizes in
+/// any letter case. Anything else is fetched over HTTPS or fails.
+fn plain_http(url: &str) -> bool {
+    url.get(..PLAIN_SCHEME.len())
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case(PLAIN_SCHEME))
 }
 
 /// Turns off the HTTP client's log, the one place ESP-IDF would print the
@@ -75,8 +95,9 @@ fn silence_client_log() {
 }
 
 /// Downloads `url`, reporting the status, the body in chunks, and then
-/// that it completed or failed.
-fn fetch(url: &str, ca: &CStr, events: &EventSender) {
+/// that it completed or failed. Over HTTPS `ca` is the certificate to trust;
+/// plain http has none and leaves the global CA store alone.
+fn fetch(url: &str, ca: Option<&CStr>, events: &EventSender) {
     let transfer = match get(url, ca, events) {
         Ok(()) => Transfer::Complete,
         Err(error) => Transfer::Failed(error),
@@ -84,15 +105,23 @@ fn fetch(url: &str, ca: &CStr, events: &EventSender) {
     events.push(Event::Download(transfer));
 }
 
-fn get(url: &str, ca: &CStr, events: &EventSender) -> Result<(), String> {
-    trust(ca).map_err(describe)?;
-    let mut connection = EspHttpConnection::new(&configuration()).map_err(describe)?;
+fn get(url: &str, ca: Option<&CStr>, events: &EventSender) -> Result<(), String> {
+    let mut connection = connect(ca).map_err(describe)?;
     connection
         .initiate_request(Method::Get, url, &[])
         .map_err(describe)?;
     connection.initiate_response().map_err(describe)?;
     events.push(Event::Download(Transfer::Status(connection.status())));
     stream(&mut connection, events)
+}
+
+/// A connection that verifies against `ca` when there is one, and against
+/// nothing for plain http.
+fn connect(ca: Option<&CStr>) -> Result<EspHttpConnection, EspError> {
+    if let Some(ca) = ca {
+        trust(ca)?;
+    }
+    EspHttpConnection::new(&configuration(ca.is_some()))
 }
 
 /// Makes `ca` the one certificate the HTTP client trusts.
@@ -104,11 +133,12 @@ fn trust(ca: &CStr) -> Result<(), EspError> {
     esp!(unsafe { sys::esp_tls_set_global_ca_store(pem.as_ptr(), length) })
 }
 
-fn configuration() -> Configuration {
+/// The client's settings, verifying against the global CA store when `tls`.
+fn configuration(tls: bool) -> Configuration {
     Configuration {
         buffer_size: Some(HEADER_BYTES),
         timeout: Some(NETWORK_TIMEOUT),
-        use_global_ca_store: true,
+        use_global_ca_store: tls,
         ..Default::default()
     }
 }
