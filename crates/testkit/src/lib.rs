@@ -4,6 +4,7 @@
 
 mod broker;
 mod door;
+mod enrolled;
 mod events;
 mod storage;
 
@@ -17,6 +18,7 @@ use connectors::{
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
 pub use door::{StrikeCall, StubDoorSensor, StubStrike};
+pub use enrolled::{door_connection_to, door_online_status};
 pub use events::{
     config_for, credentials_for, door_message, reply_for, timeline_for, typed, StubEvents,
 };
@@ -129,6 +131,15 @@ impl StubLog {
         self.lines.borrow().clone()
     }
 
+    /// The lines logged at `level`, in order.
+    pub fn lines_at(&self, level: Level) -> Vec<String> {
+        self.lines()
+            .into_iter()
+            .filter(|(at, _)| *at == level)
+            .map(|(_, line)| line)
+            .collect()
+    }
+
     /// Every level the log was set to, in order.
     pub fn levels(&self) -> Vec<Level> {
         self.levels.borrow().clone()
@@ -159,6 +170,17 @@ pub struct StubConnectors {
     pub log: StubLog,
     pub strike: StubStrike,
     pub door_sensor: StubDoorSensor,
+}
+
+impl StubConnectors {
+    /// The stubs of a device enrolled as door 7 that sees `events`.
+    pub fn enrolled(events: StubEvents) -> Self {
+        Self {
+            storage: StubStorage::enrolled(),
+            events,
+            ..Self::default()
+        }
+    }
 }
 
 impl Connectors for StubConnectors {

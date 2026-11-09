@@ -25,6 +25,8 @@ pub(crate) struct Gate {
     /// The one check waiting for its reply. A newer entry replaces it.
     check: Option<Outstanding>,
     latch: Latch,
+    /// The round trip of the last check that was answered; 0 until one is.
+    latency_ms: u64,
 }
 
 impl Gate {
@@ -75,10 +77,12 @@ impl Gate {
     /// Releases the strike for the reply to the outstanding check when it
     /// allows; a reply to anything else is ignored.
     pub(crate) fn reply(&mut self, device: &Device<'_>, payload: &[u8], config: &Config) {
-        let Some(reply) = check::answer(device, self.check.as_ref(), payload) else {
+        let Some(answer) = check::answer(device, self.check.as_ref(), payload) else {
             return;
         };
         self.check = None;
+        self.latency_ms = answer.round_trip_ms;
+        let reply = answer.reply;
         if !reply.allow {
             device.log(Level::Info, "the server denied the entry");
             return;
@@ -102,12 +106,16 @@ impl Gate {
         self.latch.lock(device);
     }
 
+    /// The round trip of the last check that was answered; 0 until one is.
+    pub(crate) fn latency_ms(&self) -> u64 {
+        self.latency_ms
+    }
+
     pub(crate) fn report(self) -> Access {
         Access {
             entry: self.entry.keys().to_owned(),
             check: self.check.map(|outstanding| outstanding.check),
             strike: self.latch.state,
-            opens: self.latch.opens,
         }
     }
 }

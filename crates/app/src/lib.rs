@@ -13,6 +13,7 @@ mod enrollment;
 mod entry;
 mod stored;
 mod strike;
+mod telemetry;
 mod timeline;
 
 use connectors::{BrokerAddress, Connectors, Event, StorageError};
@@ -41,6 +42,8 @@ pub struct RunReport {
     pub door_open: bool,
     /// The keypad, the check, and the strike at the end.
     pub access: Access,
+    /// What the next telemetry report would count.
+    pub counters: Counters,
 }
 
 /// The state the timeline puts the door in.
@@ -62,8 +65,17 @@ pub struct Access {
     /// The check sent and not answered yet.
     pub check: Option<Check>,
     pub strike: StrikeState,
-    /// How often the strike was released since the controller started.
+}
+
+/// The counts telemetry reports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counters {
+    /// How often the door opened since the last report.
     pub opens: u64,
+    /// How often the door connected again since it started.
+    pub reconnects: u64,
+    /// The round trip of the last check that was answered; 0 until one is.
+    pub latency_ms: u64,
 }
 
 /// Whether the strike holds the door.
@@ -85,6 +97,7 @@ impl RunReport {
         config: Config,
         timeline: Timeline,
         access: Access,
+        counters: Counters,
     ) -> RunReport {
         RunReport {
             provisioning: device.provisioning.clone(),
@@ -95,6 +108,7 @@ impl RunReport {
             timeline,
             door_open: device.connectors.door_sensor().is_open(),
             access,
+            counters,
         }
     }
 }

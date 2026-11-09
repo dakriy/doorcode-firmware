@@ -1,4 +1,4 @@
-use connectors::{Connectors, Level};
+use connectors::{BrokerError, Connectors, Level, Publication};
 
 use crate::Provisioning;
 
@@ -42,6 +42,22 @@ impl<'a> Device<'a> {
     /// radio has none.
     pub(crate) fn signal_dbm(&self) -> i32 {
         self.connectors.radio().signal_dbm().unwrap_or(0)
+    }
+
+    /// Publishes `payload`, not retained, on the topic of door `door_id`
+    /// that ends in `leaf`.
+    pub(crate) fn publish(
+        &self,
+        door_id: u64,
+        leaf: &str,
+        payload: Vec<u8>,
+    ) -> Result<(), BrokerError> {
+        let publication = Publication {
+            topic: protocol::door_topic(door_id, leaf),
+            payload,
+            retain: false,
+        };
+        self.connectors.broker().publish(&publication)
     }
 
     pub(crate) fn log(&self, level: Level, message: &str) {

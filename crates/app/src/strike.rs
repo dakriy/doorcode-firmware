@@ -1,5 +1,4 @@
-//! The strike: released for a while, then locked again, and counted each
-//! time it is released.
+//! The strike: released for a while, then locked again.
 
 use crate::device::Device;
 use crate::StrikeState;
@@ -7,8 +6,6 @@ use crate::StrikeState;
 #[derive(Default)]
 pub(crate) struct Latch {
     pub(crate) state: StrikeState,
-    /// Releases since the controller started.
-    pub(crate) opens: u64,
 }
 
 impl Latch {
@@ -19,7 +16,6 @@ impl Latch {
         self.state = StrikeState::Released {
             relock_at_ms: device.now_ms() + ms,
         };
-        self.opens += 1;
     }
 
     /// Locks the strike when it is released.

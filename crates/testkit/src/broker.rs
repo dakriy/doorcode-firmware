@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use connectors::{Broker, BrokerAddress, BrokerError, ConnectOptions, Publication};
-use protocol::{Check, Enrollment, Online, Topic};
+use protocol::{Check, DoorEvent, Enrollment, Online, Telemetry, Topic};
 
 /// A broker that records every request and decodes what was published.
 #[derive(Debug, Default)]
@@ -49,6 +49,8 @@ pub enum Message {
     Enrollment(Enrollment),
     Online(Online),
     Check(Check),
+    Telemetry(Telemetry),
+    DoorEvent(DoorEvent),
     Undecoded(Vec<u8>),
 }
 
@@ -60,6 +62,12 @@ fn decode(topic: &str, payload: &[u8]) -> Option<Message> {
         }
         Topic::Door { leaf, .. } if leaf == protocol::LEAF_CHECK => {
             Check::decode(payload).ok().map(Message::Check)
+        }
+        Topic::Door { leaf, .. } if leaf == protocol::LEAF_TELEMETRY => {
+            Telemetry::decode(payload).ok().map(Message::Telemetry)
+        }
+        Topic::Door { leaf, .. } if leaf == protocol::LEAF_EVENT => {
+            DoorEvent::decode(payload).ok().map(Message::DoorEvent)
         }
         _ => None,
     }

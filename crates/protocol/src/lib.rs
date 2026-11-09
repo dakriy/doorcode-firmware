@@ -35,6 +35,10 @@ pub const LEAF_REPLY: &str = "reply";
 pub const LEAF_COMMAND: &str = "command";
 /// The last level of the topic a door asks the server about an entry on.
 pub const LEAF_CHECK: &str = "check";
+/// The last level of the topic a door reports its telemetry on.
+pub const LEAF_TELEMETRY: &str = "telemetry";
+/// The last level of the topic a door says it opened or closed on.
+pub const LEAF_EVENT: &str = "event";
 
 /// The topic of door `door_id` that ends in `leaf`.
 pub fn door_topic(door_id: u64, leaf: &str) -> String {
@@ -434,6 +438,84 @@ impl Reply {
                 ("strike_ms", Slot::Uint(&mut message.strike_ms)),
             ],
         );
+        read.map(|()| message)
+    }
+}
+
+/// A door's periodic report of how it is doing. Every field is always sent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Telemetry {
+    /// Signal strength now, in dBm.
+    pub signal: i32,
+    /// The latest round trip to the server, in milliseconds.
+    pub latency_ms: u64,
+    pub uptime_s: u64,
+    pub free_bytes: u64,
+    pub firmware_version: String,
+    /// How often the door connected again since it started.
+    pub reconnects: u64,
+    pub door_open: bool,
+    /// How often the door opened since the last report.
+    pub opens: u64,
+}
+
+impl Telemetry {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut map = MapWriter::new();
+        map.int("signal", self.signal.into());
+        map.uint("latency_ms", self.latency_ms);
+        map.uint("uptime_s", self.uptime_s);
+        map.uint("free_bytes", self.free_bytes);
+        map.text("firmware_version", &self.firmware_version);
+        map.uint("reconnects", self.reconnects);
+        map.bool("door_open", self.door_open);
+        map.uint("opens", self.opens);
+        map.finish()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut message = Self::default();
+        let read = cbor::read_map(
+            bytes,
+            &mut [
+                ("signal", Slot::Int(&mut message.signal)),
+                ("latency_ms", Slot::Uint(&mut message.latency_ms)),
+                ("uptime_s", Slot::Uint(&mut message.uptime_s)),
+                ("free_bytes", Slot::Uint(&mut message.free_bytes)),
+                (
+                    "firmware_version",
+                    Slot::Text(&mut message.firmware_version),
+                ),
+                ("reconnects", Slot::Uint(&mut message.reconnects)),
+                ("door_open", Slot::Bool(&mut message.door_open)),
+                ("opens", Slot::Uint(&mut message.opens)),
+            ],
+        );
+        read.map(|()| message)
+    }
+}
+
+/// The door saying it opened.
+pub const EVENT_OPENED: &str = "opened";
+/// The door saying it closed.
+pub const EVENT_CLOSED: &str = "closed";
+
+/// Something that happened to a door: `opened` or `closed`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DoorEvent {
+    pub event: String,
+}
+
+impl DoorEvent {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut map = MapWriter::new();
+        map.text("event", &self.event);
+        map.finish()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut message = Self::default();
+        let read = cbor::read_map(bytes, &mut [("event", Slot::Text(&mut message.event))]);
         read.map(|()| message)
     }
 }

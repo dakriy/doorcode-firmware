@@ -1,6 +1,6 @@
 //! Asking the server about an entry, and matching its reply.
 
-use connectors::{Level, Publication};
+use connectors::Level;
 use protocol::{Check, Reply};
 
 use crate::device::Device;
@@ -8,8 +8,16 @@ use crate::device::Device;
 /// A check sent and not answered yet.
 pub(crate) struct Outstanding {
     pub(crate) check: Check,
+    /// When the check was published.
+    sent_at: u64,
     /// When the door stops waiting for the reply.
     pub(crate) deadline: u64,
+}
+
+/// A reply to the outstanding check, and how long it took to come.
+pub(crate) struct Answer {
+    pub(crate) reply: Reply,
+    pub(crate) round_trip_ms: u64,
 }
 
 /// Publishes a check for `digits` on door `door_id`'s check topic, with a
@@ -25,18 +33,15 @@ pub(crate) fn send(
         request_id: request_id(device),
         digits,
     };
-    let publication = Publication {
-        topic: protocol::door_topic(door_id, protocol::LEAF_CHECK),
-        payload: check.encode(),
-        retain: false,
-    };
-    if let Err(error) = device.connectors.broker().publish(&publication) {
+    if let Err(error) = device.publish(door_id, protocol::LEAF_CHECK, check.encode()) {
         device.log(Level::Warn, &format!("an entry was not checked: {error}"));
         return None;
     }
+    let sent_at = device.now_ms();
     Some(Outstanding {
         check,
-        deadline: device.now_ms() + reply_timeout_ms,
+        sent_at,
+        deadline: sent_at + reply_timeout_ms,
     })
 }
 
@@ -51,7 +56,7 @@ pub(crate) fn answer(
     device: &Device<'_>,
     outstanding: Option<&Outstanding>,
     payload: &[u8],
-) -> Option<Reply> {
+) -> Option<Answer> {
     let reply = match Reply::decode(payload) {
         Ok(reply) => reply,
         Err(error) => {
@@ -59,13 +64,17 @@ pub(crate) fn answer(
             return None;
         }
     };
-    let awaited = outstanding.map(|outstanding| outstanding.check.request_id.as_str());
-    if awaited != Some(reply.request_id.as_str()) {
+    let awaited =
+        outstanding.filter(|outstanding| outstanding.check.request_id == reply.request_id);
+    let Some(outstanding) = awaited else {
         device.log(
             Level::Info,
             &format!("ignored a reply to {}, not awaited", reply.request_id),
         );
         return None;
-    }
-    Some(reply)
+    };
+    Some(Answer {
+        round_trip_ms: device.now_ms() - outstanding.sent_at,
+        reply,
+    })
 }

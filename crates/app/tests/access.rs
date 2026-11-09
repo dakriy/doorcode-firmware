@@ -7,8 +7,9 @@ use connectors::{Event, Level};
 use pretty_assertions::assert_eq;
 use protocol::{Check, Config, Reply, Span, Timeline};
 use testkit::{
-    config_for, door_message, hex, reply_for, timeline_for, typed, BrokerCall, Message, Sent,
-    StrikeCall, StubBroker, StubConnectors, StubDoorSensor, StubEvents, StubRandom, StubStorage,
+    config_for, door_connection_to, door_message, door_online_status, hex, reply_for, timeline_for,
+    typed, BrokerCall, Message, Sent, StrikeCall, StubBroker, StubConnectors, StubDoorSensor,
+    StubEvents, StubRandom, StubStorage,
 };
 
 /// The request id the contract's examples use.
@@ -18,17 +19,9 @@ const IN_OPEN_SPAN: i64 = 1_793_010_000;
 /// A time inside the locked span of `spans`.
 const IN_LOCKED_SPAN: i64 = 1_793_020_000;
 
-fn door(events: StubEvents) -> StubConnectors {
-    StubConnectors {
-        storage: StubStorage::enrolled(),
-        events,
-        ..StubConnectors::default()
-    }
-}
-
 /// A door that comes online at once and then sees `events`.
 fn online(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
-    door(script_online(events))
+    StubConnectors::enrolled(script_online(events))
 }
 
 fn script_online(events: impl IntoIterator<Item = (u64, Event)>) -> StubEvents {
@@ -85,10 +78,9 @@ fn entry_allowed(strike_ms: u64) -> Vec<(u64, Event)> {
     events
 }
 
-fn released_until(relock_at_ms: u64, opens: u64) -> Access {
+fn released_until(relock_at_ms: u64) -> Access {
     Access {
         strike: StrikeState::Released { relock_at_ms },
-        opens,
         ..Access::default()
     }
 }
@@ -117,17 +109,20 @@ fn spans() -> Timeline {
 /// The door's state at `unix_seconds` under `timeline`.
 fn mode_at(timeline: &Timeline, unix_seconds: i64) -> Mode {
     let events = StubEvents::script([(0, timeline_for(7, timeline))]).at_unix(unix_seconds);
-    app::run(&door(events)).unwrap().mode
+    app::run(&StubConnectors::enrolled(events)).unwrap().mode
 }
 
-fn info_lines(connectors: &StubConnectors) -> Vec<String> {
-    connectors
-        .log
-        .lines()
-        .into_iter()
-        .filter(|(level, _)| *level == Level::Info)
-        .map(|(_, line)| line)
-        .collect()
+/// What door 7 asks of the broker to come online.
+fn door_coming_online() -> Vec<BrokerCall> {
+    let subscription = |leaf: &str| BrokerCall::Subscribe(format!("doorcode/doors/7/{leaf}"));
+    vec![
+        BrokerCall::Connect(door_connection_to("broker.example.org")),
+        subscription("config"),
+        subscription("timeline"),
+        subscription("reply"),
+        subscription("command"),
+        BrokerCall::Publish(door_online_status()),
+    ]
 }
 
 #[test]
@@ -198,7 +193,7 @@ fn the_contract_allowed_reply_releases_the_strike_for_its_strike_ms() {
 
     assert_eq!(
         (report.access, connectors.strike.calls()),
-        (released_until(3100, 1), vec![StrikeCall::Release])
+        (released_until(3100), vec![StrikeCall::Release])
     );
 }
 
@@ -208,7 +203,7 @@ fn an_allowed_reply_releases_the_strike_for_the_time_it_gives() {
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.access, released_until(4600, 1));
+    assert_eq!(report.access, released_until(4600));
 }
 
 #[test]
@@ -224,20 +219,29 @@ fn an_allowed_reply_without_a_time_releases_the_strike_for_the_configured_pulse(
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.access, released_until(5100, 1));
+    assert_eq!(report.access, released_until(5100));
 }
 
 #[test]
-fn the_strike_stays_released_up_to_its_last_millisecond() {
-    let mut events = entry_allowed(3000);
-    events.push((3100, Event::Stop));
-    let connectors = online_with_contract_id(events);
-
-    let report = app::run(&connectors).unwrap();
+fn the_strike_locks_on_the_millisecond_its_time_is_up() {
+    let strike_after_an_event_at = |at_ms: u64| {
+        let mut events = entry_allowed(3000);
+        events.push((at_ms, Event::Door { open: false }));
+        app::run(&online_with_contract_id(events))
+            .unwrap()
+            .access
+            .strike
+    };
 
     assert_eq!(
-        report.access.strike,
-        StrikeState::Released { relock_at_ms: 3100 }
+        (
+            strike_after_an_event_at(3099),
+            strike_after_an_event_at(3100)
+        ),
+        (
+            StrikeState::Released { relock_at_ms: 3100 },
+            StrikeState::Locked
+        )
     );
 }
 
@@ -252,10 +256,7 @@ fn the_strike_locks_again_once_its_time_is_up() {
     assert_eq!(
         (report.access, connectors.strike.calls()),
         (
-            Access {
-                opens: 1,
-                ..Access::default()
-            },
+            Access::default(),
             vec![StrikeCall::Release, StrikeCall::Lock]
         )
     );
@@ -315,7 +316,7 @@ fn the_contract_denied_reply_is_logged_and_releases_nothing() {
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.access, info_lines(&connectors)),
+        (report.access, connectors.log.lines_at(Level::Info)),
         (
             Access::default(),
             vec!["the server denied the entry".to_owned()]
@@ -332,7 +333,7 @@ fn a_reply_to_another_request_is_logged_and_the_check_still_waits() {
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.access.check, info_lines(&connectors)),
+        (report.access.check, connectors.log.lines_at(Level::Info)),
         (
             Some(check(REQUEST_ID, "4211234")),
             vec!["ignored a reply to 0000000000000000, not awaited".to_owned()]
@@ -362,7 +363,7 @@ fn a_reply_on_its_last_millisecond_is_followed() {
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.access, released_until(6009, 1));
+    assert_eq!(report.access, released_until(6009));
 }
 
 #[test]
@@ -374,7 +375,7 @@ fn a_reply_once_the_reply_timeout_is_over_is_ignored() {
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.access, info_lines(&connectors)),
+        (report.access, connectors.log.lines_at(Level::Info)),
         (
             Access::default(),
             vec![
@@ -399,7 +400,7 @@ fn the_reply_timeout_comes_from_the_configuration() {
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.access, info_lines(&connectors)),
+        (report.access, connectors.log.lines_at(Level::Info)),
         (
             Access::default(),
             vec!["no reply to the check in time; denied".to_owned()]
@@ -423,9 +424,9 @@ fn a_new_entry_while_a_check_waits_replaces_it_and_the_old_reply_is_ignored() {
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.access, info_lines(&connectors)),
+        (report.access, connectors.log.lines_at(Level::Info)),
         (
-            released_until(3200, 1),
+            released_until(3200),
             vec!["ignored a reply to 9f86d081884c7d65, not awaited".to_owned()]
         )
     );
@@ -550,15 +551,21 @@ fn no_more_keys_are_taken_once_the_entry_is_as_long_as_it_may_be() {
 }
 
 #[test]
-fn an_entry_is_kept_until_the_idle_time_after_its_last_key() {
-    let mut events = typed(0, "12");
-    events.extend(typed(5000, "3"));
-    events.push((15_000, Event::Stop));
-    let connectors = online(events);
+fn an_entry_is_discarded_on_the_millisecond_the_idle_time_after_its_last_key_is_up() {
+    let entry_after_an_event_at = |at_ms: u64| {
+        let mut events = typed(0, "12");
+        events.extend(typed(5000, "3"));
+        events.push((at_ms, Event::Door { open: false }));
+        app::run(&online(events)).unwrap().access.entry
+    };
 
-    let report = app::run(&connectors).unwrap();
-
-    assert_eq!(report.access.entry, "123");
+    assert_eq!(
+        (
+            entry_after_an_event_at(14_999),
+            entry_after_an_event_at(15_000)
+        ),
+        ("123".to_owned(), String::new())
+    );
 }
 
 #[test]
@@ -590,12 +597,12 @@ fn the_idle_time_comes_from_the_configuration() {
 
 #[test]
 fn an_entry_while_not_connected_is_denied_and_logged() {
-    let connectors = door(StubEvents::script(typed(10, "1234#")));
+    let connectors = StubConnectors::enrolled(StubEvents::script(typed(10, "1234#")));
 
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.access, info_lines(&connectors)),
+        (report.access, connectors.log.lines_at(Level::Info)),
         (
             Access::default(),
             vec!["an entry was denied: not connected".to_owned()]
@@ -607,7 +614,7 @@ fn an_entry_while_not_connected_is_denied_and_logged() {
 fn inside_an_open_span_any_key_releases_the_strike_for_the_pulse_and_asks_nothing() {
     let mut events = vec![(0, timeline_for(7, &spans()))];
     events.extend(typed(10, "1#"));
-    let connectors = door(script_online(events).at_unix(IN_OPEN_SPAN));
+    let connectors = StubConnectors::enrolled(script_online(events).at_unix(IN_OPEN_SPAN));
 
     let report = app::run(&connectors).unwrap();
 
@@ -615,12 +622,12 @@ fn inside_an_open_span_any_key_releases_the_strike_for_the_pulse_and_asks_nothin
         (
             report.access,
             connectors.strike.calls(),
-            connectors.broker.calls().len()
+            connectors.broker.calls()
         ),
         (
-            released_until(3010, 2),
+            released_until(3010),
             vec![StrikeCall::Release, StrikeCall::Release],
-            6
+            door_coming_online()
         )
     );
 }
@@ -629,11 +636,11 @@ fn inside_an_open_span_any_key_releases_the_strike_for_the_pulse_and_asks_nothin
 fn inside_an_open_span_a_key_releases_the_strike_while_not_connected() {
     let mut events = vec![(0, timeline_for(7, &spans()))];
     events.extend(typed(10, "5"));
-    let connectors = door(StubEvents::script(events).at_unix(IN_OPEN_SPAN));
+    let connectors = StubConnectors::enrolled(StubEvents::script(events).at_unix(IN_OPEN_SPAN));
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.access, released_until(3010, 1));
+    assert_eq!(report.access, released_until(3010));
 }
 
 #[test]
@@ -644,18 +651,18 @@ fn the_open_span_pulse_comes_from_the_configuration() {
     };
     let mut events = vec![(0, timeline_for(7, &spans())), (1, config_for(7, &config))];
     events.extend(typed(10, "5"));
-    let connectors = door(StubEvents::script(events).at_unix(IN_OPEN_SPAN));
+    let connectors = StubConnectors::enrolled(StubEvents::script(events).at_unix(IN_OPEN_SPAN));
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.access, released_until(8010, 1));
+    assert_eq!(report.access, released_until(8010));
 }
 
 #[test]
 fn inside_a_locked_span_an_entry_is_checked_while_connected() {
     let mut events = vec![(0, timeline_for(7, &spans()))];
     events.extend(typed(10, "1234#"));
-    let connectors = door(script_online(events).at_unix(IN_LOCKED_SPAN));
+    let connectors = StubConnectors::enrolled(script_online(events).at_unix(IN_LOCKED_SPAN));
 
     let report = app::run(&connectors).unwrap();
 
@@ -669,31 +676,14 @@ fn inside_a_locked_span_an_entry_is_checked_while_connected() {
 fn inside_a_locked_span_an_entry_is_denied_while_not_connected() {
     let mut events = vec![(0, timeline_for(7, &spans()))];
     events.extend(typed(10, "1234#"));
-    let connectors = door(StubEvents::script(events).at_unix(IN_LOCKED_SPAN));
+    let connectors = StubConnectors::enrolled(StubEvents::script(events).at_unix(IN_LOCKED_SPAN));
 
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        info_lines(&connectors),
+        connectors.log.lines_at(Level::Info),
         vec!["an entry was denied: not connected".to_owned()]
     );
-}
-
-#[test]
-fn releases_by_reply_and_by_open_span_are_both_counted_as_opens() {
-    let mut events = vec![(0, timeline_for(7, &spans()))];
-    events.extend(typed(10, "5"));
-    events.extend(typed(5000, "4211234#"));
-    events.push((5100, allowed(REQUEST_ID, 3000)));
-    // The open span ends three seconds after the first key.
-    let connectors = StubConnectors {
-        random: StubRandom::queued(hex(REQUEST_ID)),
-        ..door(script_online(events).at_unix(1_793_019_197))
-    };
-
-    let report = app::run(&connectors).unwrap();
-
-    assert_eq!(report.access, released_until(8100, 2));
 }
 
 #[test]
@@ -701,11 +691,11 @@ fn a_key_while_the_strike_is_released_in_an_open_span_releases_it_for_the_pulse_
     let mut events = vec![(0, timeline_for(7, &spans()))];
     events.extend(typed(10, "5"));
     events.extend(typed(1000, "6"));
-    let connectors = door(StubEvents::script(events).at_unix(IN_OPEN_SPAN));
+    let connectors = StubConnectors::enrolled(StubEvents::script(events).at_unix(IN_OPEN_SPAN));
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.access, released_until(4000, 2));
+    assert_eq!(report.access, released_until(4000));
 }
 
 #[test]
@@ -752,7 +742,7 @@ fn keys_and_the_door_sensor_while_enrolling_change_nothing() {
 fn the_door_sensor_reading_at_the_end_is_reported() {
     let connectors = StubConnectors {
         door_sensor: StubDoorSensor { open: true },
-        ..door(StubEvents::default())
+        ..StubConnectors::enrolled(StubEvents::default())
     };
 
     let report = app::run(&connectors).unwrap();
@@ -762,7 +752,7 @@ fn the_door_sensor_reading_at_the_end_is_reported() {
 
 #[test]
 fn an_unknown_time_is_the_normal_state_even_inside_an_open_span() {
-    let connectors = door(StubEvents::script([(0, timeline_for(7, &spans()))]));
+    let connectors = StubConnectors::enrolled(StubEvents::script([(0, timeline_for(7, &spans()))]));
 
     let report = app::run(&connectors).unwrap();
 
@@ -829,7 +819,7 @@ fn a_span_of_a_state_this_version_does_not_know_is_the_normal_state() {
 fn time_passes_on_the_clock_the_timeline_is_read_against() {
     let mut events = vec![(0, timeline_for(7, &spans()))];
     events.push((2000, Event::Stop));
-    let connectors = door(StubEvents::script(events).at_unix(1_793_008_399));
+    let connectors = StubConnectors::enrolled(StubEvents::script(events).at_unix(1_793_008_399));
 
     let report = app::run(&connectors).unwrap();
 

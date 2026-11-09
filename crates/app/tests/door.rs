@@ -3,28 +3,18 @@
 //! reconnecting after a drop, and enrolling again once revoked.
 
 use app::ConnectionState;
-use connectors::{BrokerAddress, Event, Level};
+use connectors::{Event, Level};
 use pretty_assertions::assert_eq;
-use protocol::{Config, Online, Span, Timeline};
+use protocol::{Config, Span, Timeline};
 use testkit::{
-    config_for, door_message, hex, timeline_for, BrokerCall, Connection, Message, Sent, StubBroker,
-    StubConnectors, StubEvents, StubRandom, StubStorage,
+    config_for, door_connection_to, door_message, door_online_status, hex, timeline_for,
+    BrokerCall, Connection, StubBroker, StubConnectors, StubEvents, StubRandom, StubStorage,
 };
-
-const USERNAME: &str = "door-7-0123456789ab";
-
-fn door(events: StubEvents) -> StubConnectors {
-    StubConnectors {
-        storage: StubStorage::enrolled(),
-        events,
-        ..StubConnectors::default()
-    }
-}
 
 /// The door, started again after a run in which it received `event`, with
 /// what that run left in storage.
 fn restarted_after(event: Event) -> StubConnectors {
-    let first = door(StubEvents::script([(0, event)]));
+    let first = StubConnectors::enrolled(StubEvents::script([(0, event)]));
     app::run(&first).unwrap();
     StubConnectors {
         storage: first.storage,
@@ -41,32 +31,8 @@ fn connection_at(connectors: &StubConnectors, index: usize) -> Connection {
     connection
 }
 
-fn door_connection_to(host: &str) -> BrokerCall {
-    BrokerCall::Connect(Connection {
-        address: BrokerAddress {
-            host: host.to_owned(),
-            port: 8883,
-            tls: true,
-            ca_pem: "-----BEGIN CERTIFICATE-----".to_owned(),
-        },
-        client_id: "a1b2c3d4e5f6".to_owned(),
-        username: USERNAME.to_owned(),
-        password: "c2VjcmV0LXRva2VuLWZvci1kb29yLTc".to_owned(),
-        keep_alive_s: 30,
-        will: Sent {
-            topic: "doorcode/doors/7/online".to_owned(),
-            retain: true,
-            message: Message::Online(Online {
-                online: false,
-                username: USERNAME.to_owned(),
-                ..Online::default()
-            }),
-        },
-    })
-}
-
 fn door_connection() -> BrokerCall {
-    door_connection_to("broker.example.org")
+    BrokerCall::Connect(door_connection_to("broker.example.org"))
 }
 
 fn subscription(leaf: &str) -> BrokerCall {
@@ -74,16 +40,7 @@ fn subscription(leaf: &str) -> BrokerCall {
 }
 
 fn online_status() -> BrokerCall {
-    BrokerCall::Publish(Sent {
-        topic: "doorcode/doors/7/online".to_owned(),
-        retain: true,
-        message: Message::Online(Online {
-            online: true,
-            username: USERNAME.to_owned(),
-            firmware_version: "2.0.0".to_owned(),
-            signal: -61,
-        }),
-    })
+    BrokerCall::Publish(door_online_status())
 }
 
 fn custom_config() -> Config {
@@ -130,20 +87,9 @@ fn contract_timeline() -> Timeline {
     }
 }
 
-/// The pause each warning announces, in order.
-fn pauses(connectors: &StubConnectors) -> Vec<String> {
-    connectors
-        .log
-        .lines()
-        .into_iter()
-        .filter(|(level, _)| *level == Level::Warn)
-        .map(|(_, line)| line)
-        .collect()
-}
-
 #[test]
 fn a_door_connects_with_its_credentials_the_hardware_id_and_a_retained_offline_will() {
-    let connectors = door(StubEvents::default());
+    let connectors = StubConnectors::enrolled(StubEvents::default());
 
     app::run(&connectors).unwrap();
 
@@ -152,7 +98,7 @@ fn a_door_connects_with_its_credentials_the_hardware_id_and_a_retained_offline_w
 
 #[test]
 fn once_connected_it_subscribes_to_its_four_topics_and_then_publishes_its_status_retained() {
-    let connectors = door(StubEvents::script([(0, Event::Connected)]));
+    let connectors = StubConnectors::enrolled(StubEvents::script([(0, Event::Connected)]));
 
     app::run(&connectors).unwrap();
 
@@ -171,7 +117,7 @@ fn once_connected_it_subscribes_to_its_four_topics_and_then_publishes_its_status
 
 #[test]
 fn the_online_status_is_encoded_with_the_contract_field_names() {
-    let connectors = door(StubEvents::script([(0, Event::Connected)]));
+    let connectors = StubConnectors::enrolled(StubEvents::script([(0, Event::Connected)]));
 
     app::run(&connectors).unwrap();
 
@@ -185,7 +131,7 @@ fn the_online_status_is_encoded_with_the_contract_field_names() {
 
 #[test]
 fn a_door_reports_itself_connecting_until_the_broker_answers() {
-    let connectors = door(StubEvents::default());
+    let connectors = StubConnectors::enrolled(StubEvents::default());
 
     let report = app::run(&connectors).unwrap();
 
@@ -197,7 +143,7 @@ fn a_door_reports_itself_connecting_until_the_broker_answers() {
 
 #[test]
 fn a_door_reports_itself_connected_once_its_status_is_published() {
-    let connectors = door(StubEvents::script([(0, Event::Connected)]));
+    let connectors = StubConnectors::enrolled(StubEvents::script([(0, Event::Connected)]));
 
     let report = app::run(&connectors).unwrap();
 
@@ -206,7 +152,7 @@ fn a_door_reports_itself_connected_once_its_status_is_published() {
 
 #[test]
 fn a_door_reports_itself_disconnected_after_a_drop() {
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, Event::Connected),
         (10, Event::Disconnected),
     ]));
@@ -218,7 +164,7 @@ fn a_door_reports_itself_disconnected_after_a_drop() {
 
 #[test]
 fn a_door_with_nothing_stored_runs_with_the_default_configuration_and_an_empty_timeline() {
-    let connectors = door(StubEvents::default());
+    let connectors = StubConnectors::enrolled(StubEvents::default());
 
     let report = app::run(&connectors).unwrap();
 
@@ -268,7 +214,8 @@ fn a_configuration_with_every_field_is_read_by_the_contract_field_names() {
     let full = hex(
         "b81c617601696c6f675f6c6576656c656465627567696d6573685f7373696465646f6f727369776966695f73736964656c6f6262796a6e74705f7365727665727074696d652e6578616d706c652e6f72676a7375626d69745f6b657961416b62726f6b65725f686f7374606b68656c645f6f70656e5f73185a6b6b656570616c6976655f73146c6d6573685f656e61626c6564f56d6d6573685f70617373776f72646b6d6573682d7365637265746d776966695f70617373776f72646c6c6f6262792d7365637265746e6d6573685f6d61785f6c61796572066e776966695f726f616d5f7273736938406f6d61785f636f64655f6c656e677468146f6d696e5f636f64655f6c656e677468056f7265636f6e6e6563745f6d61785f7318786f737472696b655f70756c73655f6d7319138870726174655f6c696d69745f627572737405707265706c795f74696d656f75745f6d731909c4746b65797061645f69646c655f636c6561725f6d73194e20746d6573685f6d696e5f726f757465725f72737369384f7474656c656d657472795f696e74657276616c5f73181e75726174655f6c696d69745f7065725f6d696e757465183c7674696d656c696e655f726566726573685f686f7572730378186163636570745f756e7369676e65645f6669726d77617265f5781863726564656e7469616c5f726f746174696f6e5f646179730e78187570646174655f636f6e6e6563745f74696d656f75745f73190258",
     );
-    let connectors = door(StubEvents::script([(0, door_message(7, "config", full))]));
+    let connectors =
+        StubConnectors::enrolled(StubEvents::script([(0, door_message(7, "config", full))]));
 
     let report = app::run(&connectors).unwrap();
 
@@ -277,7 +224,7 @@ fn a_configuration_with_every_field_is_read_by_the_contract_field_names() {
 
 #[test]
 fn a_received_configuration_replaces_the_one_in_effect() {
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, Event::Connected),
         (10, config_for(7, &custom_config())),
     ]));
@@ -299,7 +246,7 @@ fn a_received_configuration_is_used_after_a_restart_before_any_arrives() {
 #[test]
 fn a_configuration_missing_keys_takes_the_defaults_for_them() {
     let partial = hex("a26176016f737472696b655f70756c73655f6d73191388");
-    let connectors = door(StubEvents::script([(
+    let connectors = StubConnectors::enrolled(StubEvents::script([(
         0,
         door_message(7, "config", partial),
     )]));
@@ -318,7 +265,7 @@ fn a_configuration_missing_keys_takes_the_defaults_for_them() {
 #[test]
 fn a_configuration_with_keys_this_version_does_not_know_is_taken() {
     let with_zone = hex("a3617601647a6f6e6564656173746f737472696b655f70756c73655f6d73191388");
-    let connectors = door(StubEvents::script([(
+    let connectors = StubConnectors::enrolled(StubEvents::script([(
         0,
         door_message(7, "config", with_zone),
     )]));
@@ -331,7 +278,7 @@ fn a_configuration_with_keys_this_version_does_not_know_is_taken() {
 #[test]
 fn a_configuration_of_another_protocol_version_is_logged_and_ignored() {
     let version_two = hex("a26176026f737472696b655f70756c73655f6d73191388");
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, config_for(7, &custom_config())),
         (10, door_message(7, "config", version_two)),
     ]));
@@ -363,7 +310,7 @@ fn the_contract_timeline_example_is_taken() {
     let example = hex(
         "a461760162746f1a6ae061d06466726f6d1a6adf0240657370616e7381a363656e641a6adf50606573746172741a6adf2950657374617465646f70656e",
     );
-    let connectors = door(StubEvents::script([(
+    let connectors = StubConnectors::enrolled(StubEvents::script([(
         0,
         door_message(7, "timeline", example),
     )]));
@@ -378,7 +325,7 @@ fn a_timeline_whose_spans_are_an_array_of_indefinite_length_is_taken() {
     let indefinite = hex(
         "a461760162746f1a6ae061d06466726f6d1a6adf0240657370616e739fa363656e641a6adf50606573746172741a6adf2950657374617465646f70656ea363656e641a6adf9e806573746172741a6adf7770657374617465666c6f636b6564ff",
     );
-    let connectors = door(StubEvents::script([(
+    let connectors = StubConnectors::enrolled(StubEvents::script([(
         0,
         door_message(7, "timeline", indefinite),
     )]));
@@ -414,7 +361,7 @@ fn a_received_timeline_is_followed_after_a_restart_before_any_arrives() {
 #[test]
 fn a_timeline_of_another_protocol_version_is_logged_and_ignored() {
     let version_two = hex("a461760262746f1a6ae061d06466726f6d1a6adf0240657370616e7380");
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, timeline_for(7, &contract_timeline())),
         (10, door_message(7, "timeline", version_two)),
     ]));
@@ -430,7 +377,7 @@ fn a_timeline_of_another_protocol_version_is_logged_and_ignored() {
 
 #[test]
 fn a_message_on_another_door_topic_is_logged_at_debug_level() {
-    let connectors = door(StubEvents::script([(
+    let connectors = StubConnectors::enrolled(StubEvents::script([(
         0,
         door_message(7, "command", b"later".to_vec()),
     )]));
@@ -452,7 +399,7 @@ fn a_broker_host_in_the_configuration_is_used_from_the_next_connection_on() {
         broker_host: "broker2.example.org".to_owned(),
         ..Config::default()
     };
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, Event::Connected),
         (10, config_for(7, &moved)),
         (20, Event::Disconnected),
@@ -467,7 +414,9 @@ fn a_broker_host_in_the_configuration_is_used_from_the_next_connection_on() {
             connectors.storage.stored("broker_host")
         ),
         (
-            Some(door_connection_to("broker2.example.org")),
+            Some(BrokerCall::Connect(door_connection_to(
+                "broker2.example.org"
+            ))),
             Some(b"broker2.example.org".to_vec())
         )
     );
@@ -507,7 +456,7 @@ fn the_log_level_is_set_at_start_and_again_whenever_the_configuration_changes_it
         log_level: level.to_owned(),
         ..Config::default()
     };
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, config_for(7, &at("debug"))),
         (1, config_for(7, &at("debug"))),
         (2, config_for(7, &at("warn"))),
@@ -545,14 +494,14 @@ fn a_stored_log_level_is_set_at_start() {
 fn failed_connections_in_a_row_wait_one_two_four_seconds_and_so_on_up_to_a_minute() {
     let connectors = StubConnectors {
         broker: StubBroker::failing("no route to host"),
-        ..door(StubEvents::script([(200_000, Event::Stop)]))
+        ..StubConnectors::enrolled(StubEvents::script([(200_000, Event::Stop)]))
     };
 
     app::run(&connectors).unwrap();
 
     let reason = "not connected (broker: no route to host); connecting again in";
     assert_eq!(
-        pauses(&connectors),
+        connectors.log.lines_at(Level::Warn),
         [1, 2, 4, 8, 16, 32, 60, 60, 60]
             .map(|seconds| format!("{reason} {seconds}000 ms"))
             .to_vec()
@@ -567,7 +516,7 @@ fn the_longest_wait_between_connections_comes_from_the_configuration() {
     };
     let connectors = StubConnectors {
         broker: StubBroker::failing("no route to host"),
-        ..door(StubEvents::script([
+        ..StubConnectors::enrolled(StubEvents::script([
             (0, config_for(7, &patient)),
             (20_000, Event::Stop),
         ]))
@@ -577,7 +526,7 @@ fn the_longest_wait_between_connections_comes_from_the_configuration() {
 
     let reason = "not connected (broker: no route to host); connecting again in";
     assert_eq!(
-        pauses(&connectors),
+        connectors.log.lines_at(Level::Warn),
         [1, 2, 4, 5, 5, 5]
             .map(|seconds| format!("{reason} {seconds}000 ms"))
             .to_vec()
@@ -590,7 +539,7 @@ fn a_longest_wait_of_zero_still_waits_a_second_between_connections() {
         reconnect_max_s: 0,
         ..Config::default()
     };
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, config_for(7, &impatient)),
         (10, Event::Disconnected),
         (1_500, Event::Disconnected),
@@ -599,7 +548,7 @@ fn a_longest_wait_of_zero_still_waits_a_second_between_connections() {
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        pauses(&connectors),
+        connectors.log.lines_at(Level::Warn),
         vec![
             "not connected (connection lost); connecting again in 1000 ms".to_owned(),
             "not connected (connection lost); connecting again in 1000 ms".to_owned()
@@ -609,7 +558,7 @@ fn a_longest_wait_of_zero_still_waits_a_second_between_connections() {
 
 #[test]
 fn drops_in_a_row_wait_longer_each_time() {
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, Event::Disconnected),
         (1_500, Event::Disconnected),
     ]));
@@ -617,7 +566,7 @@ fn drops_in_a_row_wait_longer_each_time() {
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        pauses(&connectors),
+        connectors.log.lines_at(Level::Warn),
         vec![
             "not connected (connection lost); connecting again in 1000 ms".to_owned(),
             "not connected (connection lost); connecting again in 2000 ms".to_owned()
@@ -627,7 +576,7 @@ fn drops_in_a_row_wait_longer_each_time() {
 
 #[test]
 fn coming_online_starts_the_waits_over_at_one_second() {
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, Event::Disconnected),
         (1_500, Event::Connected),
         (1_600, Event::Disconnected),
@@ -636,7 +585,7 @@ fn coming_online_starts_the_waits_over_at_one_second() {
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        pauses(&connectors),
+        connectors.log.lines_at(Level::Warn),
         vec![
             "not connected (connection lost); connecting again in 1000 ms".to_owned(),
             "not connected (connection lost); connecting again in 1000 ms".to_owned()
@@ -648,7 +597,7 @@ fn coming_online_starts_the_waits_over_at_one_second() {
 fn a_random_part_of_up_to_a_quarter_is_added_to_each_wait() {
     let connectors = StubConnectors {
         random: StubRandom::repeating(7),
-        ..door(StubEvents::script([
+        ..StubConnectors::enrolled(StubEvents::script([
             (0, Event::Connected),
             (10, Event::Disconnected),
         ]))
@@ -657,14 +606,14 @@ fn a_random_part_of_up_to_a_quarter_is_added_to_each_wait() {
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        pauses(&connectors),
+        connectors.log.lines_at(Level::Warn),
         vec!["not connected (connection lost); connecting again in 1063 ms".to_owned()]
     );
 }
 
 #[test]
 fn after_a_wait_it_connects_again() {
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, Event::Connected),
         (10, Event::Disconnected),
         (1_020, Event::Connected),
@@ -689,7 +638,7 @@ fn after_a_wait_it_connects_again() {
 fn a_failed_subscription_is_not_followed_by_the_status_but_by_a_wait() {
     let connectors = StubConnectors {
         broker: StubBroker::failing("not connected"),
-        ..door(StubEvents::script([
+        ..StubConnectors::enrolled(StubEvents::script([
             (0, Event::Connected),
             (1_500, Event::Stop),
         ]))
@@ -708,12 +657,16 @@ fn a_failed_subscription_is_not_followed_by_the_status_but_by_a_wait() {
 
 #[test]
 fn a_refusal_for_another_reason_is_waited_out_with_the_credentials_kept() {
-    let connectors = door(StubEvents::script([(0, Event::Refused { code: 3 })]));
+    let connectors =
+        StubConnectors::enrolled(StubEvents::script([(0, Event::Refused { code: 3 })]));
 
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.door.map(|door| door.door_id), pauses(&connectors)),
+        (
+            report.door.map(|door| door.door_id),
+            connectors.log.lines_at(Level::Warn)
+        ),
         (
             Some(7),
             vec!["not connected (refused with code 3); connecting again in 1000 ms".to_owned()]
@@ -723,7 +676,7 @@ fn a_refusal_for_another_reason_is_waited_out_with_the_credentials_kept() {
 
 #[test]
 fn a_door_refused_as_not_authorized_forgets_its_credentials_config_and_timeline_and_enrolls() {
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, config_for(7, &custom_config())),
         (1, timeline_for(7, &contract_timeline())),
         (2, Event::Refused { code: 5 }),
@@ -751,7 +704,8 @@ fn a_door_refused_as_not_authorized_forgets_its_credentials_config_and_timeline_
 
 #[test]
 fn a_door_refused_for_a_bad_username_or_password_enrolls_with_the_enrollment_account() {
-    let connectors = door(StubEvents::script([(0, Event::Refused { code: 4 })]));
+    let connectors =
+        StubConnectors::enrolled(StubEvents::script([(0, Event::Refused { code: 4 })]));
 
     app::run(&connectors).unwrap();
 
@@ -777,7 +731,7 @@ fn a_door_moved_to_another_broker_and_then_revoked_enrolls_at_the_new_broker() {
         broker_host: "broker2.example.org".to_owned(),
         ..Config::default()
     };
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, config_for(7, &moved)),
         (10, Event::Refused { code: 5 }),
     ]));
@@ -798,7 +752,7 @@ fn a_door_moved_to_another_broker_and_then_revoked_enrolls_at_the_new_broker() {
 fn a_timeline_with_a_span_of_the_wrong_shape_is_logged_and_ignored() {
     let wrong_span =
         hex("a461760162746f1a6ae061d06466726f6d1a6adf0240657370616e7381a165737461727464736f6f6e");
-    let connectors = door(StubEvents::script([
+    let connectors = StubConnectors::enrolled(StubEvents::script([
         (0, timeline_for(7, &contract_timeline())),
         (10, door_message(7, "timeline", wrong_span)),
     ]));
@@ -814,7 +768,7 @@ fn a_timeline_with_a_span_of_the_wrong_shape_is_logged_and_ignored() {
 #[test]
 fn a_configuration_sent_as_a_map_of_indefinite_length_is_logged_and_ignored() {
     let indefinite = hex("bf6176016f737472696b655f70756c73655f6d73191388ff");
-    let connectors = door(StubEvents::script([(
+    let connectors = StubConnectors::enrolled(StubEvents::script([(
         0,
         door_message(7, "config", indefinite),
     )]));

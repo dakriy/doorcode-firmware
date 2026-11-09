@@ -5,7 +5,7 @@ use connectors::{BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Le
 use protocol::{Config, Credentials, Enrollment, Timeline};
 
 use crate::device::Device;
-use crate::{door, stored, Access, ConnectionState, Phase, RunError, RunReport};
+use crate::{door, stored, Access, ConnectionState, Counters, Phase, RunError, RunReport};
 
 /// The broker drops the connection after one and a half of these without a packet.
 const KEEP_ALIVE_S: u16 = 30;
@@ -61,6 +61,7 @@ impl Enrolling {
             Config::default(),
             Timeline::default(),
             Access::default(),
+            Counters::default(),
         )
     }
 

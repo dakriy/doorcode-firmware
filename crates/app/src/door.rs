@@ -7,7 +7,8 @@ use protocol::{Config, Credentials, DecodeError, Online, Timeline};
 
 use crate::access::{Gate, Situation};
 use crate::device::Device;
-use crate::{enrollment, stored, timeline, ConnectionState, Phase, RunError, RunReport};
+use crate::telemetry::{self, Tally};
+use crate::{enrollment, stored, timeline, ConnectionState, Mode, Phase, RunError, RunReport};
 
 /// CONNACK return codes that say the broker does not accept the
 /// credentials: bad username or password, and not authorized.
@@ -30,13 +31,15 @@ pub(crate) struct Door {
     /// Connection attempts that failed since the door was last online.
     failures: u32,
     gate: Gate,
+    tally: Tally,
 }
 
 enum Link {
     /// A connection was asked for; the broker has not answered yet.
     Connecting,
-    /// Subscribed, and the online status published.
-    Online,
+    /// Subscribed, and the online status published; reports telemetry at
+    /// the given time.
+    Online { report_at: u64 },
     /// Not connected; connects again at the given time.
     Paused { reconnect_at: u64 },
 }
@@ -46,7 +49,15 @@ impl Link {
     fn reconnect_at(&self) -> Option<u64> {
         match self {
             Link::Paused { reconnect_at } => Some(*reconnect_at),
-            Link::Connecting | Link::Online => None,
+            Link::Connecting | Link::Online { .. } => None,
+        }
+    }
+
+    /// When the door reports telemetry next; `None` unless it is online.
+    fn report_at(&self) -> Option<u64> {
+        match self {
+            Link::Online { report_at } => Some(*report_at),
+            Link::Connecting | Link::Paused { .. } => None,
         }
     }
 }
@@ -72,6 +83,7 @@ pub(crate) fn start(
         link: Link::Connecting,
         failures: 0,
         gate: Gate::default(),
+        tally: Tally::default(),
     };
     Ok(door.connect(device))
 }
@@ -109,7 +121,11 @@ fn log_level(name: &str) -> Level {
 impl Door {
     /// How long the event loop may wait before this needs attention.
     pub(crate) fn wait_ms(&self, now_ms: u64) -> Option<u64> {
-        let due_at = [self.link.reconnect_at(), self.gate.due_at(&self.config)];
+        let due_at = [
+            self.link.reconnect_at(),
+            self.link.report_at(),
+            self.gate.due_at(&self.config),
+        ];
         let soonest = due_at.into_iter().flatten().min()?;
         Some(soonest.saturating_sub(now_ms))
     }
@@ -133,7 +149,7 @@ impl Door {
                 door
             }
             Some(Event::Door { open }) => {
-                door.gate.door_moved(device, open);
+                door.door_moved(device, open);
                 door
             }
             // The wait ran out. `Stop` ends the loop before it gets here.
@@ -145,9 +161,10 @@ impl Door {
     pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
         let connection = match self.link {
             Link::Connecting => ConnectionState::Connecting,
-            Link::Online => ConnectionState::Connected,
+            Link::Online { .. } => ConnectionState::Connected,
             Link::Paused { .. } => ConnectionState::Disconnected,
         };
+        let counters = self.tally.counters(self.gate.latency_ms());
         RunReport::new(
             device,
             Some(self.credentials),
@@ -155,27 +172,59 @@ impl Door {
             self.config,
             self.timeline,
             self.gate.report(),
+            counters,
         )
     }
 
-    /// Connects again once the pause is over, and lets the keypad side
-    /// catch up with the time.
+    /// Connects again once the pause is over, reports telemetry when it is
+    /// time, and lets the keypad side catch up with the time.
     fn when_due(mut self, device: &Device<'_>) -> Door {
         self.gate.expire(device, &self.config);
+        if device.is_due(self.link.report_at()) {
+            self.report_telemetry(device);
+        }
         if device.is_due(self.link.reconnect_at()) {
             return self.connect(device);
         }
         self
     }
 
+    /// Reports telemetry, and the next report one interval later.
+    fn report_telemetry(&mut self, device: &Device<'_>) {
+        let door_id = self.credentials.door_id;
+        self.tally.report(device, door_id, self.gate.latency_ms());
+        let interval_ms = self.config.telemetry_interval_s.max(1) * 1000;
+        self.link = Link::Online {
+            report_at: device.now_ms() + interval_ms,
+        };
+    }
+
     fn press(&mut self, device: &Device<'_>, key: char) {
         let situation = Situation {
             door_id: self.credentials.door_id,
             config: &self.config,
-            mode: timeline::mode_at(&self.timeline, device.unix_seconds()),
-            online: matches!(self.link, Link::Online),
+            mode: self.mode(device),
+            online: self.is_online(),
         };
         self.gate.press(device, key, &situation);
+    }
+
+    /// Locks the strike when the door opens, counts the opening, and says
+    /// so to the server while online and outside an open span.
+    fn door_moved(&mut self, device: &Device<'_>, open: bool) {
+        self.gate.door_moved(device, open);
+        self.tally.door_moved(open);
+        if self.is_online() && self.mode(device) != Mode::Open {
+            telemetry::send_door_event(device, self.credentials.door_id, open);
+        }
+    }
+
+    fn mode(&self, device: &Device<'_>) -> Mode {
+        timeline::mode_at(&self.timeline, device.unix_seconds())
+    }
+
+    fn is_online(&self) -> bool {
+        matches!(self.link, Link::Online { .. })
     }
 
     fn topic(&self, leaf: &str) -> String {
@@ -211,10 +260,14 @@ impl Door {
 
     /// Subscribes first, so the retained configuration and timeline arrive
     /// whatever happens to the online status.
-    fn come_online(self, device: &Device<'_>) -> Door {
+    /// The first telemetry report follows the online status shortly.
+    fn come_online(mut self, device: &Device<'_>) -> Door {
+        self.tally.connected();
         match self.subscribe_and_publish_online(device) {
             Ok(()) => Door {
-                link: Link::Online,
+                link: Link::Online {
+                    report_at: device.now_ms() + telemetry::FIRST_REPORT_AFTER_MS,
+                },
                 failures: 0,
                 ..self
             },
