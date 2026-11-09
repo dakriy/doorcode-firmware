@@ -30,12 +30,7 @@ pub(crate) const CONFIG: &str = "config";
 pub(crate) const TIMELINE: &str = "timeline";
 
 pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunError> {
-    let broker = BrokerAddress {
-        host: required(storage, BROKER_HOST)?,
-        port: number(required(storage, BROKER_PORT)?, BROKER_PORT)?,
-        tls: flag(required(storage, BROKER_TLS)?, BROKER_TLS)?,
-        ca_pem: optional(storage, BROKER_CA)?,
-    };
+    let broker = broker(storage)?;
     let enrollment = Account {
         username: required(storage, ENROLL_USERNAME)?,
         password: required(storage, ENROLL_PASSWORD)?,
@@ -60,7 +55,7 @@ pub(crate) fn door_credentials(storage: &dyn Storage) -> Result<Option<Credentia
         return Ok(None);
     };
     Ok(Some(Credentials {
-        door_id: number(door_id, DOOR_ID)?,
+        door_id: parsed(door_id, DOOR_ID)?,
         username,
         token,
     }))
@@ -155,9 +150,22 @@ pub(crate) fn forget_update(storage: &dyn Storage) -> Result<(), RunError> {
     remove(storage, &[UPDATE_ID, UPDATE_VERSION])
 }
 
-/// Moves the controller to another broker host, from the next start on too.
-pub(crate) fn store_broker_host(storage: &dyn Storage, host: &str) -> Result<(), RunError> {
-    store(storage, BROKER_HOST, host)
+/// The broker the controller connects to, as `store_broker` keeps it.
+fn broker(storage: &dyn Storage) -> Result<BrokerAddress, RunError> {
+    Ok(BrokerAddress {
+        host: required(storage, BROKER_HOST)?,
+        port: parsed(required(storage, BROKER_PORT)?, BROKER_PORT)?,
+        tls: parsed(required(storage, BROKER_TLS)?, BROKER_TLS)?,
+        ca_pem: optional(storage, BROKER_CA)?,
+    })
+}
+
+/// Moves the controller to another broker, from the next start on too.
+pub(crate) fn store_broker(storage: &dyn Storage, broker: &BrokerAddress) -> Result<(), RunError> {
+    store(storage, BROKER_HOST, &broker.host)?;
+    store(storage, BROKER_PORT, &broker.port.to_string())?;
+    store(storage, BROKER_TLS, &broker.tls.to_string())?;
+    store(storage, BROKER_CA, &broker.ca_pem)
 }
 
 pub(crate) fn bytes(storage: &dyn Storage, key: &str) -> Result<Option<Vec<u8>>, RunError> {
@@ -190,17 +198,10 @@ fn optional(storage: &dyn Storage, key: &'static str) -> Result<String, RunError
     Ok(text(storage, key)?.unwrap_or_default())
 }
 
-fn number<T: FromStr>(value: String, key: &'static str) -> Result<T, RunError> {
+/// `value` read back as the type that was stored with `to_string`.
+fn parsed<T: FromStr>(value: String, key: &'static str) -> Result<T, RunError> {
     match value.parse() {
-        Ok(number) => Ok(number),
+        Ok(parsed) => Ok(parsed),
         Err(_) => Err(RunError::InvalidStored { key }),
-    }
-}
-
-fn flag(value: String, key: &'static str) -> Result<bool, RunError> {
-    match value.as_str() {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        _ => Err(RunError::InvalidStored { key }),
     }
 }

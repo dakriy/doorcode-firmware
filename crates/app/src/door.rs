@@ -604,10 +604,9 @@ impl Door {
         };
         let storage = device.connectors.storage();
         stored::store_bytes(storage, stored::CONFIG, payload)?;
-        let mut broker = self.broker.clone();
-        if !config.broker_host.is_empty() {
-            stored::store_broker_host(storage, &config.broker_host)?;
-            broker.host = config.broker_host.clone();
+        let broker = configured_broker(&self.broker, &config);
+        if broker != self.broker {
+            stored::store_broker(storage, &broker)?;
         }
         let level = log_level(&config.log_level);
         if level != log_level(&self.config.log_level) {
@@ -630,6 +629,34 @@ impl Door {
         };
         stored::store_bytes(device.connectors.storage(), stored::TIMELINE, payload)?;
         Ok(Door { timeline, ..self })
+    }
+}
+
+/// The broker `config` moves the door to from `current`. Each broker field
+/// it gives replaces the one in use; an empty host or CA, a missing port or
+/// one of zero or out of range, and a missing TLS flag keep it.
+fn configured_broker(current: &BrokerAddress, config: &Config) -> BrokerAddress {
+    BrokerAddress {
+        host: given_text(&config.broker_host, &current.host),
+        port: given_port(config.broker_port).unwrap_or(current.port),
+        tls: config.broker_tls.unwrap_or(current.tls),
+        ca_pem: given_text(&config.broker_ca_pem, &current.ca_pem),
+    }
+}
+
+/// `given` unless it is empty, which keeps `current`.
+fn given_text(given: &str, current: &str) -> String {
+    if given.is_empty() {
+        return current.to_owned();
+    }
+    given.to_owned()
+}
+
+/// The port `given` names, when it names one.
+fn given_port(given: Option<u64>) -> Option<u16> {
+    match u16::try_from(given?) {
+        Ok(0) | Err(_) => None,
+        Ok(port) => Some(port),
     }
 }
 

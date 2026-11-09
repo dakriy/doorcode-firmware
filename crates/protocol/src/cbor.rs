@@ -49,6 +49,13 @@ impl<'a> MapWriter<'a> {
         self.entries.push((key, Value::Bool(value)));
     }
 
+    /// A field omitted when `None`.
+    pub(crate) fn bool_unless_none(&mut self, key: &'static str, value: Option<bool>) {
+        if let Some(value) = value {
+            self.bool(key, value);
+        }
+    }
+
     /// A field sent always, zero included.
     pub(crate) fn int(&mut self, key: &'static str, value: i64) {
         self.entries.push((key, Value::Int(value)));
@@ -64,6 +71,13 @@ impl<'a> MapWriter<'a> {
     /// A field sent always, zero included.
     pub(crate) fn uint(&mut self, key: &'static str, value: u64) {
         self.entries.push((key, Value::Uint(value)));
+    }
+
+    /// A field omitted when `None`.
+    pub(crate) fn uint_unless_none(&mut self, key: &'static str, value: Option<u64>) {
+        if let Some(value) = value {
+            self.uint(key, value);
+        }
     }
 
     /// A field omitted when zero.
@@ -138,6 +152,8 @@ fn write_spans<'e>(
 /// Where a decoded field's value goes.
 pub(crate) enum Slot<'a> {
     Bool(&'a mut bool),
+    /// A field whose absence means something other than any value.
+    Optional(Optional<'a>),
     Int(&'a mut i32),
     Long(&'a mut i64),
     Uint(&'a mut u64),
@@ -149,11 +165,28 @@ impl Slot<'_> {
     fn read(&mut self, decoder: &mut Decoder<'_>) -> Result<(), Error> {
         match self {
             Slot::Bool(target) => **target = decoder.bool()?,
+            Slot::Optional(target) => target.read(decoder)?,
             Slot::Int(target) => **target = decoder.i32()?,
             Slot::Long(target) => **target = decoder.i64()?,
             Slot::Uint(target) => **target = decoder.u64()?,
             Slot::Text(target) => **target = decoder.str()?.to_owned(),
             Slot::Spans(target) => **target = read_spans(decoder)?,
+        }
+        Ok(())
+    }
+}
+
+/// Where a decoded field's value goes when its absence reads as `None`.
+pub(crate) enum Optional<'a> {
+    Bool(&'a mut Option<bool>),
+    Uint(&'a mut Option<u64>),
+}
+
+impl Optional<'_> {
+    fn read(&mut self, decoder: &mut Decoder<'_>) -> Result<(), Error> {
+        match self {
+            Optional::Bool(target) => **target = Some(decoder.bool()?),
+            Optional::Uint(target) => **target = Some(decoder.u64()?),
         }
         Ok(())
     }

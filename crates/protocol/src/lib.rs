@@ -9,7 +9,7 @@ mod cbor;
 
 pub use cbor::DecodeError;
 
-use cbor::{MapWriter, Slot};
+use cbor::{MapWriter, Optional, Slot};
 
 const PREFIX: &str = "doorcode/";
 
@@ -172,7 +172,8 @@ impl Online {
 }
 
 /// A door's configuration. Every field is sent; one that is missing reads
-/// as its default, which is what the door runs with before the first one.
+/// as its default, which is what the door runs with before the first one,
+/// except `broker_port` and `broker_tls`, which read as `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub strike_pulse_ms: u64,
@@ -190,6 +191,14 @@ pub struct Config {
     pub ntp_server: String,
     /// Empty keeps the broker host the door uses now.
     pub broker_host: String,
+    /// `None` when the key is missing, which keeps the port the door uses
+    /// now rather than moving it to a default; zero keeps it too.
+    pub broker_port: Option<u64>,
+    /// `None` when the key is missing, which keeps the flag the door uses
+    /// now rather than switching TLS on or off by default.
+    pub broker_tls: Option<bool>,
+    /// Empty keeps the CA certificate the door uses now.
+    pub broker_ca_pem: String,
     /// One of `error`, `warn`, `info`, `debug`.
     pub log_level: String,
     pub wifi_ssid: String,
@@ -223,6 +232,9 @@ impl Default for Config {
             rate_limit_burst: 10,
             ntp_server: "pool.ntp.org".to_owned(),
             broker_host: String::new(),
+            broker_port: None,
+            broker_tls: None,
+            broker_ca_pem: String::new(),
             log_level: "info".to_owned(),
             wifi_ssid: String::new(),
             wifi_password: String::new(),
@@ -257,6 +269,9 @@ impl Config {
         map.uint("rate_limit_burst", self.rate_limit_burst);
         map.text("ntp_server", &self.ntp_server);
         map.text("broker_host", &self.broker_host);
+        map.uint_unless_none("broker_port", self.broker_port);
+        map.bool_unless_none("broker_tls", self.broker_tls);
+        map.text("broker_ca_pem", &self.broker_ca_pem);
         map.text("log_level", &self.log_level);
         map.text("wifi_ssid", &self.wifi_ssid);
         map.text("wifi_password", &self.wifi_password);
@@ -313,6 +328,15 @@ impl Config {
                 ),
                 ("ntp_server", Slot::Text(&mut message.ntp_server)),
                 ("broker_host", Slot::Text(&mut message.broker_host)),
+                (
+                    "broker_port",
+                    Slot::Optional(Optional::Uint(&mut message.broker_port)),
+                ),
+                (
+                    "broker_tls",
+                    Slot::Optional(Optional::Bool(&mut message.broker_tls)),
+                ),
+                ("broker_ca_pem", Slot::Text(&mut message.broker_ca_pem)),
                 ("log_level", Slot::Text(&mut message.log_level)),
                 ("wifi_ssid", Slot::Text(&mut message.wifi_ssid)),
                 ("wifi_password", Slot::Text(&mut message.wifi_password)),
