@@ -17,7 +17,7 @@ use serde_json::{Map, Number, Value};
 #[path = "src/storage_keys.rs"]
 mod storage_keys;
 
-use storage_keys::{CONFIG, NAMESPACE, WIFI_PASSWORD, WIFI_SSID};
+use storage_keys::{BROKER_CA, CONFIG, NAMESPACE, WIFI_PASSWORD, WIFI_SSID};
 
 /// The provisioning file the server makes, beside this script.
 const PROVISIONING: &str = "provisioning.json";
@@ -64,7 +64,7 @@ fn entries(text: &str) -> Entries {
         ("broker_host", required_text(&file, "/broker/host")),
         ("broker_port", port(&file).to_string().into_bytes()),
         ("broker_tls", tls(&file).to_string().into_bytes()),
-        ("broker_ca", optional_text(&file, "/broker/ca_pem")),
+        (BROKER_CA, optional_text(&file, "/broker/ca_pem")),
         (
             "enroll_username",
             required_text(&file, "/enrollment/username"),

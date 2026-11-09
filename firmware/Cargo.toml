@@ -16,7 +16,7 @@ description = "ESP32 connector implementations and production wiring for the doo
 name = "doorcode-firmware"
 harness = false
 
-# Built for size: an image must fit the partition table's 1 MB app slots.
+# Built for size: an image must fit the partition table's 0x1F0000 app slots.
 [profile.release]
 opt-level = "z"
 lto = true

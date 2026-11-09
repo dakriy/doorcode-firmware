@@ -3,12 +3,13 @@
 //! that an idle wait never trips it.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use connectors::{Event, Events};
 
 use crate::clock::now_ms;
+use crate::threads;
 use crate::watchdog;
 
 /// The longest the queue waits between feeds of the watchdog.
@@ -29,22 +30,26 @@ pub(crate) struct EventSender {
 struct Queue {
     events: Mutex<VecDeque<Event>>,
     arrived: Condvar,
+    taken: Condvar,
 }
 
 impl Queue {
     fn lock(&self) -> MutexGuard<'_, VecDeque<Event>> {
-        self.events.lock().unwrap_or_else(PoisonError::into_inner)
+        threads::lock(&self.events)
     }
 
     /// The first event, waiting for one at most `wait_ms`.
     fn pop(&self, wait_ms: u64) -> Option<Event> {
         let events = self.lock();
         let wait = Duration::from_millis(wait_ms);
-        let (mut events, _) = self
+        let waited = self
             .arrived
-            .wait_timeout_while(events, wait, |events| events.is_empty())
-            .unwrap_or_else(PoisonError::into_inner);
-        events.pop_front()
+            .wait_timeout_while(events, wait, |events| events.is_empty());
+        let (mut events, _) = threads::unpoisoned(waited);
+        let event = events.pop_front();
+        drop(events);
+        self.taken.notify_all();
+        event
     }
 }
 
@@ -60,6 +65,21 @@ impl EventSender {
     /// Adds `event` to the end of the queue and wakes the waiting reader.
     pub(crate) fn push(&self, event: Event) {
         self.queue.lock().push_back(event);
+        self.queue.arrived.notify_one();
+    }
+
+    /// Adds `event` once the queue holds fewer than `limit` events, so a
+    /// producer faster than the application waits for it instead of
+    /// filling the heap.
+    pub(crate) fn push_when_below(&self, limit: usize, event: Event) {
+        let events = self.queue.lock();
+        let waited = self
+            .queue
+            .taken
+            .wait_while(events, |events| events.len() >= limit);
+        let mut events = threads::unpoisoned(waited);
+        events.push_back(event);
+        drop(events);
         self.queue.arrived.notify_one();
     }
 }

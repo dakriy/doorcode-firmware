@@ -53,10 +53,12 @@ CBOR, the other keys are text):
   them. Run `scripts/firmware-provision.sh` inside the container without a
   port to only write the image, `target/provisioning-nvs.bin`.
 
-The partition table, `partitions.csv`, is ESP-IDF's standard two-OTA table
-for 4 MB flash: `nvs` at 0x9000 (16 KB), two 1 MB OTA slots, and a 1 MB
-factory slot. The release profile and `sdkconfig.defaults` build for size so
-an image fits a slot.
+The partition table, `partitions.csv`, fills 4 MB flash with two OTA slots
+of 0x1F0000 (1984 KB) each, `ota_0` at 0x10000 and `ota_1` at 0x200000, and
+no factory slot. `nvs` (16 KB at 0x9000), `otadata` (0xD000), and
+`phy_init` (0xF000) keep ESP-IDF's standard places. A board flashed over USB
+boots `ota_0`. The release profile and `sdkconfig.defaults` build for size so an
+image fits a slot.
 
 ## What runs on the board
 
@@ -71,6 +73,21 @@ an image fits a slot.
   told fail to associate. While the signal is below `wifi_roam_rssi`, it
   scans at most once a minute and moves to an access point at least 8 dB
   stronger. A broker connection asked for while Wi-Fi is down fails at once.
+- **Broker.** Each connection is an esp-mqtt client: MQTT 3.1.1, QoS 1
+  for every publication, subscription, and will, clean session, and TLS
+  verified against the provisioned CA unless the broker is configured
+  without TLS. The client never reconnects on its own; the application
+  does. Opening and closing clients happens on a thread of its own, since
+  closing one waits for its task, and publications are queued for the
+  client's task to send, so the event loop never waits on the network.
+  Messages longer than the 4 KB receive buffer arrive in pieces and are
+  put back together before they are delivered.
+- **Downloads** run on a thread each, over HTTPS verified against the same
+  CA, and hand the body to the event loop in 4 KB chunks, waiting while
+  the event queue is backed up. ESP-IDF's HTTP client log is off, since it
+  would print the address, which may carry a one-time token.
+- **Randomness** comes from the hardware generator, which is true random
+  while Wi-Fi runs.
 - **Time.** Milliseconds come from `esp_timer`. Unix time comes from SNTP
   against `ntp_server` (default `pool.ntp.org`) and is unknown until the
   first synchronization.

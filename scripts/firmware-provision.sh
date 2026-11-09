@@ -21,7 +21,6 @@ fi
 
 idf_path=$(ls -d /root/.espressif/esp-idf/v* | tail -n 1)
 python=$(ls /root/.espressif/python_env/idf*_env/bin/python | tail -n 1)
-release=target/xtensa-esp32-espidf/release
 image=target/provisioning-nvs.bin
 
 # The build script's output directory holds provisioning.csv.
@@ -37,9 +36,11 @@ if [ -z "$out_dir" ]; then
     exit 1
 fi
 
-# The nvs partition's offset and size, from the partition table the build made.
+# The nvs partition's offset and size (0x9000, 0x4000), from partitions.csv
+# itself: the build does not regenerate its partition-table.bin when the CSV
+# changes, so that copy can be stale.
 set -- $("$python" "$idf_path/components/partition_table/parttool.py" -q \
-    --partition-table-file "$release/partition-table.bin" \
+    --partition-table-file partitions.csv \
     get_partition_info --partition-name nvs --info offset size)
 offset="$1"
 size="$2"

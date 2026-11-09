@@ -1,8 +1,10 @@
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use connectors::{Storage, StorageError};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use esp_idf_svc::sys::EspError;
+
+use crate::threads;
 
 /// Storage backed by one NVS namespace. Every value is a blob, as
 /// `nvs_partition_gen.py` writes the provisioning entries.
@@ -19,7 +21,7 @@ impl NvsStorage {
     }
 
     fn lock(&self) -> MutexGuard<'_, EspNvs<NvsDefault>> {
-        self.nvs.lock().unwrap_or_else(PoisonError::into_inner)
+        threads::lock(&self.nvs)
     }
 }
 

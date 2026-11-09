@@ -9,3 +9,6 @@ pub(crate) const CONFIG: &str = "config";
 /// The provisioned Wi-Fi network, as text.
 pub(crate) const WIFI_SSID: &str = "wifi_ssid";
 pub(crate) const WIFI_PASSWORD: &str = "wifi_password";
+/// The CA certificate, PEM text, that the broker's and the download
+/// server's certificates chain to.
+pub(crate) const BROKER_CA: &str = "broker_ca";

@@ -27,6 +27,7 @@ use protocol::Config;
 use crate::clock::{now_ms, TimeSync};
 use crate::nvs_storage::NvsStorage;
 use crate::storage_keys::{CONFIG, NAMESPACE, WIFI_PASSWORD, WIFI_SSID};
+use crate::threads;
 
 /// How much stronger an access point must be to roam to it.
 const ROAM_MARGIN_DB: i32 = 8;
@@ -79,6 +80,11 @@ pub(crate) fn start(
     Ok(link)
 }
 
+/// Runs the station on a thread of its own.
+fn spawn(station: Station) -> Result<(), EspError> {
+    threads::spawn("network", STACK_BYTES, move || station.run())
+}
+
 fn wifi(
     modem: Modem,
     partition: EspDefaultNvsPartition,
@@ -86,16 +92,6 @@ fn wifi(
     let event_loop = EspSystemEventLoop::take()?;
     let wifi = EspWifi::new(modem, event_loop.clone(), Some(partition))?;
     BlockingWifi::wrap(wifi, event_loop)
-}
-
-fn spawn(station: Station) -> Result<(), EspError> {
-    let spawned = thread::Builder::new()
-        .name("network".to_owned())
-        .stack_size(STACK_BYTES)
-        .spawn(move || station.run());
-    spawned
-        .map(drop)
-        .map_err(|_| EspError::from_infallible::<{ sys::ESP_ERR_NO_MEM }>())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

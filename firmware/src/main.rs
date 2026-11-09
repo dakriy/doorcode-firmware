@@ -3,15 +3,19 @@
 //! Nothing here is tested; nothing here decides. One module per connector.
 
 mod clock;
+mod download;
 mod events;
 mod firmware;
 mod logger;
+mod mqtt;
 mod network;
 mod nvs_storage;
 mod placeholders;
 mod provisioning;
 mod radio;
+mod random;
 mod storage_keys;
+mod threads;
 mod watchdog;
 
 use std::thread;
@@ -26,12 +30,15 @@ use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
 
 use clock::EspClock;
+use download::EspDownload;
 use events::EspEvents;
 use firmware::BuildFirmware;
 use logger::{EspLog, LogStatus};
+use mqtt::MqttBroker;
 use nvs_storage::NvsStorage;
-use placeholders::{ClosedDoor, NoDownload, NoStrike, OfflineBroker, ZeroRandom};
+use placeholders::{ClosedDoor, NoStrike};
 use radio::EspRadio;
+use random::EspRandom;
 
 /// How long the log shows why the application returned before the restart.
 const RESTART_AFTER: Duration = Duration::from_secs(10);
@@ -39,9 +46,10 @@ const RESTART_AFTER: Duration = Duration::from_secs(10);
 struct EspConnectors {
     storage: NvsStorage,
     events: EspEvents,
-    broker: OfflineBroker,
+    broker: MqttBroker,
     clock: EspClock,
     radio: EspRadio,
+    download: EspDownload,
 }
 
 impl Connectors for EspConnectors {
@@ -62,7 +70,7 @@ impl Connectors for EspConnectors {
     }
 
     fn random(&self) -> &dyn Random {
-        &ZeroRandom
+        &EspRandom
     }
 
     fn radio(&self) -> &dyn Radio {
@@ -74,7 +82,7 @@ impl Connectors for EspConnectors {
     }
 
     fn download(&self) -> &dyn Download {
-        &NoDownload
+        &self.download
     }
 
     fn log(&self) -> &dyn Log {
@@ -104,7 +112,8 @@ fn storage(partition: &EspDefaultNvsPartition) -> NvsStorage {
     storage
 }
 
-/// Builds the connectors, with the Wi-Fi station running on its own thread.
+/// Builds the connectors, with the Wi-Fi station, the broker's clients, and
+/// each download running on threads of their own.
 fn connectors() -> EspConnectors {
     let partition = EspDefaultNvsPartition::take().expect("the default NVS partition");
     let storage = storage(&partition);
@@ -113,12 +122,12 @@ fn connectors() -> EspConnectors {
     let link = network::start(modem, partition.clone(), clock.time_sync())
         .expect("starting the Wi-Fi station");
     let events = EspEvents::default();
+    let download_storage = NvsStorage::open(partition, storage_keys::NAMESPACE)
+        .expect("opening the application's NVS namespace");
     EspConnectors {
         storage,
-        broker: OfflineBroker {
-            events: events.sender(),
-            link,
-        },
+        broker: MqttBroker::start(events.sender(), link).expect("starting the MQTT thread"),
+        download: EspDownload::new(events.sender(), download_storage),
         events,
         clock,
         radio: EspRadio::new().expect("reading the station MAC"),
