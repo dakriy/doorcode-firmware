@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use connectors::Radio;
+use connectors::{Mesh, Radio};
 
-/// A device whose link and memory are whatever its control handle last set;
-/// it starts with no signal and no free memory.
+/// A device whose link, memory, and mesh position are whatever its control
+/// handle last set; it starts with no signal, no free memory, and joined to
+/// the access point directly with no doors hopping through it.
 #[derive(Debug)]
 pub struct HostRadio {
     hardware_id: String,
@@ -20,6 +21,7 @@ pub struct RadioControl {
 struct Facts {
     signal_dbm: Option<i32>,
     free_bytes: u32,
+    mesh: Mesh,
 }
 
 fn lock(facts: &Mutex<Facts>) -> MutexGuard<'_, Facts> {
@@ -50,6 +52,10 @@ impl RadioControl {
     pub fn set_free_bytes(&self, free_bytes: u32) {
         lock(&self.facts).free_bytes = free_bytes;
     }
+
+    pub fn set_mesh(&self, mesh: Mesh) {
+        lock(&self.facts).mesh = mesh;
+    }
 }
 
 impl Radio for HostRadio {
@@ -63,5 +69,9 @@ impl Radio for HostRadio {
 
     fn hardware_id(&self) -> String {
         self.hardware_id.clone()
+    }
+
+    fn mesh(&self) -> Mesh {
+        lock(&self.facts).mesh.clone()
     }
 }

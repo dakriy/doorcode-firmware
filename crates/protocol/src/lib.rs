@@ -483,6 +483,12 @@ pub struct Telemetry {
     pub door_open: bool,
     /// How often the door opened since the last report.
     pub opens: u64,
+    /// Hops to the building's access point: 0 when joined to it directly.
+    pub mesh_layer: u64,
+    /// The hardware id of the door this one hops through; empty when direct.
+    pub mesh_parent: String,
+    /// Doors hopping through this one.
+    pub mesh_children: u64,
 }
 
 impl Telemetry {
@@ -496,6 +502,9 @@ impl Telemetry {
         map.uint("reconnects", self.reconnects);
         map.bool("door_open", self.door_open);
         map.uint("opens", self.opens);
+        map.uint("mesh_layer", self.mesh_layer);
+        map.text("mesh_parent", &self.mesh_parent);
+        map.uint("mesh_children", self.mesh_children);
         map.finish()
     }
 
@@ -515,6 +524,9 @@ impl Telemetry {
                 ("reconnects", Slot::Uint(&mut message.reconnects)),
                 ("door_open", Slot::Bool(&mut message.door_open)),
                 ("opens", Slot::Uint(&mut message.opens)),
+                ("mesh_layer", Slot::Uint(&mut message.mesh_layer)),
+                ("mesh_parent", Slot::Text(&mut message.mesh_parent)),
+                ("mesh_children", Slot::Uint(&mut message.mesh_children)),
             ],
         );
         read.map(|()| message)

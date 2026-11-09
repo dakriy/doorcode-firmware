@@ -29,8 +29,11 @@ The script:
    own build does, including the SHA-256 digest appended to it.
 4. Appends the 68-byte signature block with
    `espsecure sign_data --version 1` (see `firmware-signing.md`).
-5. Checks the signature against `firmware/signing_public_key.bin`, and only
-   then writes `dist/doorcode-firmware-VERSION.bin` and
+5. Checks the signature against `firmware/signing_public_key.bin`, and
+   that the signed image fits the smallest app slot of
+   `firmware/partitions.csv` (`ota_1`, 0x1F0000 bytes; an update may go
+   into either slot), and only then writes
+   `dist/doorcode-firmware-VERSION.bin` and
    `dist/doorcode-firmware-VERSION.sha256` (`sha256sum` format, of the whole
    signed file). `dist/` is ignored by git.
 

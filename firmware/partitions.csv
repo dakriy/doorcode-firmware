@@ -1,11 +1,14 @@
-# Two OTA slots of 0x1F0000 (1984 KB) on 4 MB flash, and no factory slot:
-# the bootloader boots ota_0 until an update records another in otadata.
+# Two OTA slots on 4 MB flash, and no factory slot: ota_0 of 0x200000
+# (2048 KB) at 0x10000 and ota_1 of 0x1F0000 (1984 KB) at 0x210000. The
+# bootloader boots ota_0 until an update records another in otadata. An
+# image must fit the smaller slot, which the release script checks.
 # nvs, otadata, and phy_init keep ESP-IDF's standard offsets and sizes, and
-# nvs at 0x9000 is where make firmware-provision writes the provisioning
-# image.
+# ota_1 starts where the standard two-OTA table's ota_1 does, so a board on
+# that table can move to this one in place. nvs at 0x9000 is where make
+# firmware-provision writes the provisioning image.
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x4000,
 otadata,  data, ota,     0xD000,   0x2000,
 phy_init, data, phy,     0xF000,   0x1000,
-ota_0,    app,  ota_0,   0x10000,  0x1F0000,
-ota_1,    app,  ota_1,   0x200000, 0x1F0000,
+ota_0,    app,  ota_0,   0x10000,  0x200000,
+ota_1,    app,  ota_1,   0x210000, 0x1F0000,

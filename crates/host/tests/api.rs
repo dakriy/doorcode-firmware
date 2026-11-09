@@ -227,6 +227,53 @@ fn the_radio_values_set_are_shown() {
 }
 
 #[test]
+fn the_mesh_position_set_is_shown() {
+    let (_directory, address) = start(&[]);
+
+    post(
+        address,
+        "/radio",
+        r#"{"free_bytes": 180000, "mesh_layer": 2, "mesh_parent": "a1b2c3d4e5f7", "mesh_children": 1}"#,
+    );
+
+    let state = state(address);
+    assert_eq!(
+        (
+            &state["mesh_layer"],
+            &state["mesh_parent"],
+            &state["mesh_children"]
+        ),
+        (&json!(2), &json!("a1b2c3d4e5f7"), &json!(1))
+    );
+}
+
+#[test]
+fn radio_values_without_the_mesh_set_the_door_joined_directly() {
+    let (_directory, address) = start(&[]);
+    post(
+        address,
+        "/radio",
+        r#"{"free_bytes": 180000, "mesh_layer": 2, "mesh_parent": "a1b2c3d4e5f7", "mesh_children": 1}"#,
+    );
+
+    post(
+        address,
+        "/radio",
+        r#"{"signal": -61, "free_bytes": 180000}"#,
+    );
+
+    let state = state(address);
+    assert_eq!(
+        (
+            &state["mesh_layer"],
+            &state["mesh_parent"],
+            &state["mesh_children"]
+        ),
+        (&json!(0), &json!(""), &json!(0))
+    );
+}
+
+#[test]
 fn a_restart_boots_the_image_set_to_boot_and_reports_its_version() {
     let (directory, address) = start(&[]);
     write_boot(&directory, &app_image("2.1.0"));

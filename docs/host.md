@@ -54,9 +54,16 @@ change:
 
     curl -X POST localhost:8484/door -d '{"open":true}'
 
-Set what the radio reports. A `signal` of `null`, or none, means no link:
+Set what the radio reports. A `signal` of `null`, or none, means no link.
+`mesh_layer`, `mesh_parent`, and `mesh_children` set where the door sits in
+the mesh (`docs/mesh.md`): hops to the access point, the hardware id of the
+door it hops through, and how many doors hop through it. Each one left out
+is 0 or empty, a door joined to the access point directly with no doors
+hopping through it:
 
     curl -X POST localhost:8484/radio -d '{"signal":-61,"free_bytes":180000}'
+    curl -X POST localhost:8484/radio \
+        -d '{"signal":-70,"free_bytes":150000,"mesh_layer":2,"mesh_parent":"a1b2c3d4e5f7","mesh_children":1}'
 
 Restart the door as a power cycle would:
 
@@ -87,7 +94,7 @@ reported and works none of them out itself.
 | `timeline` | The stored timeline message, decoded; `null` when none is stored. |
 | `firmware_version` | The version the application runs. |
 | `hardware_id` | The hardware id. |
-| `signal`, `free_bytes` | What the radio reports. |
+| `signal`, `free_bytes`, `mesh_layer`, `mesh_parent`, `mesh_children` | What the radio reports. |
 
 ## Restarts and firmware updates
 

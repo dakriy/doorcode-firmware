@@ -1,9 +1,11 @@
 #!/bin/sh
 # Builds a release image of the firmware as VERSION, signs it with the
 # P-256 private key at KEY_PATH (PEM), and checks the signature with the
-# committed public key before it writes dist/doorcode-firmware-VERSION.bin
-# and its SHA-256 beside it. docs/release.md describes the flow and
-# docs/firmware-signing.md the signature block.
+# committed public key and refuses an image larger than the smaller OTA slot
+# of firmware/partitions.csv before it writes
+# dist/doorcode-firmware-VERSION.bin and its SHA-256 beside it.
+# docs/release.md describes the flow and docs/firmware-signing.md the
+# signature block.
 #
 # The build, the signing, and the checks run in the firmware container
 # (scripts/firmware-release-image.sh). The key is mounted into it read-only

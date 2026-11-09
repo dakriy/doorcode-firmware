@@ -66,6 +66,9 @@
       <dt>Update</dt><dd id="update"></dd>
       <dt>Firmware</dt><dd id="firmware_version"></dd>
       <dt>Hardware id</dt><dd id="hardware_id"></dd>
+      <dt>Mesh layer</dt><dd id="mesh_layer"></dd>
+      <dt>Mesh parent</dt><dd id="mesh_parent"></dd>
+      <dt>Mesh children</dt><dd id="mesh_children"></dd>
       <dt>Bytes in</dt><dd id="bytes_in"></dd>
       <dt>Bytes out</dt><dd id="bytes_out"></dd>
     </dl>
@@ -76,6 +79,9 @@
 const $ = (id) => document.getElementById(id);
 let doorOpen = false;
 let radioShown = false;
+// Where the door sits in the mesh, as last shown, sent again with the signal
+// so that moving the slider keeps what `POST /radio` set.
+let mesh = {};
 
 async function request(path, options) {
   try {
@@ -105,15 +111,17 @@ function showSignal() {
 
 function sendRadio() {
   showSignal();
-  post("/radio", { signal: Number($("signal").value), free_bytes: Number($("free").value) });
+  post("/radio", { ...mesh, signal: Number($("signal").value), free_bytes: Number($("free").value) });
 }
 
 const text = (value) => (value === null || value === undefined ? "—" : String(value));
 
 function show(state) {
-  for (const field of ["phase", "connection", "door_id", "mode", "update", "firmware_version", "hardware_id", "bytes_in", "bytes_out"]) {
+  for (const field of ["phase", "connection", "door_id", "mode", "update", "firmware_version", "hardware_id", "bytes_in", "bytes_out", "mesh_layer", "mesh_children"]) {
     $(field).textContent = text(state[field]);
   }
+  $("mesh_parent").textContent = state.mesh_parent || "—";
+  mesh = { mesh_layer: state.mesh_layer, mesh_parent: state.mesh_parent, mesh_children: state.mesh_children };
   $("strike_released").textContent = state.strike_released ? "released" : "locked";
   $("strike_released").classList.toggle("released", state.strike_released === true);
   $("entry_shown").textContent = state.entry || "—";

@@ -9,6 +9,7 @@ mod events;
 mod firmware;
 mod keypad;
 mod logger;
+mod mesh;
 mod mqtt;
 mod network;
 mod nvs_storage;
@@ -16,6 +17,7 @@ mod pins;
 mod provisioning;
 mod radio;
 mod random;
+mod station;
 mod storage_keys;
 mod strike;
 mod threads;
@@ -134,8 +136,8 @@ fn connectors(
     let partition = EspDefaultNvsPartition::take().expect("the default NVS partition");
     let storage = storage(&partition);
     let clock = EspClock::default();
-    let link = network::start(modem, partition.clone(), clock.time_sync())
-        .expect("starting the Wi-Fi station");
+    let (link, meshing) = network::start(modem, partition.clone(), clock.time_sync())
+        .expect("starting the Wi-Fi network");
     let events = EspEvents::default();
     let download_storage = NvsStorage::open(partition, storage_keys::NAMESPACE)
         .expect("opening the application's NVS namespace");
@@ -148,7 +150,7 @@ fn connectors(
             .expect("starting the door sensor thread"),
         events,
         clock,
-        radio: EspRadio::new().expect("reading the station MAC"),
+        radio: EspRadio::new(meshing).expect("reading the station MAC"),
         strike,
         firmware: EspFirmware::new(),
     }

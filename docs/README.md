@@ -11,5 +11,7 @@ live outside the repository.
 - `release.md`: building, signing, uploading, and rolling out a firmware
   release.
 - `host.md`: the desktop host binary, its flags, and its control API.
+- `mesh.md`: how doors far from an access point hop through other doors,
+  and the telemetry that shows it.
 - `testing.md`: the integration test that runs a desktop door against a
   development server, and the load tool that runs many.

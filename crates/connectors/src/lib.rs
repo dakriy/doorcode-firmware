@@ -165,6 +165,17 @@ pub trait Random {
     fn bytes(&self, count: usize) -> Vec<u8>;
 }
 
+/// Where the device sits in a Wi-Fi mesh of doors.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Mesh {
+    /// Hops to the building's access point: 0 when joined to it directly.
+    pub layer: u32,
+    /// The hardware id of the door it hops through; empty when direct.
+    pub parent: String,
+    /// Doors hopping through this one.
+    pub children: u32,
+}
+
 /// Facts about the device and its network link.
 pub trait Radio {
     /// Signal strength in dBm, or `None` when there is no radio link.
@@ -173,6 +184,8 @@ pub trait Radio {
     fn free_bytes(&self) -> u32;
     /// The device's fixed hardware id.
     fn hardware_id(&self) -> String;
+    /// Where the device sits in the mesh.
+    fn mesh(&self) -> Mesh;
 }
 
 /// HTTPS downloads. Calls start work; progress arrives through `Events` as

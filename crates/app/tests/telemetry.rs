@@ -3,7 +3,7 @@
 //! and closing outside open spans.
 
 use app::Counters;
-use connectors::{Event, Level};
+use connectors::{Event, Level, Mesh};
 use pretty_assertions::assert_eq;
 use protocol::{Config, DoorEvent, Reply, Span, Telemetry, Timeline};
 use testkit::{
@@ -69,6 +69,9 @@ fn quiet_report(uptime_s: u64) -> Telemetry {
         reconnects: 0,
         door_open: false,
         opens: 0,
+        mesh_layer: 0,
+        mesh_parent: String::new(),
+        mesh_children: 0,
     }
 }
 
@@ -135,7 +138,7 @@ fn the_report_is_encoded_with_the_contract_field_names() {
     assert_eq!(
         connectors.broker.published_payloads().last(),
         Some(&hex(concat!(
-            "a9",
+            "ac",
             "617601",
             "656f70656e7300",
             "667369676e616c383c",
@@ -143,7 +146,10 @@ fn the_report_is_encoded_with_the_contract_field_names() {
             "69646f6f725f6f70656ef4",
             "6a667265655f62797465731a0002bf20",
             "6a6c6174656e63795f6d7300",
+            "6a6d6573685f6c6179657200",
             "6a7265636f6e6e6563747300",
+            "6b6d6573685f706172656e7460",
+            "6d6d6573685f6368696c6472656e00",
             "706669726d776172655f76657273696f6e65322e302e30"
         )))
     );
@@ -189,6 +195,33 @@ fn the_signal_free_memory_version_and_door_come_from_the_device_as_they_are_then
             free_bytes: 123_456,
             firmware_version: "2.1.0".to_owned(),
             door_open: true,
+            ..quiet_report(1)
+        }]
+    );
+}
+
+#[test]
+fn the_mesh_layer_parent_and_children_come_from_the_radio() {
+    let connectors = StubConnectors {
+        radio: StubRadio {
+            mesh: Mesh {
+                layer: 2,
+                parent: "a1b2c3d4e5f7".to_owned(),
+                children: 3,
+            },
+            ..StubRadio::default()
+        },
+        ..online_until(1001, [])
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        reports(&connectors),
+        vec![Telemetry {
+            mesh_layer: 2,
+            mesh_parent: "a1b2c3d4e5f7".to_owned(),
+            mesh_children: 3,
             ..quiet_report(1)
         }]
     );

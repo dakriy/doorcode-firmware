@@ -55,6 +55,7 @@ impl Tally {
     /// Publishes a report; the opens count from zero again once it is sent.
     pub(crate) fn report(&mut self, device: &Device<'_>, door_id: u64, latency_ms: u64) {
         let counters = self.counters(latency_ms);
+        let mesh = device.connectors.radio().mesh();
         let telemetry = Telemetry {
             signal: device.signal_dbm(),
             latency_ms: counters.latency_ms,
@@ -64,6 +65,9 @@ impl Tally {
             reconnects: counters.reconnects,
             door_open: device.connectors.door_sensor().is_open(),
             opens: counters.opens,
+            mesh_layer: mesh.layer.into(),
+            mesh_parent: mesh.parent,
+            mesh_children: mesh.children.into(),
         };
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
             Ok(_) => self.opens = 0,

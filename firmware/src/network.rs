@@ -1,48 +1,56 @@
-//! The Wi-Fi station and SNTP, on their own thread so that scanning and
-//! associating never block the event loop.
+//! The Wi-Fi network and SNTP, on a thread of their own so that scanning
+//! and associating never block the event loop.
 //!
-//! The station joins the network it was told: `wifi_ssid` and
-//! `wifi_password` from the stored configuration, or, while those are
-//! empty, the provisioned ones. It scans every channel and joins the
-//! strongest access point of that SSID. The credentials that last
-//! associated are kept, and used when the ones it was told fail. While the
-//! signal is below `wifi_roam_rssi`, it scans at most once a minute and
-//! moves to an access point at least `ROAM_MARGIN_DB` stronger.
+//! Which station runs is chosen at start from the stored configuration:
+//! with the mesh enabled and named, Mesh-Lite runs it (`mesh.rs`);
+//! otherwise the plain station does (`station.rs`). Either joins the
+//! network it was told: `wifi_ssid` and `wifi_password` from the stored
+//! configuration, or, while those are empty, the provisioned ones, and
+//! falls back to the credentials that last associated when those fail.
+//! Since the choice is made once, a change of the mesh settings restarts
+//! the device.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use connectors::Storage;
-use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::{self, EspError};
-use esp_idf_svc::wifi::{
-    AccessPointInfo, BlockingWifi, ClientConfiguration, Configuration, EspWifi,
-};
 use protocol::Config;
 
 use crate::clock::{now_ms, TimeSync};
 use crate::nvs_storage::NvsStorage;
 use crate::storage_keys::{CONFIG, NAMESPACE, WIFI_PASSWORD, WIFI_SSID};
-use crate::threads;
+use crate::{mesh, station};
+
+/// The network's own namespace, and the credentials that last associated.
+const MEMORY_NAMESPACE: &str = "wifi";
+const LAST_SSID_KEY: &str = "ssid";
+const LAST_PASSWORD_KEY: &str = "password";
 
 /// How much stronger an access point must be to roam to it.
 const ROAM_MARGIN_DB: i32 = 8;
 /// A scan interrupts traffic briefly, so a roaming scan waits this long
 /// after the last scan.
 const ROAM_SCAN_EVERY_MS: u64 = 60_000;
-/// How often the station looks at the link and the stored configuration.
-const CHECK_EVERY: Duration = Duration::from_secs(1);
-/// How long the station waits after it could not join any network.
-const RETRY_AFTER: Duration = Duration::from_secs(5);
-const STACK_BYTES: usize = 12 * 1024;
+/// How often either station looks at the link and the stored configuration.
+pub(crate) const CHECK_EVERY: Duration = Duration::from_secs(1);
+/// The stack of either station's thread.
+pub(crate) const STACK_BYTES: usize = 12 * 1024;
 
-/// The station's own namespace, and the credentials that last associated.
-const MEMORY_NAMESPACE: &str = "wifi";
-const LAST_SSID_KEY: &str = "ssid";
-const LAST_PASSWORD_KEY: &str = "password";
+/// Whether to scan for an access point to roam to: the signal is below
+/// `roam_rssi` and the last scan, at `last_scan_ms`, was long enough ago.
+pub(crate) fn roam_scan_due(signal: i32, roam_rssi: i32, last_scan_ms: u64) -> bool {
+    signal < roam_rssi && now_ms() >= last_scan_ms + ROAM_SCAN_EVERY_MS
+}
+
+/// Whether an access point heard at `found` is worth roaming to from one
+/// heard at `signal`.
+pub(crate) fn worth_roaming(found: i32, signal: i32) -> bool {
+    found >= signal + ROAM_MARGIN_DB
+}
 
 /// Whether the station has an IP link, readable from any thread.
 #[derive(Debug, Clone, Default)]
@@ -53,65 +61,85 @@ impl Link {
         self.0.load(Ordering::Acquire)
     }
 
-    fn set(&self, up: bool) {
+    pub(crate) fn set(&self, up: bool) {
         self.0.store(up, Ordering::Release);
     }
 }
 
-/// Starts the station on its own thread and returns its link.
+/// What either station needs: the application's storage, read for what it
+/// was told, the credentials that last associated, the link it reports,
+/// and SNTP to follow.
+pub(crate) struct Context {
+    pub(crate) storage: NvsStorage,
+    pub(crate) memory: Memory,
+    pub(crate) link: Link,
+    pub(crate) time: TimeSync,
+    /// The mesh settings the network started with.
+    pub(crate) mesh: Option<MeshSettings>,
+}
+
+/// Starts the station the stored configuration asks for, on its own
+/// thread, and returns its link and whether it runs the mesh.
 pub(crate) fn start(
     modem: Modem,
     partition: EspDefaultNvsPartition,
     time: TimeSync,
-) -> Result<Link, EspError> {
-    let link = Link::default();
-    let station = Station {
-        wifi: wifi(modem, partition.clone())?,
-        storage: NvsStorage::open(partition.clone(), NAMESPACE)?,
-        memory: NvsStorage::open(partition, MEMORY_NAMESPACE)?,
-        link: link.clone(),
-        time,
-        tried: None,
-        joined: None,
-        last_scan_ms: 0,
-    };
-    spawn(station)?;
-    Ok(link)
+) -> Result<(Link, bool), EspError> {
+    let context = Context::open(&partition, time)?;
+    let link = context.link.clone();
+    let mesh = context.mesh.clone();
+    let meshing = mesh.is_some();
+    match mesh {
+        Some(settings) => mesh::start(modem, &settings, context),
+        None => station::start(modem, partition, context),
+    }
+    .map(|()| (link, meshing))
 }
 
-/// Runs the station on a thread of its own.
-fn spawn(station: Station) -> Result<(), EspError> {
-    threads::spawn("network", STACK_BYTES, move || station.run())
-}
-
-fn wifi(
-    modem: Modem,
-    partition: EspDefaultNvsPartition,
-) -> Result<BlockingWifi<EspWifi<'static>>, EspError> {
-    let event_loop = EspSystemEventLoop::take()?;
-    let wifi = EspWifi::new(modem, event_loop.clone(), Some(partition))?;
-    BlockingWifi::wrap(wifi, event_loop)
-}
-
+/// The Wi-Fi credentials of one network.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct Credentials {
-    ssid: String,
-    password: String,
+pub(crate) struct Credentials {
+    pub(crate) ssid: String,
+    pub(crate) password: String,
+}
+
+/// The mesh the door may join or offer: present when `mesh_enabled` is
+/// true and `mesh_ssid` names one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MeshSettings {
+    pub(crate) network: Credentials,
+    pub(crate) min_router_rssi: i32,
+    pub(crate) max_layer: u64,
+}
+
+impl MeshSettings {
+    fn read(config: &Config) -> Option<Self> {
+        let named = config.mesh_enabled && !config.mesh_ssid.is_empty();
+        named.then(|| Self {
+            network: Credentials {
+                ssid: config.mesh_ssid.clone(),
+                password: config.mesh_password.clone(),
+            },
+            min_router_rssi: config.mesh_min_router_rssi,
+            max_layer: config.mesh_max_layer,
+        })
+    }
 }
 
 /// What the station was told, read anew on every check.
-struct Settings {
-    wanted: Credentials,
-    roam_rssi: i32,
-    ntp_server: String,
+pub(crate) struct Settings {
+    pub(crate) wanted: Credentials,
+    pub(crate) roam_rssi: i32,
+    pub(crate) ntp_server: String,
+    pub(crate) mesh: Option<MeshSettings>,
 }
 
 impl Settings {
-    fn read(storage: &dyn Storage) -> Self {
+    pub(crate) fn read(storage: &dyn Storage) -> Self {
         let config = stored_config(storage);
         let configured = Credentials {
-            ssid: config.wifi_ssid,
-            password: config.wifi_password,
+            ssid: config.wifi_ssid.clone(),
+            password: config.wifi_password.clone(),
         };
         let wanted = if configured.ssid.is_empty() {
             stored_credentials(storage, WIFI_SSID, WIFI_PASSWORD)
@@ -121,6 +149,7 @@ impl Settings {
         Self {
             wanted: wanted.unwrap_or_default(),
             roam_rssi: config.wifi_roam_rssi,
+            mesh: MeshSettings::read(&config),
             ntp_server: config.ntp_server,
         }
     }
@@ -146,95 +175,22 @@ fn stored_credentials(
     })
 }
 
-struct Station {
-    wifi: BlockingWifi<EspWifi<'static>>,
-    /// The application's storage, read for what the station was told.
-    storage: NvsStorage,
-    /// The station's own storage, for the credentials that last associated.
-    memory: NvsStorage,
-    link: Link,
-    time: TimeSync,
-    /// The credentials the station was told when it last joined.
-    tried: Option<Credentials>,
-    /// The credentials of the association the station holds.
-    joined: Option<Credentials>,
-    last_scan_ms: u64,
-}
+/// The network's own storage, for the credentials that last associated.
+pub(crate) struct Memory(NvsStorage);
 
-impl Station {
-    fn run(mut self) {
-        if let Err(error) = self.wifi.start() {
-            log::error!("starting Wi-Fi: {error}");
-            return;
-        }
-        threads::repeat(|| self.check())
-    }
-
-    /// Looks at the link once, and returns how long to wait before the next
-    /// look.
-    fn check(&mut self) -> Duration {
-        let settings = Settings::read(&self.storage);
-        let up = self.wifi.is_up().unwrap_or(false);
-        self.link.set(up);
-        if !up || self.tried.as_ref() != Some(&settings.wanted) {
-            return self.connect(&settings);
-        }
-        self.time.follow(&settings.ntp_server);
-        self.roam(settings.roam_rssi);
-        CHECK_EVERY
-    }
-
-    /// Joins the network the station was told, or the one that last
-    /// associated when that fails.
-    fn connect(&mut self, settings: &Settings) -> Duration {
-        self.tried = Some(settings.wanted.clone());
-        if self.join(&settings.wanted) {
-            self.remember(&settings.wanted);
-            return CHECK_EVERY;
-        }
-        if self.join_last(&settings.wanted) {
-            CHECK_EVERY
-        } else {
-            RETRY_AFTER
-        }
-    }
-
-    /// Joins with the credentials that last associated, unless they are
-    /// the ones that just failed.
-    fn join_last(&mut self, failed: &Credentials) -> bool {
-        match self.last_associated() {
-            Some(last) if last != *failed => self.join(&last),
-            _ => false,
-        }
-    }
-
-    /// Joins the strongest access point of `credentials.ssid`.
-    fn join(&mut self, credentials: &Credentials) -> bool {
-        self.joined = None;
-        let Some(access_point) = self.strongest(&credentials.ssid) else {
-            return false;
-        };
-        let joined = self.associate(credentials, &access_point);
-        if let Err(error) = &joined {
-            log::warn!("joining {}: {error}", credentials.ssid);
-        }
-        self.joined = joined.ok().map(|()| credentials.clone());
-        self.link.set(self.joined.is_some());
-        self.joined.is_some()
-    }
-
-    /// Keeps `credentials` as the last that associated, unless they already
-    /// are.
-    fn remember(&self, credentials: &Credentials) {
+impl Memory {
+    /// Keeps `credentials` as the last that associated, unless they
+    /// already are.
+    pub(crate) fn remember(&self, credentials: &Credentials) {
         if self.last_associated().as_ref() == Some(credentials) {
             return;
         }
         let stored = self
-            .memory
+            .0
             .store(LAST_SSID_KEY, credentials.ssid.as_bytes())
             .and_then(|()| {
                 let password = credentials.password.as_bytes();
-                self.memory.store(LAST_PASSWORD_KEY, password)
+                self.0.store(LAST_PASSWORD_KEY, password)
             });
         if let Err(error) = stored {
             log::warn!("keeping the Wi-Fi credentials: {error}");
@@ -243,98 +199,39 @@ impl Station {
 
     /// The credentials that last associated, if any were kept.
     fn last_associated(&self) -> Option<Credentials> {
-        stored_credentials(&self.memory, LAST_SSID_KEY, LAST_PASSWORD_KEY)
+        stored_credentials(&self.0, LAST_SSID_KEY, LAST_PASSWORD_KEY)
     }
 
-    /// Moves to a stronger access point of the same SSID while the signal
-    /// is below `roam_rssi`.
-    fn roam(&mut self, roam_rssi: i32) {
-        let Some(signal) = self.weak_signal(roam_rssi) else {
-            return;
-        };
-        let Some(joined) = self.joined.clone() else {
-            return;
-        };
-        let stronger = self
-            .strongest(&joined.ssid)
-            .filter(|candidate| i32::from(candidate.signal_strength) >= signal + ROAM_MARGIN_DB);
-        if let Some(candidate) = stronger {
-            self.roam_to(&joined, &candidate);
-        }
-    }
-
-    /// The signal of the access point joined, when it is below `roam_rssi`
-    /// and a roaming scan is due.
-    fn weak_signal(&mut self, roam_rssi: i32) -> Option<i32> {
-        let current = self.wifi.wifi_mut().driver_mut().get_ap_info().ok()?;
-        let signal = i32::from(current.signal_strength);
-        let scan_due = now_ms() >= self.last_scan_ms + ROAM_SCAN_EVERY_MS;
-        (signal < roam_rssi && scan_due).then_some(signal)
-    }
-
-    fn roam_to(&mut self, credentials: &Credentials, access_point: &AccessPointInfo) {
-        log::info!("roaming to {:02x?}", access_point.bssid);
-        let roamed = self.associate(credentials, access_point);
-        if let Err(error) = roamed {
-            log::warn!("roaming: {error}");
-            self.joined = None;
-            self.link.set(false);
-        }
-    }
-
-    /// The strongest access point of `ssid` on any channel.
-    fn strongest(&mut self, ssid: &str) -> Option<AccessPointInfo> {
-        if ssid.is_empty() {
-            return None;
-        }
-        let matching = self.scan()?.into_iter().filter(|found| found.ssid == ssid);
-        matching.max_by_key(|found| found.signal_strength)
-    }
-
-    /// Every access point in reach, on every channel.
-    fn scan(&mut self) -> Option<Vec<AccessPointInfo>> {
-        let scanned = self.wifi.scan();
-        self.last_scan_ms = now_ms();
-        scanned
-            .inspect_err(|error| log::warn!("scanning: {error}"))
-            .ok()
-    }
-
-    /// Associates with `access_point` and waits for an address; both wait
-    /// a bounded time.
-    fn associate(
-        &mut self,
-        credentials: &Credentials,
-        access_point: &AccessPointInfo,
-    ) -> Result<(), EspError> {
-        let configuration = client_configuration(credentials, access_point)?;
-        self.leave()?;
-        self.wifi
-            .set_configuration(&Configuration::Client(configuration))?;
-        self.wifi.connect()?;
-        self.wifi.wait_netif_up()
-    }
-
-    /// Ends the association the station holds, if any.
-    fn leave(&mut self) -> Result<(), EspError> {
-        if self.wifi.is_connected()? {
-            self.wifi.disconnect()?;
-        }
-        Ok(())
+    /// The credentials to fall back to when `failed` do not associate:
+    /// those that last associated, unless they are the same.
+    pub(crate) fn fallback_for(&self, failed: &Credentials) -> Option<Credentials> {
+        self.last_associated().filter(|last| last != failed)
     }
 }
 
-fn client_configuration(
-    credentials: &Credentials,
-    access_point: &AccessPointInfo,
-) -> Result<ClientConfiguration, EspError> {
-    let too_long = |()| EspError::from_infallible::<{ sys::ESP_ERR_INVALID_ARG }>();
-    Ok(ClientConfiguration {
-        ssid: credentials.ssid.as_str().try_into().map_err(too_long)?,
-        password: credentials.password.as_str().try_into().map_err(too_long)?,
-        bssid: Some(access_point.bssid),
-        channel: Some(access_point.channel),
-        auth_method: access_point.auth_method.unwrap_or_default(),
-        ..Default::default()
-    })
+impl Context {
+    /// Opens both namespaces, and reads the mesh settings to start with.
+    fn open(partition: &EspDefaultNvsPartition, time: TimeSync) -> Result<Self, EspError> {
+        let storage = NvsStorage::open(partition.clone(), NAMESPACE)?;
+        let memory = Memory(NvsStorage::open(partition.clone(), MEMORY_NAMESPACE)?);
+        Ok(Self {
+            mesh: Settings::read(&storage).mesh,
+            storage,
+            memory,
+            link: Link::default(),
+            time,
+        })
+    }
+
+    /// Reads the settings, and restarts the device when the mesh settings
+    /// are no longer the ones the network started with.
+    pub(crate) fn settings(&self) -> Settings {
+        let settings = Settings::read(&self.storage);
+        if settings.mesh != self.mesh {
+            log::warn!("the mesh settings changed; restarting to apply them");
+            // SAFETY: takes no arguments and does not return.
+            unsafe { sys::esp_restart() };
+        }
+        settings
+    }
 }

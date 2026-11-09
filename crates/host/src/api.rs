@@ -2,7 +2,7 @@
 
 use std::io::Cursor;
 
-use connectors::{DoorSensor, Event, Radio, Storage};
+use connectors::{DoorSensor, Event, Mesh, Radio, Storage};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -142,6 +142,14 @@ struct RadioFacts {
     #[serde(default)]
     signal: Option<i32>,
     free_bytes: u32,
+    /// Absent, like the two below, for a door joined to the access point
+    /// directly with no doors hopping through it.
+    #[serde(default)]
+    mesh_layer: u32,
+    #[serde(default)]
+    mesh_parent: String,
+    #[serde(default)]
+    mesh_children: u32,
 }
 
 /// Sets what the radio reports.
@@ -150,6 +158,11 @@ fn radio(device: &Device, body: &str) -> Result<Value, Failure> {
     let control = device.board.radio.control();
     control.set_signal_dbm(facts.signal);
     control.set_free_bytes(facts.free_bytes);
+    control.set_mesh(Mesh {
+        layer: facts.mesh_layer,
+        parent: facts.mesh_parent,
+        children: facts.mesh_children,
+    });
     Ok(done())
 }
 
@@ -169,6 +182,10 @@ fn state(device: &Device, _body: &str) -> Result<Value, Failure> {
     state["signal"] = device.board.radio.signal_dbm().into();
     state["free_bytes"] = device.board.radio.free_bytes().into();
     state["hardware_id"] = device.board.radio.hardware_id().into();
+    let mesh = device.board.radio.mesh();
+    state["mesh_layer"] = mesh.layer.into();
+    state["mesh_parent"] = mesh.parent.into();
+    state["mesh_children"] = mesh.children.into();
     Ok(state)
 }
 

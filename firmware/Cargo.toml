@@ -16,7 +16,8 @@ description = "ESP32 connector implementations and production wiring for the doo
 name = "doorcode-firmware"
 harness = false
 
-# Built for size: an image must fit the partition table's 0x1F0000 app slots.
+# Built for size: an image must fit the partition table's smaller app slot,
+# 0x1F0000 bytes.
 [profile.release]
 opt-level = "z"
 lto = true
@@ -40,3 +41,10 @@ serde_json = "1"
 
 [lints.clippy]
 cognitive_complexity = "deny"
+
+# Mesh-Lite from the ESP component registry, with the IoT bridge it builds
+# on: bindings in esp_idf_svc::sys::mesh_lite.
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/mesh_lite", version = "1.0.2" }
+bindings_header = "src/mesh_lite.h"
+bindings_module = "mesh_lite"

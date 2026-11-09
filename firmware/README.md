@@ -23,6 +23,15 @@ Caches live in the docker volumes `esp-rs-espressif`, `esp-rs-embuild`,
 `esp-rs-cargo-reg`, and `esp-rs-target`. The first build downloads and
 compiles ESP-IDF (about fifteen minutes); later builds take under a minute.
 
+The mesh comes from two components of Espressif's component registry,
+`espressif/mesh_lite` and the `espressif/iot_bridge` it builds on, listed
+under `[package.metadata.esp-idf-sys]` in `Cargo.toml`. ESP-IDF's component
+manager downloads them on the first build and pins their versions in
+`components_esp32.lock`; their bindings are `esp_idf_svc::sys::mesh_lite`,
+generated from `src/mesh_lite.h`. The IoT bridge patches lwIP's DHCP server
+and NAT in the ESP-IDF checkout itself (in the `esp-rs-espressif` volume)
+when it is configured, so that checkout is no longer pristine afterwards.
+
 Everything in this directory is connector code or production wiring. It is
 excluded from coverage and mutation and is verified by `make firmware-build`,
 `make firmware-check`, and by running on a board.
@@ -65,11 +74,14 @@ CBOR, the other keys are text):
   port to only write the image, `target/provisioning-nvs.bin`.
 
 The partition table, `partitions.csv`, fills 4 MB flash with two OTA slots
-of 0x1F0000 (1984 KB) each, `ota_0` at 0x10000 and `ota_1` at 0x200000, and
-no factory slot. `nvs` (16 KB at 0x9000), `otadata` (0xD000), and
-`phy_init` (0xF000) keep ESP-IDF's standard places. A board flashed over USB
-boots `ota_0`. The release profile and `sdkconfig.defaults` build for size so an
-image fits a slot.
+and no factory slot: `ota_0` of 0x200000 (2048 KB) at 0x10000 and `ota_1`
+of 0x1F0000 (1984 KB) at 0x210000. `nvs` (16 KB at 0x9000), `otadata`
+(0xD000), and `phy_init` (0xF000) keep ESP-IDF's standard places, and
+`ota_1` starts where it does in ESP-IDF's standard two-OTA table. A board
+flashed over USB boots `ota_0`. Since an update may go into either slot,
+an image must fit the smaller one, 0x1F0000 bytes; `make firmware-release`
+refuses a larger image. The release profile and `sdkconfig.defaults` build
+for size so an image fits.
 
 ## What runs on the board
 
@@ -84,6 +96,11 @@ image fits a slot.
   told fail to associate. While the signal is below `wifi_roam_rssi`, it
   scans at most once a minute and moves to an access point at least 8 dB
   stronger. A broker connection asked for while Wi-Fi is down fails at once.
+- **Mesh.** With `mesh_enabled` set and `mesh_ssid` named in the stored
+  configuration at start, Mesh-Lite runs Wi-Fi instead, and a door whose
+  access point is too weak hops through a neighbouring door
+  (`docs/mesh.md`). The choice is made once at start, so a configuration
+  that changes any mesh setting restarts the door.
 - **Broker.** Each connection is an esp-mqtt client: MQTT 3.1.1, QoS 1
   for every publication, subscription, and will, clean session, and TLS
   verified against the provisioned CA unless the broker is configured
@@ -102,9 +119,13 @@ image fits a slot.
 - **Time.** Milliseconds come from `esp_timer`. Unix time comes from SNTP
   against `ntp_server` (default `pool.ntp.org`) and is unknown until the
   first synchronization.
-- **Radio.** The signal is the RSSI of the access point joined, free bytes
-  are the free heap, and the hardware id is the station MAC as 12 lowercase
-  hex digits.
+- **Radio.** The signal is the RSSI of the access point joined (a
+  neighbouring door's soft-AP when hopping through one), free bytes are the
+  free heap, and the hardware id is the station MAC as 12 lowercase hex
+  digits. The mesh layer is Mesh-Lite's level less one, the parent is the
+  soft-AP joined less one as 12 hex digits (an ESP32's soft-AP MAC is its
+  station MAC plus one) below the root, and the children are the stations
+  on the soft-AP; without the mesh they are 0, empty, and 0.
 - **Watchdog.** The main task subscribes to the ESP-IDF task watchdog
   (30 seconds, panic, and a panic reboots). The event queue feeds it on
   every call of `Events::next`, and every five seconds while it waits, so

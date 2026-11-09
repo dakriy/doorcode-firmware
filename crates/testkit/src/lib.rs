@@ -13,8 +13,8 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Radio,
-    Random, Status, StatusReport, Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Mesh,
+    Radio, Random, Status, StatusReport, Storage, Strike,
 };
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
@@ -81,6 +81,7 @@ pub struct StubRadio {
     pub signal_dbm: Option<i32>,
     pub free_bytes: u32,
     pub hardware_id: String,
+    pub mesh: Mesh,
 }
 
 impl Default for StubRadio {
@@ -89,6 +90,7 @@ impl Default for StubRadio {
             signal_dbm: Some(-61),
             free_bytes: 180_000,
             hardware_id: "a1b2c3d4e5f6".to_owned(),
+            mesh: Mesh::default(),
         }
     }
 }
@@ -104,6 +106,10 @@ impl Radio for StubRadio {
 
     fn hardware_id(&self) -> String {
         self.hardware_id.clone()
+    }
+
+    fn mesh(&self) -> Mesh {
+        self.mesh.clone()
     }
 }
 

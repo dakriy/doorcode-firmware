@@ -1,8 +1,7 @@
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ESP_WIFI_MESH_ENABLE=y
 
-# Flash and partitions: 4 MB, two OTA slots of 0x1F0000 (partitions.csv).
+# Flash and partitions: 4 MB, two OTA slots (partitions.csv).
 # ESP-IDF resolves the path from the project esp-idf-sys generates, in
 # target/<target>/<profile>/build/esp-idf-sys-<hash>/out, six levels below
 # this directory.
@@ -22,9 +21,9 @@ CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
 # Brownout detector resets the chip when the supply sags.
 CONFIG_ESP_BROWNOUT_DET=y
 
-# Size: an image must fit the table's 0x1F0000 app slots. newlib's nano
-# printf drops the formatting nothing here uses, and failed ESP-IDF
-# assertions abort without their message text.
+# Size: an image must fit the table's smaller app slot, 0x1F0000 bytes.
+# newlib's nano printf drops the formatting nothing here uses, and failed
+# ESP-IDF assertions abort without their message text.
 CONFIG_NEWLIB_NANO_FORMAT=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
 
@@ -35,3 +34,11 @@ CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
 # checks the signature itself, so the configuration can accept unsigned
 # images on a bench board.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Mesh: Mesh-Lite on the IoT bridge, which forwards between the station
+# and the soft-AP with NAT, so every door keeps its own address. The
+# board's Ethernet port is not a bridge interface.
+CONFIG_MESH_LITE_ENABLE=y
+CONFIG_BRIDGE_EXTERNAL_NETIF_STATION=y
+CONFIG_BRIDGE_DATA_FORWARDING_NETIF_SOFTAP=y
+# CONFIG_BRIDGE_ETHERNET_NETIF_ENABLE is not set

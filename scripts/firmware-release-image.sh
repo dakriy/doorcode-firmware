@@ -4,8 +4,9 @@
 # an app image with esptool's elf2image as ESP-IDF does, checks that the
 # image's app descriptor carries VERSION, appends the signature block with
 # `espsecure sign_data --version 1` and the private KEY, checks the
-# signature with the raw public key PUBLIC, and only then writes OUT, owned
-# by OWNER (uid:gid).
+# signature with the raw public key PUBLIC, refuses a signed image larger
+# than the partition table's smallest app slot, and only then writes OUT,
+# owned by OWNER (uid:gid).
 #
 # Usage: scripts/firmware-release-image.sh VERSION KEY PUBLIC OUT OWNER
 set -eu
@@ -30,7 +31,7 @@ DOORCODE_FIRMWARE_VERSION="$version" cargo build --release
 rm -f "$signed"
 "$idf_python" -m espsecure sign_data --version 1 --keyfile "$key" --output "$signed" "$unsigned"
 
-"$idf_python" - "$version" "$unsigned" "$signed" "$public" <<'PYTHON'
+"$idf_python" - "$version" "$unsigned" "$signed" "$public" "$firmware_partitions" <<'PYTHON'
 """Checks the signed image before it is released."""
 import hashlib
 import sys
@@ -39,7 +40,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.primitives import hashes
 
-version, unsigned_path, signed_path, public_path = sys.argv[1:]
+version, unsigned_path, signed_path, public_path, partitions_path = sys.argv[1:]
 unsigned = open(unsigned_path, "rb").read()
 signed = open(signed_path, "rb").read()
 raw_key = open(public_path, "rb").read()
@@ -69,7 +70,18 @@ try:
     key.verify(utils.encode_dss_signature(r, s), digest, ec.ECDSA(utils.Prehashed(hashes.SHA256())))
 except InvalidSignature:
     sys.exit("the signature does not verify with the public key")
+# An update goes into whichever slot the door is not running, so the
+# signed image, which is what a door writes, must fit the smallest.
+slots = []
+for line in open(partitions_path):
+    fields = [field.strip() for field in line.split("#")[0].split(",")]
+    if len(fields) > 4 and fields[1] == "app":
+        slots.append(int(fields[4], 0))
+slot = min(slots)
+if len(signed) > slot:
+    sys.exit(f"the signed image is {len(signed)} bytes, larger than the smallest app slot ({slot:#x} bytes)")
 print(f"app descriptor version {field}; signature verifies with the public key")
+print(f"{len(signed)} bytes, {slot - len(signed)} below the smallest app slot ({slot:#x} bytes)")
 PYTHON
 
 cp "$signed" "$out"
