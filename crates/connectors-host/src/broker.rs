@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use connectors::{Broker, BrokerAddress, BrokerError, ConnectOptions, Publication};
+use connectors::{Broker, BrokerAddress, BrokerError, ConnectOptions, Event, Publication};
 use rumqttc::{
     AsyncClient, ClientError, Connect, LastWill, Login, MqttOptions, Publish, QoS, Subscribe,
     Transport,
@@ -29,7 +29,29 @@ const MAX_PACKET_BYTES: usize = 268_435_455;
 pub struct MqttBroker {
     events: EventSender,
     traffic: Traffic,
-    session: Mutex<Option<Session>>,
+    session: Arc<Mutex<Option<Session>>>,
+}
+
+/// Drops the connection of an `MqttBroker` from any thread, as a lost
+/// network would.
+#[derive(Debug, Clone)]
+pub struct LinkControl {
+    events: EventSender,
+    session: Arc<Mutex<Option<Session>>>,
+}
+
+impl LinkControl {
+    /// Ends the current connection at once, without DISCONNECT, so the
+    /// broker sends the last will, and reports `Disconnected`. Without a
+    /// connection there is nothing to end.
+    pub fn cut(&self) {
+        let Some(session) = lock(&self.session).take() else {
+            return;
+        };
+        session.link.live.store(false, Ordering::SeqCst);
+        session.abort.notify_one();
+        self.events.push(Event::Disconnected);
+    }
 }
 
 /// Counts MQTT packet bytes to and from the broker, over every connection;
@@ -108,7 +130,15 @@ impl MqttBroker {
         Self {
             events,
             traffic: Traffic::default(),
-            session: Mutex::default(),
+            session: Arc::default(),
+        }
+    }
+
+    /// A handle that drops this broker's connection.
+    pub fn link(&self) -> LinkControl {
+        LinkControl {
+            events: self.events.clone(),
+            session: Arc::clone(&self.session),
         }
     }
 

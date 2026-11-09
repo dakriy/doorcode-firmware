@@ -114,7 +114,7 @@ struct Door {
 /// Opens or closes the door: the sensor sees it, and reports the change.
 fn door(device: &Device, body: &str) -> Result<Value, Failure> {
     let Door { open } = parse(body)?;
-    device.door.control().set_open(open);
+    device.board.door.control().set_open(open);
     device.live.push(Event::Door { open })?;
     Ok(done())
 }
@@ -130,7 +130,7 @@ struct RadioFacts {
 /// Sets what the radio reports.
 fn radio(device: &Device, body: &str) -> Result<Value, Failure> {
     let facts: RadioFacts = parse(body)?;
-    let control = device.radio.control();
+    let control = device.board.radio.control();
     control.set_signal_dbm(facts.signal);
     control.set_free_bytes(facts.free_bytes);
     Ok(done())
@@ -144,14 +144,14 @@ fn restart(device: &Device, _body: &str) -> Result<Value, Failure> {
 
 /// The door's state now.
 fn state(device: &Device, _body: &str) -> Result<Value, Failure> {
-    let storage = device.storage();
+    let storage = device.board.storage();
     let mut state = device.live.json();
     state["config"] = stored_message(&storage, "config");
     state["timeline"] = stored_message(&storage, "timeline");
-    state["door_open"] = device.door.is_open().into();
-    state["signal"] = device.radio.signal_dbm().into();
-    state["free_bytes"] = device.radio.free_bytes().into();
-    state["hardware_id"] = device.radio.hardware_id().into();
+    state["door_open"] = device.board.door.is_open().into();
+    state["signal"] = device.board.radio.signal_dbm().into();
+    state["free_bytes"] = device.board.radio.free_bytes().into();
+    state["hardware_id"] = device.board.radio.hardware_id().into();
     Ok(state)
 }
 

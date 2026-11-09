@@ -5,8 +5,10 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use connectors::{ConnectionState, Event, Mode, Phase, ReceivedReply, SentCheck, StatusReport};
-use connectors_host::{EventSender, HostStatus, Traffic};
+use connectors_host::HostStatus;
 use serde_json::{json, Value};
+
+use crate::desktop::Handles;
 
 /// What the control API reads, shared between the application thread and
 /// the control API.
@@ -14,15 +16,7 @@ use serde_json::{json, Value};
 pub(crate) struct Live {
     /// Where every run of the application reports its status.
     pub(crate) status: HostStatus,
-    run: Mutex<Option<Run>>,
-}
-
-/// The handles of the connectors one run of the application uses.
-#[derive(Debug, Clone)]
-pub(crate) struct Run {
-    pub(crate) events: EventSender,
-    pub(crate) traffic: Traffic,
-    pub(crate) firmware_version: String,
+    run: Mutex<Option<Handles>>,
 }
 
 /// Why an event could not be pushed.
@@ -30,13 +24,13 @@ pub(crate) struct Run {
 pub(crate) struct NotRunning;
 
 impl Live {
-    fn run(&self) -> MutexGuard<'_, Option<Run>> {
+    fn run(&self) -> MutexGuard<'_, Option<Handles>> {
         self.run.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// A run of the application begins with these connectors.
-    pub(crate) fn begin(&self, run: Run) {
-        *self.run() = Some(run);
+    pub(crate) fn begin(&self, handles: Handles) {
+        *self.run() = Some(handles);
     }
 
     /// Pushes `event` into the event queue of the current run.

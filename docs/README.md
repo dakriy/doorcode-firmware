@@ -10,4 +10,4 @@ live outside the repository.
   that checks it.
 - `host.md`: the desktop host binary, its flags, and its control API.
 - `testing.md`: the integration test that runs a desktop door against a
-  development server.
+  development server, and the load tool that runs many.

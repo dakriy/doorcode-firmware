@@ -154,9 +154,9 @@ Tool installation on a fresh machine (none needs root):
 | Connector interfaces | `crates/connectors/src/lib.rs` |
 | Connector implementations | `crates/connectors-host/src` (desktop), `firmware/src` (ESP32) |
 | Connector factory interface | `connectors::Connectors` in `crates/connectors/src/lib.rs` |
-| Production wiring | `crates/host/src/main.rs` (desktop binary `doorcode-host`), `firmware/src/main.rs` (ESP32) |
+| Production wiring | `crates/host/src/main.rs` (desktop binary `doorcode-host`; `crates/host/src/desktop.rs` builds one desktop door's connectors), `crates/swarm/src` (load tool `doorcode-swarm`, with its report library), `firmware/src/main.rs` (ESP32) |
 | Entrypoint suite | `crates/app/tests` |
-| Connector suite, and how a test is marked slow | `crates/connectors-host/tests`; a slow test carries `#[ignore = "slow"]` and runs only under `cargo test -- --ignored` |
+| Connector suite, and how a test is marked slow | `crates/connectors-host/tests`, `crates/host/tests`, `crates/swarm/tests`; a slow test carries `#[ignore = "slow"]` and runs only under `cargo test -- --ignored` |
 | Test support, stubs, and the stub factory | `crates/testkit/src/lib.rs`: `StubConnectors` and one `Stub*` per connector |
 
 The entry function and how tests pass it the stub factory:
@@ -215,21 +215,21 @@ Firmware commands: `make firmware-build`, `make firmware-check`,
   `rust-code-analysis-cli`; cognitive from clippy as a second check
 - Application code, per function, each metric: 15
 - Connector code, per function, each metric: 5 (`crates/connectors-host`,
-  `crates/host`, `firmware`)
+  `crates/host`, `crates/swarm`, `firmware`)
 
 ## Effect packages
 
 Standard-library and third-party packages application code may not import
 because they perform I/O or read nondeterministic state.
 
-- Crates: `connectors-host`, `host`, `testkit`, `doorcode-firmware`
+- Crates: `connectors-host`, `host`, `swarm`, `testkit`, `doorcode-firmware`
   (implementations, wiring, test support)
 - Effect crates, denied by name in `scripts/check-imports.sh`: `tokio`,
   `async-std`, `smol`, `reqwest`, `hyper`, `ureq`, `rumqttc`, `rustls`,
   `rcgen`, `rusqlite`, `sqlx`,
   `diesel`, `rand`, `getrandom`, `fastrand`, `uuid`, `chrono`, `time`,
   `esp-idf-svc`, `esp-idf-hal`, `esp-idf-sys`, `embedded-svc`, `tempfile`,
-  `tiny_http`
+  `tiny_http`, `ctrlc`
 - Standard-library modules, denied by path in `scripts/check-imports.sh`:
   `std::fs`, `std::net`, `std::env`, `std::process`, `std::thread`,
   `std::time`, `std::io::stdin`, `std::io::stdout`, `std::io::stderr`

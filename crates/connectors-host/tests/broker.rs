@@ -371,3 +371,36 @@ fn connecting_again_replaces_the_connection_with_a_working_one() {
     assert_eq!(client.next(), Event::Connected);
     client.subscribed("test/door-1/after");
 }
+
+#[test]
+#[ignore = "slow"]
+fn cutting_the_link_reports_disconnected_and_the_broker_sends_the_will() {
+    let mosquitto = open_mosquitto();
+    let server = Client::connected(&mosquitto, "server");
+    server.subscribed("test/door-1/online");
+    let door = Client::connected(&mosquitto, "door-1");
+
+    door.broker.link().cut();
+
+    assert_eq!(
+        (door.next(), server.next_besides_deliveries()),
+        (
+            Event::Disconnected,
+            message("test/door-1/online", b"offline")
+        )
+    );
+}
+
+#[test]
+#[ignore = "slow"]
+fn connecting_again_after_a_cut_gives_a_working_connection() {
+    let mosquitto = open_mosquitto();
+    let client = Client::connected(&mosquitto, "door-1");
+    client.broker.link().cut();
+    assert_eq!(client.next(), Event::Disconnected);
+
+    client.broker.connect(&plain(&mosquitto, "door-1")).unwrap();
+
+    assert_eq!(client.next(), Event::Connected);
+    client.subscribed("test/door-1/after");
+}

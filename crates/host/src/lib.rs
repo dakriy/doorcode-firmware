@@ -6,6 +6,7 @@
 //! what the door does; the application does.
 
 mod api;
+pub mod desktop;
 mod identity;
 mod image;
 mod live;

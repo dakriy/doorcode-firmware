@@ -1,0 +1,30 @@
+[package]
+name = "swarm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "A load tool that runs many desktop doors against a doorcode server and reports how the server keeps up."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "doorcode-swarm"
+path = "src/main.rs"
+
+[dependencies]
+connectors.workspace = true
+connectors-host.workspace = true
+ctrlc = "3.4"
+host = { path = "../host" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+ureq = { version = "3.5", default-features = false, features = ["rustls", "platform-verifier"] }
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

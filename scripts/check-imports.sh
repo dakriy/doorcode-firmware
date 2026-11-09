@@ -29,9 +29,9 @@ for crate in app protocol; do
     for dep in $deps; do
         case "$dep" in
             connectors|protocol) ;;
-            connectors-host|host|testkit|firmware|doorcode-firmware)
+            connectors-host|host|swarm|testkit|firmware|doorcode-firmware)
                 fail "$crate depends on '$dep' (connector implementation, wiring, or test support)" ;;
-            tokio|async-std|smol|reqwest|hyper|ureq|rumqttc|rustls|rcgen|rusqlite|sqlx|diesel|rand|getrandom|fastrand|uuid|chrono|time|esp-idf-svc|esp-idf-hal|esp-idf-sys|embedded-svc|tempfile|tiny_http|std-io)
+            tokio|async-std|smol|reqwest|hyper|ureq|rumqttc|rustls|rcgen|rusqlite|sqlx|diesel|rand|getrandom|fastrand|uuid|chrono|time|esp-idf-svc|esp-idf-hal|esp-idf-sys|embedded-svc|tempfile|tiny_http|ctrlc|std-io)
                 fail "$crate depends on effect crate '$dep'" ;;
         esac
     done

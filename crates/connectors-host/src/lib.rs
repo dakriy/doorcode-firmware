@@ -14,7 +14,7 @@ mod radio;
 mod random;
 mod status;
 
-pub use broker::{MqttBroker, Traffic};
+pub use broker::{LinkControl, MqttBroker, Traffic};
 pub use clock::SystemClock;
 pub use door::{DoorControl, HostDoorSensor, HostStrike};
 pub use download::HostDownload;

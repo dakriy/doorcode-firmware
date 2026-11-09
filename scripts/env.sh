@@ -10,4 +10,4 @@ export LLVM_PROFDATA="${LLVM_PROFDATA:-/usr/bin/llvm-profdata}"
 APPLICATION_SRC="crates/app/src crates/protocol/src"
 # Everything the coverage report ignores: connector interfaces, test support,
 # connector implementations, production wiring, tests, and the cargo registry.
-COVERAGE_IGNORE='(crates/(connectors|testkit|connectors-host|host)/|/tests/|/\.cargo/registry/|/rustc/)'
+COVERAGE_IGNORE='(crates/(connectors|testkit|connectors-host|host|swarm)/|/tests/|/\.cargo/registry/|/rustc/)'
