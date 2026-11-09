@@ -1,8 +1,8 @@
 //! The Wi-Fi network while the mesh is on: Mesh-Lite on the IoT bridge.
 //!
-//! Every door runs a station and a soft-AP named `mesh_ssid`. Mesh-Lite
-//! joins the strongest access point of the configured SSID while its
-//! signal is at least `mesh_min_router_rssi`, and the door is then a root
+//! Every door runs a station and a hidden soft-AP named `mesh_ssid`.
+//! Mesh-Lite joins the strongest access point of the configured SSID while
+//! its signal is at least `mesh_min_router_rssi`, and the door is then a root
 //! that offers the mesh to others; otherwise it joins a neighbouring
 //! door's soft-AP, at most `mesh_max_layer` hops from the access point.
 //! The bridge hands out addresses on each soft-AP and forwards with NAT,
@@ -94,11 +94,29 @@ fn bring_up(settings: &MeshSettings, router: &Credentials) -> Result<(), EspErro
     sys::esp!(unsafe { sys::esp_netif_init() })?;
     // SAFETY: as above, after the network interfaces are initialized.
     unsafe { mesh_lite::esp_bridge_create_all_netif() };
+    configure_soft_ap(&settings.network)?;
     initialize(settings)?;
     configure_router(router)?;
     // SAFETY: takes no arguments; Mesh-Lite is initialized and configured.
     unsafe { mesh_lite::esp_mesh_lite_start() };
     Ok(())
+}
+
+/// Names the bridge's soft-AP and hides it: its beacons leave the name
+/// out, and it answers only probes that ask for the name, as a door
+/// looking for a parent does. The bridge adds the connection limit and
+/// WPA2.
+fn configure_soft_ap(network: &Credentials) -> Result<(), EspError> {
+    let mut soft_ap = mesh_lite::wifi_ap_config_t {
+        ssid_hidden: 1,
+        ..Default::default()
+    };
+    copy_text(&mut soft_ap.ssid, &network.ssid)?;
+    copy_text(&mut soft_ap.password, &network.password)?;
+    let mut config = mesh_lite::wifi_config_t { ap: soft_ap };
+    let interface = mesh_lite::wifi_interface_t_WIFI_IF_AP;
+    // SAFETY: the configuration is owned here and outlives the call.
+    sys::esp!(unsafe { mesh_lite::esp_bridge_wifi_set_config(interface, &mut config) })
 }
 
 /// Initializes Mesh-Lite with the settings' soft-AP, deepest level, and

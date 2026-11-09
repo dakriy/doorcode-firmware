@@ -15,7 +15,7 @@ The mesh is configured per door, in the configuration message:
 | --- | --- | --- |
 | `mesh_enabled` | `false` | Whether the door may join or offer the mesh. |
 | `mesh_ssid` | empty | The name of every door's soft-AP; the mesh is off while it is empty. |
-| `mesh_password` | empty | The soft-AP's WPA2 password, 8 to 63 characters. |
+| `mesh_password` | empty | The soft-AP's WPA2 password, 8 to 63 characters; a shorter one leaves the soft-AP open. |
 | `mesh_min_router_rssi` | -75 | Below this signal, in dBm, the door joins another door rather than the access point. |
 | `mesh_max_layer` | 4 | The most hops from the access point a door may sit at. |
 
@@ -55,6 +55,26 @@ With the mesh on:
 Mesh-Lite recovers on its own when a parent door goes away: the doors below
 it look for another parent or, if their access point is strong enough
 again, join it.
+
+## Hidden network
+
+Every door's soft-AP is hidden, always; no setting shows it. Its beacons
+leave the name out, so phones and laptops in the building do not list the
+mesh among the networks they offer to join. A door looking for a parent
+already knows `mesh_ssid`: Mesh-Lite finds the doors of its mesh by their
+beacons, joins by name with probes that ask for it, and remembers the
+parent it joined.
+
+Hiding the name keeps the mesh out of everyday network lists, and nothing
+more. It is not access control:
+
+- The beacons still go out, carrying the soft-AP's MAC address and
+  Mesh-Lite's own information, so a Wi-Fi scanner sees that a network is
+  there and which door offers it.
+- A door's probes for a parent carry `mesh_ssid` in the clear, and so does
+  the soft-AP's answer, so anyone listening nearby learns the name.
+- What keeps others off the mesh is WPA2 with `mesh_password`, so give
+  every site a long random one.
 
 ## Telemetry
 

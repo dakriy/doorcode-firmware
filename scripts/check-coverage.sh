@@ -13,6 +13,14 @@ budget="${FAST_BUDGET_SECONDS:-10}"
 # uninstrumented test binaries never mix into the report.
 export CARGO_TARGET_DIR="$PWD/target/coverage"
 
+# Profiles from earlier runs and test binaries from before a dependency
+# change are read alongside this run's and fail the report with mismatched
+# data, so both are removed first. Proc-macro libraries are kept.
+deps="$CARGO_TARGET_DIR/debug/deps"
+if [ -d "$CARGO_TARGET_DIR" ]; then
+    find "$CARGO_TARGET_DIR" -type f \( -name '*.profraw' -o \
+        \( -path "$deps/*" -perm -u+x ! -name '*.so' \) \) -delete
+fi
 cargo llvm-cov clean --workspace
 eval "$(cargo llvm-cov show-env --sh)"
 
