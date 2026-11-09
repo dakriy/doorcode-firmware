@@ -45,13 +45,14 @@ impl<'a> Device<'a> {
     }
 
     /// Publishes `payload`, not retained, on the topic of door `door_id`
-    /// that ends in `leaf`.
+    /// that ends in `leaf`, and returns the number its acknowledgement
+    /// will quote.
     pub(crate) fn publish(
         &self,
         door_id: u64,
         leaf: &str,
         payload: Vec<u8>,
-    ) -> Result<(), BrokerError> {
+    ) -> Result<u16, BrokerError> {
         let publication = Publication {
             topic: protocol::door_topic(door_id, leaf),
             payload,

@@ -39,6 +39,8 @@ pub const LEAF_CHECK: &str = "check";
 pub const LEAF_TELEMETRY: &str = "telemetry";
 /// The last level of the topic a door says it opened or closed on.
 pub const LEAF_EVENT: &str = "event";
+/// The last level of the topic a door answers its commands on.
+pub const LEAF_ACK: &str = "ack";
 
 /// The topic of door `door_id` that ends in `leaf`.
 pub fn door_topic(door_id: u64, leaf: &str) -> String {
@@ -516,6 +518,102 @@ impl DoorEvent {
     pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
         let mut message = Self::default();
         let read = cbor::read_map(bytes, &mut [("event", Slot::Text(&mut message.event))]);
+        read.map(|()| message)
+    }
+}
+
+/// The command that releases the strike.
+pub const COMMAND_OPEN: &str = "open";
+/// The command that hands the door new broker credentials.
+pub const COMMAND_CREDENTIALS: &str = "credentials";
+/// The command that installs other firmware.
+pub const COMMAND_UPDATE: &str = "update";
+/// The command that restarts the controller.
+pub const COMMAND_REBOOT: &str = "reboot";
+
+/// What the server tells a door to do, named by `command`. Only the fields
+/// of that command are sent: `strike_ms` for `open`, `username` and
+/// `token` for `credentials`, and `version`, `sha256`, and `url` for
+/// `update`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Command {
+    /// Quoted in the ack.
+    pub id: String,
+    pub command: String,
+    pub strike_ms: u64,
+    pub username: String,
+    pub token: String,
+    pub version: String,
+    pub sha256: String,
+    pub url: String,
+}
+
+impl Command {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut map = MapWriter::new();
+        map.text("id", &self.id);
+        map.text("command", &self.command);
+        map.uint_unless_zero("strike_ms", self.strike_ms);
+        map.text_unless_empty("username", &self.username);
+        map.text_unless_empty("token", &self.token);
+        map.text_unless_empty("version", &self.version);
+        map.text_unless_empty("sha256", &self.sha256);
+        map.text_unless_empty("url", &self.url);
+        map.finish()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut message = Self::default();
+        let read = cbor::read_map(
+            bytes,
+            &mut [
+                ("id", Slot::Text(&mut message.id)),
+                ("command", Slot::Text(&mut message.command)),
+                ("strike_ms", Slot::Uint(&mut message.strike_ms)),
+                ("username", Slot::Text(&mut message.username)),
+                ("token", Slot::Text(&mut message.token)),
+                ("version", Slot::Text(&mut message.version)),
+                ("sha256", Slot::Text(&mut message.sha256)),
+                ("url", Slot::Text(&mut message.url)),
+            ],
+        );
+        read.map(|()| message)
+    }
+}
+
+/// The result of a command the door carried out.
+pub const ACK_DONE: &str = "done";
+/// The result of a command the door could not carry out.
+pub const ACK_FAILED: &str = "failed";
+
+/// A door's answer to the command with `id`: `done` or `failed`, and why
+/// in a few words.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Ack {
+    pub id: String,
+    pub result: String,
+    pub detail: String,
+}
+
+impl Ack {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut map = MapWriter::new();
+        map.text("id", &self.id);
+        map.text("result", &self.result);
+        map.text_unless_empty("detail", &self.detail);
+        map.finish()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut message = Self::default();
+        let read = cbor::read_map(
+            bytes,
+            &mut [
+                ("id", Slot::Text(&mut message.id)),
+                ("result", Slot::Text(&mut message.result)),
+                ("detail", Slot::Text(&mut message.detail)),
+            ],
+        );
         read.map(|()| message)
     }
 }

@@ -7,7 +7,7 @@ use connectors::{Event, Level};
 use pretty_assertions::assert_eq;
 use protocol::{Check, Config, Reply, Span, Timeline};
 use testkit::{
-    config_for, door_connection_to, door_message, door_online_status, hex, reply_for, timeline_for,
+    config_for, door_coming_online, door_connection_to, door_message, hex, reply_for, timeline_for,
     typed, BrokerCall, Message, Sent, StrikeCall, StubBroker, StubConnectors, StubDoorSensor,
     StubEvents, StubRandom, StubStorage,
 };
@@ -112,17 +112,10 @@ fn mode_at(timeline: &Timeline, unix_seconds: i64) -> Mode {
     app::run(&StubConnectors::enrolled(events)).unwrap().mode
 }
 
-/// What door 7 asks of the broker to come online.
-fn door_coming_online() -> Vec<BrokerCall> {
-    let subscription = |leaf: &str| BrokerCall::Subscribe(format!("doorcode/doors/7/{leaf}"));
-    vec![
-        BrokerCall::Connect(door_connection_to("broker.example.org")),
-        subscription("config"),
-        subscription("timeline"),
-        subscription("reply"),
-        subscription("command"),
-        BrokerCall::Publish(door_online_status()),
-    ]
+/// What door 7 asks of the broker to connect and come online.
+fn door_connecting_and_coming_online() -> Vec<BrokerCall> {
+    let connection = BrokerCall::Connect(door_connection_to("broker.example.org"));
+    [vec![connection], door_coming_online()].concat()
 }
 
 #[test]
@@ -627,7 +620,7 @@ fn inside_an_open_span_any_key_releases_the_strike_for_the_pulse_and_asks_nothin
         (
             released_until(3010),
             vec![StrikeCall::Release, StrikeCall::Release],
-            door_coming_online()
+            door_connecting_and_coming_online()
         )
     );
 }

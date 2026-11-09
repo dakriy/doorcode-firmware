@@ -11,7 +11,6 @@ use crate::Counters;
 /// How long after the online status the first report goes out.
 pub(crate) const FIRST_REPORT_AFTER_MS: u64 = 1000;
 
-#[derive(Default)]
 pub(crate) struct Tally {
     /// Connections since the door started; each after the first is a
     /// reconnect.
@@ -21,6 +20,20 @@ pub(crate) struct Tally {
 }
 
 impl Tally {
+    /// Counting on from `connections` the door made before, as another
+    /// door it was until revoked.
+    pub(crate) fn after(connections: u64) -> Tally {
+        Tally {
+            connections,
+            opens: 0,
+        }
+    }
+
+    /// Connections since the controller started.
+    pub(crate) fn connections(&self) -> u64 {
+        self.connections
+    }
+
     pub(crate) fn connected(&mut self) {
         self.connections += 1;
     }
@@ -53,7 +66,7 @@ impl Tally {
             opens: counters.opens,
         };
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
-            Ok(()) => self.opens = 0,
+            Ok(_) => self.opens = 0,
             Err(error) => device.log(Level::Warn, &format!("telemetry was not sent: {error}")),
         }
     }

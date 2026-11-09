@@ -1,12 +1,15 @@
 //! Serving as the door: connecting with the door's own credentials,
-//! following the configuration and timeline the server sends, and going
-//! back to enrolling when the broker no longer accepts the credentials.
+//! following the configuration and timeline the server sends, obeying its
+//! commands, handing over to new credentials, and going back to enrolling
+//! when the broker no longer accepts the credentials.
 
 use connectors::{BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication};
 use protocol::{Config, Credentials, DecodeError, Online, Timeline};
 
 use crate::access::{Gate, Situation};
+use crate::command::{self, Order, PendingRestart};
 use crate::device::Device;
+use crate::rotation::Rotation;
 use crate::telemetry::{self, Tally};
 use crate::{enrollment, stored, timeline, ConnectionState, Mode, Phase, RunError, RunReport};
 
@@ -22,7 +25,10 @@ const SUBSCRIBED: [&str; 4] = [
 ];
 
 pub(crate) struct Door {
+    /// The credentials known to work.
     credentials: Credentials,
+    /// The hand-over to new credentials under way, if any.
+    rotation: Option<Rotation>,
     /// The broker to connect to; the configuration can move it.
     broker: BrokerAddress,
     config: Config,
@@ -32,6 +38,9 @@ pub(crate) struct Door {
     failures: u32,
     gate: Gate,
     tally: Tally,
+    /// The restart a reboot command asked for, waiting for its ack to be
+    /// acknowledged.
+    restart: Option<PendingRestart>,
 }
 
 enum Link {
@@ -63,12 +72,17 @@ impl Link {
 }
 
 /// Starts serving as the door with the configuration and timeline stored
-/// from the last time, and connects.
+/// from the last time, and connects: with the new credentials when a
+/// hand-over was under way. `connections` counts the door connections the
+/// controller made before, as the door it was until revoked.
 pub(crate) fn start(
     device: &Device<'_>,
     credentials: Credentials,
     broker: BrokerAddress,
+    connections: u64,
 ) -> Result<Door, RunError> {
+    let storage = device.connectors.storage();
+    let next = stored::next_credentials(storage, credentials.door_id)?;
     let config = restored(device, stored::CONFIG, Config::decode)?;
     let timeline = restored(device, stored::TIMELINE, Timeline::decode)?;
     device
@@ -77,13 +91,15 @@ pub(crate) fn start(
         .set_level(log_level(&config.log_level));
     let door = Door {
         credentials,
+        rotation: next.map(|next| Rotation::to(next).tried()),
         broker,
         config,
         timeline,
         link: Link::Connecting,
         failures: 0,
         gate: Gate::default(),
-        tally: Tally::default(),
+        tally: Tally::after(connections),
+        restart: None,
     };
     Ok(door.connect(device))
 }
@@ -125,6 +141,8 @@ impl Door {
             self.link.reconnect_at(),
             self.link.report_at(),
             self.gate.due_at(&self.config),
+            self.retry_at(),
+            self.restart_at(),
         ];
         let soonest = due_at.into_iter().flatten().min()?;
         Some(soonest.saturating_sub(now_ms))
@@ -140,7 +158,7 @@ impl Door {
     ) -> Result<Phase, RunError> {
         let mut door = self.when_due(device);
         let door = match event {
-            Some(Event::Connected) => door.come_online(device),
+            Some(Event::Connected) => door.come_online(device)?,
             Some(Event::Disconnected) => door.pause(device, "connection lost"),
             Some(Event::Refused { code }) => return door.refused(device, code),
             Some(Event::Message(message)) => door.receive(device, &message)?,
@@ -152,6 +170,7 @@ impl Door {
                 door.door_moved(device, open);
                 door
             }
+            Some(Event::Delivered { message_id }) => door.delivered(device, message_id),
             // The wait ran out. `Stop` ends the loop before it gets here.
             None | Some(Event::Stop) => door,
         };
@@ -177,16 +196,53 @@ impl Door {
     }
 
     /// Connects again once the pause is over, reports telemetry when it is
-    /// time, and lets the keypad side catch up with the time.
+    /// time, lets the keypad side catch up with the time, restarts once a
+    /// reboot has waited long enough, and tries new credentials again.
     fn when_due(mut self, device: &Device<'_>) -> Door {
         self.gate.expire(device, &self.config);
         if device.is_due(self.link.report_at()) {
             self.report_telemetry(device);
         }
+        if device.is_due(self.restart_at()) {
+            device.log(
+                Level::Warn,
+                "the ack of the reboot was not acknowledged in time",
+            );
+            self.restart = None;
+            command::restart(device);
+        }
+        if device.is_due(self.retry_at()) {
+            return self.hand_over(device);
+        }
         if device.is_due(self.link.reconnect_at()) {
             return self.connect(device);
         }
         self
+    }
+
+    /// When the new credentials are tried again, while the old ones serve.
+    fn retry_at(&self) -> Option<u64> {
+        self.rotation
+            .as_ref()
+            .and_then(|rotation| rotation.retry_at)
+    }
+
+    /// When a reboot restarts without the acknowledgement of its ack.
+    fn restart_at(&self) -> Option<u64> {
+        self.restart.as_ref().map(|restart| restart.deadline)
+    }
+
+    /// Restarts when the broker acknowledges the ack of a reboot.
+    fn delivered(self, device: &Device<'_>, message_id: u16) -> Door {
+        let awaited = self.restart.as_ref();
+        if !awaited.is_some_and(|restart| restart.acknowledged_by(message_id)) {
+            return self;
+        }
+        command::restart(device);
+        Door {
+            restart: None,
+            ..self
+        }
     }
 
     /// Reports telemetry, and the next report one interval later.
@@ -242,17 +298,26 @@ impl Door {
         }
     }
 
+    /// The credentials the connection asked for or held uses.
+    fn pair(&self) -> &Credentials {
+        match &self.rotation {
+            Some(rotation) if rotation.trying => &rotation.next,
+            _ => &self.credentials,
+        }
+    }
+
     fn connect_options(&self, device: &Device<'_>) -> ConnectOptions {
+        let pair = self.pair();
         // Offline, with the username so the server can tell a stale will apart.
         let will = Online {
-            username: self.credentials.username.clone(),
+            username: pair.username.clone(),
             ..Online::default()
         };
         ConnectOptions {
             address: self.broker.clone(),
             client_id: device.hardware_id.clone(),
-            username: self.credentials.username.clone(),
-            password: self.credentials.token.clone(),
+            username: pair.username.clone(),
+            password: pair.token.clone(),
             keep_alive_s: u16::try_from(self.config.keepalive_s).unwrap_or(u16::MAX),
             will: self.status(&will),
         }
@@ -261,18 +326,52 @@ impl Door {
     /// Subscribes first, so the retained configuration and timeline arrive
     /// whatever happens to the online status.
     /// The first telemetry report follows the online status shortly.
-    fn come_online(mut self, device: &Device<'_>) -> Door {
+    fn come_online(mut self, device: &Device<'_>) -> Result<Door, RunError> {
         self.tally.connected();
-        match self.subscribe_and_publish_online(device) {
-            Ok(()) => Door {
-                link: Link::Online {
-                    report_at: device.now_ms() + telemetry::FIRST_REPORT_AFTER_MS,
-                },
-                failures: 0,
-                ..self
-            },
-            Err(error) => self.pause(device, &error.to_string()),
+        if let Err(error) = self.subscribe_and_publish_online(device) {
+            return Ok(self.pause(device, &error.to_string()));
         }
+        let door = Door {
+            link: Link::Online {
+                report_at: device.now_ms() + telemetry::FIRST_REPORT_AFTER_MS,
+            },
+            failures: 0,
+            ..self
+        };
+        door.settle_rotation(device)
+    }
+
+    /// Online with the new credentials, forgets the old ones; online with
+    /// the old ones, tries the new ones again after the reconnect backoff
+    /// for the times in a row they were refused.
+    fn settle_rotation(mut self, device: &Device<'_>) -> Result<Door, RunError> {
+        let Some(rotation) = self.rotation.take() else {
+            return Ok(self);
+        };
+        if rotation.trying {
+            stored::promote_next_credentials(device.connectors.storage(), &rotation.next)?;
+            device.log(
+                Level::Info,
+                &format!(
+                    "connected as {}; the old credentials are forgotten",
+                    rotation.next.username
+                ),
+            );
+            return Ok(Door {
+                credentials: rotation.next,
+                ..self
+            });
+        }
+        let retry_ms = self.backoff_ms(device, rotation.refusals);
+        device.log(
+            Level::Info,
+            &format!("trying the new credentials again in {retry_ms} ms"),
+        );
+        let retry_at = device.now_ms() + retry_ms;
+        Ok(Door {
+            rotation: Some(rotation.retried_at(retry_at)),
+            ..self
+        })
     }
 
     fn subscribe_and_publish_online(&self, device: &Device<'_>) -> Result<(), BrokerError> {
@@ -282,11 +381,12 @@ impl Door {
         }
         let online = Online {
             online: true,
-            username: self.credentials.username.clone(),
+            username: self.pair().username.clone(),
             firmware_version: device.firmware_version(),
             signal: device.signal_dbm(),
         };
-        broker.publish(&self.status(&online))
+        broker.publish(&self.status(&online))?;
+        Ok(())
     }
 
     /// The online status, or the last will standing in for it, retained on
@@ -299,15 +399,10 @@ impl Door {
         }
     }
 
-    /// Pauses for 1, 2, 4 ... seconds after each failure in a row, up to
-    /// `reconnect_max_s`, plus up to a quarter more at random so doors that
-    /// lost the broker together do not come back together.
+    /// Pauses for the backoff after one more failure in a row.
     fn pause(self, device: &Device<'_>, reason: &str) -> Door {
         let failures = self.failures + 1;
-        let cap_s = self.config.reconnect_max_s.max(1);
-        let base_s = (1u64 << (failures - 1).min(32)).min(cap_s);
-        let base_ms = base_s * 1000;
-        let pause_ms = base_ms + random_u32(device) % (base_ms / 4);
+        let pause_ms = self.backoff_ms(device, failures);
         device.log(
             Level::Warn,
             &format!("not connected ({reason}); connecting again in {pause_ms} ms"),
@@ -321,11 +416,41 @@ impl Door {
         }
     }
 
+    /// The pause after `failures` in a row: 1, 2, 4 ... seconds up to
+    /// `reconnect_max_s`, plus up to a quarter more at random so doors that
+    /// lost the broker together do not come back together.
+    fn backoff_ms(&self, device: &Device<'_>, failures: u32) -> u64 {
+        let cap_s = self.config.reconnect_max_s.max(1);
+        let base_s = (1u64 << failures.saturating_sub(1).min(32)).min(cap_s);
+        let base_ms = base_s * 1000;
+        base_ms + random_u32(device) % (base_ms / 4)
+    }
+
+    /// A refusal as not authorized means the credentials are revoked, unless
+    /// a hand-over is under way and the other pair was not refused just
+    /// before: then the other pair is tried at once.
     fn refused(mut self, device: &Device<'_>, code: u8) -> Result<Phase, RunError> {
         if !REVOKED_CODES.contains(&code) {
             let door = self.pause(device, &format!("refused with code {code}"));
             return Ok(Phase::Door(Box::new(door)));
         }
+        let refused = format!(
+            "the broker refused the credentials of {}",
+            self.pair().username
+        );
+        if let Some(rotation) = self.rotation.take().and_then(Rotation::switched) {
+            device.log(Level::Warn, &format!("{refused}; trying the other ones"));
+            let door = Door {
+                rotation: Some(rotation),
+                ..self
+            };
+            return Ok(Phase::Door(Box::new(door.connect(device))));
+        }
+        self.revoked(device)
+    }
+
+    /// Forgets the door and enrolls again.
+    fn revoked(mut self, device: &Device<'_>) -> Result<Phase, RunError> {
         self.gate.lock(device);
         stored::forget_door(device.connectors.storage())?;
         device.log(
@@ -335,7 +460,48 @@ impl Door {
                 self.credentials.door_id
             ),
         );
-        Ok(Phase::Enrolling(enrollment::start(device, self.broker)))
+        let connections = self.tally.connections();
+        Ok(Phase::Enrolling(enrollment::start(
+            device,
+            self.broker,
+            connections,
+        )))
+    }
+
+    /// Stores the new credentials beside the old and hands over to them.
+    fn rotate_to(self, device: &Device<'_>, next: Credentials) -> Result<Door, RunError> {
+        stored::store_next_credentials(device.connectors.storage(), &next)?;
+        device.log(
+            Level::Info,
+            &format!("handing over to the credentials of {}", next.username),
+        );
+        let door = Door {
+            rotation: Some(Rotation::to(next)),
+            ..self
+        };
+        Ok(door.hand_over(device))
+    }
+
+    /// Closes the connection cleanly and connects with the new credentials.
+    fn hand_over(self, device: &Device<'_>) -> Door {
+        if let Err(error) = device.connectors.broker().disconnect() {
+            device.log(Level::Warn, &error.to_string());
+        }
+        let door = Door {
+            rotation: self.rotation.map(Rotation::tried),
+            ..self
+        };
+        door.connect(device)
+    }
+
+    fn command(mut self, device: &Device<'_>, payload: &[u8]) -> Result<Door, RunError> {
+        match command::receive(device, self.credentials.door_id, payload) {
+            Order::Open { strike_ms } => self.gate.open(device, strike_ms, &self.config),
+            Order::Rotate(next) => return self.rotate_to(device, next),
+            Order::Restart(pending) => self.restart = Some(pending),
+            Order::Nothing => {}
+        }
+        Ok(self)
     }
 
     fn receive(mut self, device: &Device<'_>, message: &Incoming) -> Result<Door, RunError> {
@@ -348,6 +514,9 @@ impl Door {
         }
         if message.topic == self.topic(protocol::LEAF_TIMELINE) {
             return self.receive_timeline(device, &message.payload);
+        }
+        if message.topic == self.topic(protocol::LEAF_COMMAND) {
+            return self.command(device, &message.payload);
         }
         device.log(
             Level::Debug,

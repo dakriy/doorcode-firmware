@@ -25,8 +25,8 @@ impl Broker for OfflineBroker {
         Ok(())
     }
 
-    fn publish(&self, _publication: &Publication) -> Result<(), BrokerError> {
-        Ok(())
+    fn publish(&self, _publication: &Publication) -> Result<u16, BrokerError> {
+        Ok(0)
     }
 
     fn disconnect(&self) -> Result<(), BrokerError> {

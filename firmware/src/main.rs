@@ -5,8 +5,8 @@ mod nvs_storage;
 mod placeholders;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Storage,
-    Strike,
+    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Restart,
+    Storage, Strike,
 };
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
@@ -27,6 +27,15 @@ struct BuildVersion;
 impl Firmware for BuildVersion {
     fn running_version(&self) -> String {
         VERSION.to_owned()
+    }
+}
+
+/// Restarts the chip; the broker connection drops without a clean close.
+struct ChipRestart;
+
+impl Restart for ChipRestart {
+    fn restart(&self) {
+        esp_idf_svc::hal::reset::restart();
     }
 }
 
@@ -94,6 +103,10 @@ impl Connectors for EspConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &ClosedDoor
+    }
+
+    fn restart(&self) -> &dyn Restart {
+        &ChipRestart
     }
 }
 

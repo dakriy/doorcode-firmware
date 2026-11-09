@@ -18,6 +18,10 @@ const WIFI_PASSWORD: &str = "wifi_password";
 const DOOR_ID: &str = "door_id";
 const USERNAME: &str = "username";
 const TOKEN: &str = "token";
+/// The pair a rotation hands over to, kept beside the old pair until it
+/// has worked.
+const NEXT_USERNAME: &str = "next_username";
+const NEXT_TOKEN: &str = "next_token";
 pub(crate) const CONFIG: &str = "config";
 pub(crate) const TIMELINE: &str = "timeline";
 
@@ -68,10 +72,63 @@ pub(crate) fn store_door_credentials(
     store(storage, TOKEN, &credentials.token)
 }
 
+/// The pair a rotation hands over to, as credentials of door `door_id`,
+/// when both parts are stored.
+pub(crate) fn next_credentials(
+    storage: &dyn Storage,
+    door_id: u64,
+) -> Result<Option<Credentials>, RunError> {
+    let username = text(storage, NEXT_USERNAME)?;
+    let token = text(storage, NEXT_TOKEN)?;
+    let (Some(username), Some(token)) = (username, token) else {
+        return Ok(None);
+    };
+    Ok(Some(Credentials {
+        door_id,
+        username,
+        token,
+    }))
+}
+
+/// Keeps the pair a rotation hands over to beside the pair in use.
+pub(crate) fn store_next_credentials(
+    storage: &dyn Storage,
+    next: &Credentials,
+) -> Result<(), RunError> {
+    store(storage, NEXT_USERNAME, &next.username)?;
+    store(storage, NEXT_TOKEN, &next.token)
+}
+
+/// Makes the pair a rotation handed over to the only one, forgetting the
+/// old.
+pub(crate) fn promote_next_credentials(
+    storage: &dyn Storage,
+    next: &Credentials,
+) -> Result<(), RunError> {
+    store(storage, USERNAME, &next.username)?;
+    store(storage, TOKEN, &next.token)?;
+    remove(storage, &[NEXT_USERNAME, NEXT_TOKEN])
+}
+
 /// Forgets everything that belongs to the door the controller was, so it
 /// starts over as a new controller would.
 pub(crate) fn forget_door(storage: &dyn Storage) -> Result<(), RunError> {
-    for key in [DOOR_ID, USERNAME, TOKEN, CONFIG, TIMELINE] {
+    remove(
+        storage,
+        &[
+            DOOR_ID,
+            USERNAME,
+            TOKEN,
+            NEXT_USERNAME,
+            NEXT_TOKEN,
+            CONFIG,
+            TIMELINE,
+        ],
+    )
+}
+
+fn remove(storage: &dyn Storage, keys: &[&str]) -> Result<(), RunError> {
+    for key in keys {
         storage.remove(key).map_err(RunError::Storage)?;
     }
     Ok(())

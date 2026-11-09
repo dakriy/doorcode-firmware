@@ -7,8 +7,9 @@ use connectors::{Event, Level};
 use pretty_assertions::assert_eq;
 use protocol::{Config, Span, Timeline};
 use testkit::{
-    config_for, door_connection_to, door_message, door_online_status, hex, timeline_for,
-    BrokerCall, Connection, StubBroker, StubConnectors, StubEvents, StubRandom, StubStorage,
+    config_for, door_coming_online, door_connection_to, door_message, door_online_status, hex,
+    timeline_for, BrokerCall, Connection, StubBroker, StubConnectors, StubEvents, StubRandom,
+    StubStorage,
 };
 
 /// The door, started again after a run in which it received `event`, with
@@ -379,7 +380,7 @@ fn a_timeline_of_another_protocol_version_is_logged_and_ignored() {
 fn a_message_on_another_door_topic_is_logged_at_debug_level() {
     let connectors = StubConnectors::enrolled(StubEvents::script([(
         0,
-        door_message(7, "command", b"later".to_vec()),
+        door_message(7, "news", b"later".to_vec()),
     )]));
 
     app::run(&connectors).unwrap();
@@ -388,7 +389,7 @@ fn a_message_on_another_door_topic_is_logged_at_debug_level() {
         connectors.log.lines(),
         vec![(
             Level::Debug,
-            "ignored a message on doorcode/doors/7/command".to_owned()
+            "ignored a message on doorcode/doors/7/news".to_owned()
         )]
     );
 }
@@ -623,14 +624,7 @@ fn after_a_wait_it_connects_again() {
 
     assert_eq!(
         connectors.broker.calls()[6..].to_vec(),
-        vec![
-            door_connection(),
-            subscription("config"),
-            subscription("timeline"),
-            subscription("reply"),
-            subscription("command"),
-            online_status()
-        ]
+        [vec![door_connection()], door_coming_online()].concat()
     );
 }
 

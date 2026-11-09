@@ -8,13 +8,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Storage,
-    Strike,
+    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Restart,
+    Storage, Strike,
 };
 use connectors_host::FileStorage;
 
 use placeholders::{
-    ClosedDoor, NoRadio, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
+    ClosedDoor, NoRadio, NoRestart, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
 };
 
 struct BuildVersion;
@@ -86,6 +86,10 @@ impl Connectors for HostConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &ClosedDoor
+    }
+
+    fn restart(&self) -> &dyn Restart {
+        &NoRestart
     }
 }
 

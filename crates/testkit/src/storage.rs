@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 
 use connectors::{Storage, StorageError};
 
+use crate::{DOOR_TOKEN, DOOR_USERNAME};
+
 /// In-memory storage. Seed it before the run; inspect it after.
 #[derive(Debug, Default)]
 pub struct StubStorage {
@@ -29,8 +31,8 @@ impl StubStorage {
     pub fn enrolled() -> Self {
         Self::provisioned()
             .with("door_id", b"7")
-            .with("username", b"door-7-0123456789ab")
-            .with("token", b"c2VjcmV0LXRva2VuLWZvci1kb29yLTc")
+            .with("username", DOOR_USERNAME.as_bytes())
+            .with("token", DOOR_TOKEN.as_bytes())
     }
 
     /// This storage with `value` stored under `key`.

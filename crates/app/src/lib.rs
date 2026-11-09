@@ -7,10 +7,12 @@
 
 mod access;
 mod check;
+mod command;
 mod device;
 mod door;
 mod enrollment;
 mod entry;
+mod rotation;
 mod stored;
 mod strike;
 mod telemetry;
@@ -168,8 +170,10 @@ impl Phase {
     fn start(device: &Device<'_>) -> Result<Phase, RunError> {
         let broker = device.provisioning.broker.clone();
         let phase = match stored::door_credentials(device.connectors.storage())? {
-            Some(credentials) => Phase::Door(Box::new(door::start(device, credentials, broker)?)),
-            None => Phase::Enrolling(enrollment::start(device, broker)),
+            Some(credentials) => {
+                Phase::Door(Box::new(door::start(device, credentials, broker, 0)?))
+            }
+            None => Phase::Enrolling(enrollment::start(device, broker, 0)),
         };
         Ok(phase)
     }

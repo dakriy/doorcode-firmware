@@ -3,7 +3,7 @@
 
 use connectors::{
     Broker, BrokerError, Clock, ConnectOptions, DoorSensor, Event, Events, Publication, Radio,
-    Random, Strike,
+    Random, Restart, Strike,
 };
 
 pub(crate) struct StoppedEvents;
@@ -25,8 +25,8 @@ impl Broker for OfflineBroker {
         Ok(())
     }
 
-    fn publish(&self, _publication: &Publication) -> Result<(), BrokerError> {
-        Ok(())
+    fn publish(&self, _publication: &Publication) -> Result<u16, BrokerError> {
+        Ok(0)
     }
 
     fn disconnect(&self) -> Result<(), BrokerError> {
@@ -84,4 +84,10 @@ impl DoorSensor for ClosedDoor {
     fn is_open(&self) -> bool {
         false
     }
+}
+
+pub(crate) struct NoRestart;
+
+impl Restart for NoRestart {
+    fn restart(&self) {}
 }

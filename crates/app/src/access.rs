@@ -87,7 +87,13 @@ impl Gate {
             device.log(Level::Info, "the server denied the entry");
             return;
         }
-        let ms = match reply.strike_ms {
+        self.open(device, reply.strike_ms, config);
+    }
+
+    /// Releases the strike for `strike_ms`, or for the configured pulse
+    /// when it is 0.
+    pub(crate) fn open(&mut self, device: &Device<'_>, strike_ms: u64, config: &Config) {
+        let ms = match strike_ms {
             0 => config.strike_pulse_ms,
             ms => ms,
         };

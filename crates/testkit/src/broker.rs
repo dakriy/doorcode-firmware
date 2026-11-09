@@ -1,9 +1,11 @@
 use std::cell::RefCell;
 
 use connectors::{Broker, BrokerAddress, BrokerError, ConnectOptions, Publication};
-use protocol::{Check, DoorEvent, Enrollment, Online, Telemetry, Topic};
+use protocol::{Ack, Check, DoorEvent, Enrollment, Online, Telemetry, Topic};
 
 /// A broker that records every request and decodes what was published.
+/// Publications are numbered 1, 2, 3 ... in the order they were asked for,
+/// failed ones included.
 #[derive(Debug, Default)]
 pub struct StubBroker {
     calls: RefCell<Vec<BrokerCall>>,
@@ -51,6 +53,7 @@ pub enum Message {
     Check(Check),
     Telemetry(Telemetry),
     DoorEvent(DoorEvent),
+    Ack(Ack),
     Undecoded(Vec<u8>),
 }
 
@@ -68,6 +71,9 @@ fn decode(topic: &str, payload: &[u8]) -> Option<Message> {
         }
         Topic::Door { leaf, .. } if leaf == protocol::LEAF_EVENT => {
             DoorEvent::decode(payload).ok().map(Message::DoorEvent)
+        }
+        Topic::Door { leaf, .. } if leaf == protocol::LEAF_ACK => {
+            Ack::decode(payload).ok().map(Message::Ack)
         }
         _ => None,
     }
@@ -147,12 +153,14 @@ impl Broker for StubBroker {
         self.record(BrokerCall::Subscribe(topic.to_owned()))
     }
 
-    fn publish(&self, publication: &Publication) -> Result<(), BrokerError> {
-        self.published.borrow_mut().push(publication.clone());
+    fn publish(&self, publication: &Publication) -> Result<u16, BrokerError> {
+        let mut published = self.published.borrow_mut();
+        published.push(publication.clone());
+        let message_id = u16::try_from(published.len()).expect("a test-sized count");
         self.record(BrokerCall::Publish(decoded(publication)))?;
         match &self.topic_failure {
             Some((topic, error)) if *topic == publication.topic => Err(error.clone()),
-            _ => Ok(()),
+            _ => Ok(message_id),
         }
     }
 

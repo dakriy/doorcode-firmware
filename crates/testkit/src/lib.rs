@@ -12,15 +12,19 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Storage,
-    Strike,
+    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Restart,
+    Storage, Strike,
 };
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
-pub use door::{StrikeCall, StubDoorSensor, StubStrike};
-pub use enrolled::{door_connection_to, door_online_status};
+pub use door::{StrikeCall, StubDoorSensor, StubRestart, StubStrike};
+pub use enrolled::{
+    door_coming_online, door_coming_online_as, door_connection_as, door_connection_to,
+    door_online_status, door_online_status_as, DOOR_TOKEN, DOOR_USERNAME,
+};
 pub use events::{
-    config_for, credentials_for, door_message, reply_for, timeline_for, typed, StubEvents,
+    command_for, config_for, credentials_for, door_message, reply_for, timeline_for, typed,
+    StubEvents,
 };
 pub use storage::StubStorage;
 
@@ -170,6 +174,7 @@ pub struct StubConnectors {
     pub log: StubLog,
     pub strike: StubStrike,
     pub door_sensor: StubDoorSensor,
+    pub restart: StubRestart,
 }
 
 impl StubConnectors {
@@ -222,5 +227,9 @@ impl Connectors for StubConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &self.door_sensor
+    }
+
+    fn restart(&self) -> &dyn Restart {
+        &self.restart
     }
 }

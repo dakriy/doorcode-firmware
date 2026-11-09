@@ -20,6 +20,9 @@ pub(crate) struct Enrolling {
     /// The broker to enroll at.
     broker: BrokerAddress,
     step: Step,
+    /// Connections as a door since the controller started, counted on
+    /// once it is a door again.
+    door_connections: u64,
 }
 
 enum Step {
@@ -31,10 +34,18 @@ enum Step {
     Paused { reconnect_at: u64 },
 }
 
-pub(crate) fn start(device: &Device<'_>, broker: BrokerAddress) -> Enrolling {
+pub(crate) fn start(
+    device: &Device<'_>,
+    broker: BrokerAddress,
+    door_connections: u64,
+) -> Enrolling {
     device.log(Level::Info, &format!("enrolling as {}", device.hardware_id));
     let step = connect(device, &broker);
-    Enrolling { broker, step }
+    Enrolling {
+        broker,
+        step,
+        door_connections,
+    }
 }
 
 impl Enrolling {
@@ -76,8 +87,11 @@ impl Enrolling {
             Some(Event::Disconnected) => pause(device, "connection lost"),
             Some(Event::Refused { code }) => pause(device, &format!("refused with code {code}")),
             Some(Event::Message(message)) => return self.receive(device, &message),
-            // Not a door yet, so the keypad and the door sensor mean nothing.
-            Some(Event::Key(_) | Event::Door { .. }) => return Ok(Phase::Enrolling(self)),
+            // Not a door yet, so the keypad and the door sensor mean nothing,
+            // and nothing published waits for its acknowledgement.
+            Some(Event::Key(_) | Event::Door { .. } | Event::Delivered { .. }) => {
+                return Ok(Phase::Enrolling(self))
+            }
             // The wait ran out. `Stop` ends the loop before it gets here.
             None | Some(Event::Stop) => self.when_due(device),
         };
@@ -111,7 +125,7 @@ impl Enrolling {
             Level::Info,
             &format!("enrolled as door {}", credentials.door_id),
         );
-        let door = door::start(device, credentials, self.broker)?;
+        let door = door::start(device, credentials, self.broker, self.door_connections)?;
         Ok(Phase::Door(Box::new(door)))
     }
 }
@@ -158,7 +172,8 @@ fn announce(device: &Device<'_>) -> Result<(), BrokerError> {
     device
         .connectors
         .broker()
-        .publish(&status(device, &announcement))
+        .publish(&status(device, &announcement))?;
+    Ok(())
 }
 
 /// The announcement, or the last will standing in for it, retained on the

@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use connectors::{Clock, Event, Events, Incoming};
-use protocol::{Config, Credentials, Reply, Timeline};
+use protocol::{Command, Config, Credentials, Reply, Timeline};
 
 /// More waits than any test needs; reaching it means the application spins.
 const MAX_WAITS: u32 = 10_000;
@@ -45,6 +45,11 @@ pub fn typed(at_ms: u64, keys: &str) -> Vec<(u64, Event)> {
 /// The reply door `door_id` receives.
 pub fn reply_for(door_id: u64, reply: &Reply) -> Event {
     door_message(door_id, protocol::LEAF_REPLY, reply.encode())
+}
+
+/// The command door `door_id` receives.
+pub fn command_for(door_id: u64, command: &Command) -> Event {
+    door_message(door_id, protocol::LEAF_COMMAND, command.encode())
 }
 
 /// The message an approved controller with `hardware_id` receives.

@@ -39,6 +39,9 @@ pub enum Event {
     Refused { code: u8 },
     /// A message arrived on a subscribed topic.
     Message(Incoming),
+    /// The broker acknowledged the publication that `Broker::publish`
+    /// numbered `message_id`.
+    Delivered { message_id: u16 },
     /// A key was pressed on the keypad: a digit, `*`, `#`, or a letter.
     Key(char),
     /// The door sensor changed: the door is now open, or now closed.
@@ -97,8 +100,9 @@ pub trait Broker {
     fn connect(&self, options: &ConnectOptions) -> Result<(), BrokerError>;
     /// Subscribes to `topic` at QoS 1.
     fn subscribe(&self, topic: &str) -> Result<(), BrokerError>;
-    /// Publishes at QoS 1.
-    fn publish(&self, publication: &Publication) -> Result<(), BrokerError>;
+    /// Publishes at QoS 1, and returns the number the broker's
+    /// acknowledgement of it will quote in `Event::Delivered`.
+    fn publish(&self, publication: &Publication) -> Result<u16, BrokerError>;
     /// Closes the connection cleanly, so the broker does not send the will.
     fn disconnect(&self) -> Result<(), BrokerError>;
 }
@@ -160,6 +164,14 @@ pub trait Firmware {
     fn running_version(&self) -> String;
 }
 
+/// The device as a whole.
+pub trait Restart {
+    /// Restarts the device as a power cycle would, without closing the
+    /// broker connection cleanly, so the broker sends the last will. On a
+    /// device it does not return.
+    fn restart(&self);
+}
+
 /// How much a log line matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -188,4 +200,5 @@ pub trait Connectors {
     fn log(&self) -> &dyn Log;
     fn strike(&self) -> &dyn Strike;
     fn door_sensor(&self) -> &dyn DoorSensor;
+    fn restart(&self) -> &dyn Restart;
 }
