@@ -9,3 +9,5 @@ live outside the repository.
 - `firmware-signing.md`: the signature block on firmware images and the key
   that checks it.
 - `host.md`: the desktop host binary, its flags, and its control API.
+- `testing.md`: the integration test that runs a desktop door against a
+  development server.

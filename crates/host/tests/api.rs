@@ -130,7 +130,7 @@ fn restart(address: SocketAddr) -> (u16, Value) {
 }
 
 #[test]
-fn the_state_shows_the_door_the_device_and_the_provisioned_config() {
+fn the_state_shows_the_door_the_device_the_provisioned_config_and_the_timeline() {
     let (_directory, address) = start_open_door();
 
     let state = state(address);
@@ -139,6 +139,7 @@ fn the_state_shows_the_door_the_device_and_the_provisioned_config() {
         &state["hardware_id"],
         &state["mode"],
         &state["config"]["strike_pulse_ms"],
+        &state["timeline"]["spans"][0]["state"],
         &state["strike_released"],
         &state["door_open"],
     ];
@@ -150,6 +151,7 @@ fn the_state_shows_the_door_the_device_and_the_provisioned_config() {
             &json!("a1b2c3d4e5f6"),
             &json!("open"),
             &json!(2500),
+            &json!("open"),
             &json!(false),
             &json!(false)
         ]

@@ -74,6 +74,7 @@ reported and works none of them out itself.
 | `door_open` | Whether the door sensor sees the door open. |
 | `bytes_in`, `bytes_out` | MQTT packet bytes from and to the broker since the last restart. TCP and TLS framing are not counted. |
 | `config` | The stored configuration message, decoded; `null` when none is stored. |
+| `timeline` | The stored timeline message, decoded; `null` when none is stored. |
 | `firmware_version` | The version the application runs. |
 | `hardware_id` | The hardware id. |
 | `signal`, `free_bytes` | What the radio reports. |

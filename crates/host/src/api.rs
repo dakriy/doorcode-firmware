@@ -147,6 +147,7 @@ fn state(device: &Device, _body: &str) -> Result<Value, Failure> {
     let storage = device.storage();
     let mut state = device.live.json();
     state["config"] = stored_message(&storage, "config");
+    state["timeline"] = stored_message(&storage, "timeline");
     state["door_open"] = device.door.is_open().into();
     state["signal"] = device.radio.signal_dbm().into();
     state["free_bytes"] = device.radio.free_bytes().into();
