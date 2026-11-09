@@ -3,22 +3,15 @@ SHELL := /bin/sh
 .DEFAULT_GOAL := verify-fast
 
 FAST_BUDGET_SECONDS ?= 10
-FIRMWARE_IMAGE ?= espressif/idf-rust:esp32_latest
 FIRMWARE_PORT ?= /dev/ttyUSB0
-FIRMWARE_DOCKER = docker run --rm -u root \
-	-v "$(CURDIR)":/repo -w /repo/firmware \
-	-v esp-rs-espressif:/root/.espressif \
-	-v esp-rs-embuild:/root/.embuild \
-	-v esp-rs-cargo-reg:/root/.cargo/registry \
-	-v esp-rs-target:/repo/firmware/target \
-	-e RUSTUP_HOME=/home/esp/.rustup -e CARGO_HOME=/root/.cargo \
-	-e ESP_IDF_TOOLS_INSTALL_DIR=global
-# The image's login shell resets PATH, so the cargo bin dir is exported per command.
-FIRMWARE_ENV = export PATH=/home/esp/.cargo/bin:$$PATH;
+# FIRMWARE_IMAGE, when set, names another container image.
+export FIRMWARE_IMAGE
+FIRMWARE = sh scripts/firmware-container.sh
 
 .PHONY: verify-fast verify-mutation verify-mutation-diff verify-integration verify-all \
 	fmt lint build check-imports check-complexity test-fast coverage dead-code duplicates \
-	firmware-build firmware-flash firmware-check firmware-provision
+	firmware-build firmware-flash firmware-check firmware-provision \
+	firmware-release firmware-upload
 
 ## verify-fast: every gate except mutation; after every change.
 verify-fast: fmt lint check-imports check-complexity coverage dead-code duplicates
@@ -68,17 +61,29 @@ duplicates:
 	@sh scripts/report-duplicates.sh
 
 ## Firmware: builds inside the Espressif container (see firmware/README.md).
+
 firmware-build:
-	$(FIRMWARE_DOCKER) $(FIRMWARE_IMAGE) bash -lc '$(FIRMWARE_ENV) cargo build --release && chown -R $(shell id -u):$(shell id -g) /repo/firmware/Cargo.lock'
+	$(FIRMWARE) 'cargo build --release && chown -R $(shell id -u):$(shell id -g) /repo/firmware/Cargo.lock'
 
 firmware-check:
-	$(FIRMWARE_DOCKER) $(FIRMWARE_IMAGE) bash -lc '$(FIRMWARE_ENV) cargo clippy --release -- -D warnings && cargo fmt --check'
+	$(FIRMWARE) 'cargo clippy --release -- -D warnings && cargo fmt --check'
 
+# The built bootloader, not espflash's own, so app rollback is on; otadata
+# is erased so the board boots the image just written to ota_0.
 firmware-flash:
-	$(FIRMWARE_DOCKER) --device $(FIRMWARE_PORT) $(FIRMWARE_IMAGE) bash -lc \
-		'$(FIRMWARE_ENV) espflash flash --chip esp32 --port $(FIRMWARE_PORT) --partition-table partitions.csv --monitor target/xtensa-esp32-espidf/release/doorcode-firmware'
+	$(FIRMWARE) --device $(FIRMWARE_PORT) '. /repo/scripts/firmware-env.sh && \
+		espflash flash --chip esp32 --port $(FIRMWARE_PORT) \
+		--bootloader "$$firmware_bootloader" --partition-table "$$firmware_partitions" \
+		--erase-parts otadata --monitor "$$firmware_elf"'
 
 ## firmware-provision: writes firmware/provisioning.json into the NVS partition on FIRMWARE_PORT.
 firmware-provision:
-	$(FIRMWARE_DOCKER) --device $(FIRMWARE_PORT) $(FIRMWARE_IMAGE) bash -lc \
-		'$(FIRMWARE_ENV) sh /repo/scripts/firmware-provision.sh $(FIRMWARE_PORT)'
+	$(FIRMWARE) --device $(FIRMWARE_PORT) 'sh /repo/scripts/firmware-provision.sh $(FIRMWARE_PORT)'
+
+## firmware-release: builds, signs, and checks dist/doorcode-firmware-VERSION.bin with the private key at KEY.
+firmware-release:
+	@sh scripts/firmware-release.sh '$(VERSION)' '$(KEY)'
+
+## firmware-upload: uploads FILE as VERSION to the server at SERVER with the API token TOKEN.
+firmware-upload:
+	@sh scripts/firmware-upload.sh '$(SERVER)' '$(TOKEN)' '$(FILE)' '$(VERSION)'

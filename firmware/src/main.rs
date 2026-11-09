@@ -38,7 +38,7 @@ use clock::EspClock;
 use door_sensor::GpioDoorSensor;
 use download::EspDownload;
 use events::EspEvents;
-use firmware::BuildFirmware;
+use firmware::EspFirmware;
 use logger::{EspLog, LogStatus};
 use mqtt::MqttBroker;
 use nvs_storage::NvsStorage;
@@ -59,6 +59,7 @@ struct EspConnectors {
     download: EspDownload,
     strike: GpioStrike,
     door_sensor: GpioDoorSensor,
+    firmware: EspFirmware,
 }
 
 impl Connectors for EspConnectors {
@@ -87,7 +88,7 @@ impl Connectors for EspConnectors {
     }
 
     fn firmware(&self) -> &dyn Firmware {
-        &BuildFirmware
+        &self.firmware
     }
 
     fn download(&self) -> &dyn Download {
@@ -149,6 +150,7 @@ fn connectors(
         clock,
         radio: EspRadio::new().expect("reading the station MAC"),
         strike,
+        firmware: EspFirmware::new(),
     }
 }
 

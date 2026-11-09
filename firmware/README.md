@@ -8,6 +8,16 @@ run in Espressif's container rather than the desktop toolchain:
     make firmware-check      # clippy at the connector complexity cap, and rustfmt
     make firmware-flash      # flashes FIRMWARE_PORT (default /dev/ttyUSB0) and opens the monitor
     make firmware-provision  # writes provisioning.json into the NVS partition on FIRMWARE_PORT
+    make firmware-release VERSION=x KEY=path   # signed dist/doorcode-firmware-x.bin
+    make firmware-upload SERVER=url TOKEN=t FILE=f VERSION=x
+
+`scripts/firmware-container.sh` runs a command in the container with the
+volumes below; every target goes through it. Commands in the container
+source `scripts/firmware-env.sh` for where ESP-IDF, its Python tools, the
+built ELF and bootloader, and the partition table are. `make firmware-flash` writes
+the bootloader this build made (espflash's own has no app rollback), the
+partition table, and the application to `ota_0`, and erases `otadata` so
+the board boots it.
 
 Caches live in the docker volumes `esp-rs-espressif`, `esp-rs-embuild`,
 `esp-rs-cargo-reg`, and `esp-rs-target`. The first build downloads and
@@ -17,7 +27,8 @@ Everything in this directory is connector code or production wiring. It is
 excluded from coverage and mutation and is verified by `make firmware-build`,
 `make firmware-check`, and by running on a board.
 
-Security decisions are in `docs/security.md`.
+Security decisions are in `docs/security.md`. Releasing an image is in
+`docs/release.md`.
 
 ## Provisioning
 
@@ -103,3 +114,21 @@ image fits a slot.
   log tag and of the firmware's own log. ESP-IDF's components are compiled
   with `info` as their most detailed level, to keep the image small, so
   `debug` adds the firmware's own debug lines only.
+- **Updates.** An install goes into the OTA slot the board is not running,
+  through ESP-IDF's OTA API. Each 4 KB chunk of the download erases the
+  flash sector it reaches as it is written (sequential writes), so no call
+  erases the whole slot at once; an install begun before and never
+  finished is abandoned first. Finishing runs ESP-IDF's check of the
+  image's header, segments, and digest, and setting the slot to boot checks
+  it again, each a read of the whole image. The signature is checked by the
+  application, not by ESP-IDF, so that `accept_unsigned_firmware` can turn
+  it off; `CONFIG_SECURE_SIGNED_ON_UPDATE` stays off.
+- **Rollback.** `sdkconfig.defaults` enables bootloader app rollback. The
+  bootloader boots a newly installed image once, pending verification
+  (which is how the firmware knows it is on trial), and goes back to the
+  previous image on the next reset unless the application has marked the
+  new one valid by then.
+- **Version.** `DOORCODE_FIRMWARE_VERSION` at build time, or the crate
+  version without it, is the version the door reports and the version in
+  the image's app descriptor, which the firmware defines in place of
+  ESP-IDF's so the two cannot differ.

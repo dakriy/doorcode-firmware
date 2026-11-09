@@ -27,3 +27,11 @@ CONFIG_ESP_BROWNOUT_DET=y
 # assertions abort without their message text.
 CONFIG_NEWLIB_NANO_FORMAT=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+
+# Updates: the bootloader boots a newly installed image once, pending
+# verification, and goes back to the previous one on the next reset unless
+# the application has marked it valid. ESP-IDF's own check of signed images
+# on update (CONFIG_SECURE_SIGNED_ON_UPDATE) stays off: the application
+# checks the signature itself, so the configuration can accept unsigned
+# images on a bench board.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

@@ -8,6 +8,8 @@ live outside the repository.
 - `security.md`: the security posture and why.
 - `firmware-signing.md`: the signature block on firmware images and the key
   that checks it.
+- `release.md`: building, signing, uploading, and rolling out a firmware
+  release.
 - `host.md`: the desktop host binary, its flags, and its control API.
 - `testing.md`: the integration test that runs a desktop door against a
   development server, and the load tool that runs many.

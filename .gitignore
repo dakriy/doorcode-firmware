@@ -14,3 +14,5 @@
 # Provisioning files hold secrets.
 /provisioning.json
 /firmware/provisioning.json
+# Release images, signed outside the repository.
+/dist/
