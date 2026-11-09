@@ -3,6 +3,9 @@
 
 use protocol::Config;
 
+/// The key that ends an entry and submits it.
+const SUBMIT_KEY: char = '#';
+
 #[derive(Default)]
 pub(crate) struct Entry {
     keys: String,
@@ -35,7 +38,7 @@ impl Entry {
     /// entry; other keys that are neither digits nor `*` are not taken, and
     /// neither is any key once the entry is as long as it may be.
     pub(crate) fn press(&mut self, key: char, now_ms: u64, config: &Config) -> Option<String> {
-        if config.submit_key.chars().eq([key]) {
+        if key == SUBMIT_KEY {
             let entry = std::mem::take(&mut self.keys);
             return long_enough(&entry, config).then_some(entry);
         }

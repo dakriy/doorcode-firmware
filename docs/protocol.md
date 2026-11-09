@@ -57,8 +57,7 @@ the next. Before the first one it runs with the provisioning file's
 | `strike_pulse_ms` | 3000 | How long the strike is released for a keypress during an open span. A reply or an open command names its own `strike_ms`; 0 there means this value. The strike locks again as soon as the door sensor sees the door open. |
 | `keypad_idle_clear_ms` | 10000 | A partly typed entry is discarded after this long without a key. |
 | `min_code_length` | 4 | An entry whose code (the digits before any `*`) is shorter is not sent. |
-| `max_code_length` | 32 | The keypad stops taking keys once an entry is this long. |
-| `submit_key` | `#` | The key that ends an entry and sends it as a check. |
+| `max_code_length` | 32 | The keypad stops taking keys once an entry is this long. `#` ends an entry and sends it as a check; it is not configurable. |
 | `reply_timeout_ms` | 3000 | How long the door waits for the reply to a check before it denies. |
 | `telemetry_interval_s` | 60 | How often telemetry is published while connected. |
 | `ntp_server` | `pool.ntp.org` | Where the ESP32 synchronizes its clock. The timeline is in Unix seconds, so until the first synchronization the door stays in normal mode whatever the timeline says. |

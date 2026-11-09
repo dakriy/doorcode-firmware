@@ -71,7 +71,6 @@ fn the_door_config_is_stored_as_the_configuration_message() {
         config,
         Config {
             strike_pulse_ms: 2500,
-            submit_key: "A".to_owned(),
             wifi_roam_rssi: -65,
             ..Config::default()
         }

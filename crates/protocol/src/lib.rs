@@ -180,7 +180,6 @@ pub struct Config {
     pub keypad_idle_clear_ms: u64,
     pub min_code_length: u64,
     pub max_code_length: u64,
-    pub submit_key: String,
     pub reply_timeout_ms: u64,
     pub telemetry_interval_s: u64,
     pub held_open_s: u64,
@@ -222,7 +221,6 @@ impl Default for Config {
             keypad_idle_clear_ms: 10_000,
             min_code_length: 4,
             max_code_length: 32,
-            submit_key: "#".to_owned(),
             reply_timeout_ms: 3000,
             telemetry_interval_s: 60,
             held_open_s: 60,
@@ -259,7 +257,6 @@ impl Config {
         map.uint("keypad_idle_clear_ms", self.keypad_idle_clear_ms);
         map.uint("min_code_length", self.min_code_length);
         map.uint("max_code_length", self.max_code_length);
-        map.text("submit_key", &self.submit_key);
         map.uint("reply_timeout_ms", self.reply_timeout_ms);
         map.uint("telemetry_interval_s", self.telemetry_interval_s);
         map.uint("held_open_s", self.held_open_s);
@@ -300,7 +297,6 @@ impl Config {
                 ),
                 ("min_code_length", Slot::Uint(&mut message.min_code_length)),
                 ("max_code_length", Slot::Uint(&mut message.max_code_length)),
-                ("submit_key", Slot::Text(&mut message.submit_key)),
                 (
                     "reply_timeout_ms",
                     Slot::Uint(&mut message.reply_timeout_ms),
@@ -407,7 +403,7 @@ impl Timeline {
 }
 
 /// An entry typed at the door, sent to the server to decide on: the code,
-/// optionally followed by `*` and a keypad command, without the submit key.
+/// optionally followed by `*` and a keypad command, without the `#` that submitted it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Check {
     pub request_id: String,

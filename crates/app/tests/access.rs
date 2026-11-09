@@ -114,7 +114,7 @@ fn door_connecting_and_coming_online() -> Vec<BrokerCall> {
 }
 
 #[test]
-fn an_entry_ended_by_the_submit_key_is_checked_once_on_the_check_topic_not_retained() {
+fn an_entry_ended_by_the_hash_is_checked_once_on_the_check_topic_not_retained() {
     let connectors = online_with_contract_id(typed(10, "4211234#"));
 
     app::run(&connectors).unwrap();
@@ -479,7 +479,7 @@ fn the_keys_typed_so_far_are_reported() {
 }
 
 #[test]
-fn keys_other_than_digits_star_and_the_submit_key_are_not_taken() {
+fn keys_other_than_digits_star_and_the_hash_are_not_taken() {
     let connectors = StubConnectors::online(typed(10, "4AB2C1D1#"));
 
     app::run(&connectors).unwrap();
@@ -488,13 +488,11 @@ fn keys_other_than_digits_star_and_the_submit_key_are_not_taken() {
 }
 
 #[test]
-fn the_submit_key_comes_from_the_configuration_and_the_hash_is_then_not_taken() {
-    let config = Config {
-        submit_key: "A".to_owned(),
-        ..Config::default()
-    };
-    let mut events = vec![(5, config_for(7, &config))];
-    events.extend(typed(10, "42#11A"));
+fn a_submit_key_from_an_older_server_is_ignored_and_the_hash_still_submits() {
+    // {"v": 1, "submit_key": "A"}
+    let with_submit_key = hex("a26176016a7375626d69745f6b65796141");
+    let mut events = vec![(5, door_message(7, "config", with_submit_key))];
+    events.extend(typed(10, "42A11#"));
     let connectors = StubConnectors::online(events);
 
     app::run(&connectors).unwrap();
