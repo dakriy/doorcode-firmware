@@ -4,6 +4,17 @@ use protocol::Timeline;
 
 use crate::Mode;
 
+/// The soonest time after `now`, in Unix seconds, at which the state the
+/// timeline puts the door in may change: a span starting or ending, or the
+/// timeline ending; `None` when none is still to come.
+pub(crate) fn next_change(timeline: &Timeline, now: i64) -> Option<i64> {
+    let edges = timeline
+        .spans
+        .iter()
+        .flat_map(|span| [span.start, span.end]);
+    edges.chain([timeline.to]).filter(|&at| at > now).min()
+}
+
 /// The door's state at `unix_seconds`: the state of the span it falls in,
 /// and normal outside every span, after the timeline's end, and when the
 /// time is not known.

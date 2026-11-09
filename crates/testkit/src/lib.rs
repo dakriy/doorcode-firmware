@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 
 use connectors::{
     Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Radio,
-    Random, Storage, Strike,
+    Random, Status, StatusReport, Storage, Strike,
 };
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
@@ -144,6 +144,39 @@ impl Log for StubLog {
     }
 }
 
+/// A status connector that keeps every report, in order.
+#[derive(Debug, Default)]
+pub struct StubStatus {
+    reports: RefCell<Vec<StatusReport>>,
+}
+
+impl StubStatus {
+    /// Every report, in order.
+    pub fn reports(&self) -> Vec<StatusReport> {
+        self.reports.borrow().clone()
+    }
+
+    /// What `pick` reads of every report, in order.
+    pub fn reported<T>(&self, pick: impl Fn(StatusReport) -> T) -> Vec<T> {
+        self.reports().into_iter().map(pick).collect()
+    }
+
+    /// The last report. Panics when there was none.
+    pub fn latest(&self) -> StatusReport {
+        self.reports
+            .borrow()
+            .last()
+            .cloned()
+            .expect("a status report")
+    }
+}
+
+impl Status for StubStatus {
+    fn report(&self, status: &StatusReport) {
+        self.reports.borrow_mut().push(status.clone());
+    }
+}
+
 /// The stub factory. Build one per test with the stubs that test needs.
 /// Time passes only while the application waits for events, so the event
 /// script is also the clock.
@@ -159,6 +192,7 @@ pub struct StubConnectors {
     pub log: StubLog,
     pub strike: StubStrike,
     pub door_sensor: StubDoorSensor,
+    pub status: StubStatus,
 }
 
 impl StubConnectors {
@@ -223,5 +257,9 @@ impl Connectors for StubConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &self.door_sensor
+    }
+
+    fn status(&self) -> &dyn Status {
+        &self.status
     }
 }

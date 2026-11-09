@@ -14,13 +14,15 @@ mod enrollment;
 mod entry;
 mod rotation;
 mod signature;
+mod status;
 mod stored;
 mod strike;
 mod telemetry;
 mod timeline;
 mod update;
 
-use connectors::{BrokerAddress, Connectors, Event, StorageError};
+use connectors::{BrokerAddress, Connectors, Event, StatusReport, StorageError};
+pub use connectors::{ConnectionState, Mode};
 use protocol::{Check, Config, Credentials, Timeline};
 
 use device::Device;
@@ -48,17 +50,6 @@ pub struct RunReport {
     pub access: Access,
     /// What the next telemetry report would count.
     pub counters: Counters,
-}
-
-/// The state the timeline puts the door in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    /// Outside every span: entries are checked online and denied offline.
-    Normal,
-    /// Inside an `open` span: any key releases the strike.
-    Open,
-    /// Inside a `locked` span: entries are checked online and denied offline.
-    Locked,
 }
 
 /// The keypad entry, the check waiting for its reply, and the strike.
@@ -117,17 +108,6 @@ impl RunReport {
     }
 }
 
-/// Where the broker connection stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConnectionState {
-    /// A connection was asked for and the broker has not answered yet.
-    Connecting,
-    /// Connected, subscribed, and announced or online.
-    Connected,
-    /// Not connected, and waiting to connect again.
-    Disconnected,
-}
-
 /// What the device is set up with before it first talks to a server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Provisioning {
@@ -184,7 +164,7 @@ impl Phase {
     fn wait_ms(&self, device: &Device<'_>) -> Option<u64> {
         match self {
             Phase::Enrolling(enrolling) => enrolling.wait_ms(device.now_ms()),
-            Phase::Door(door) => door.wait_ms(device.now_ms()),
+            Phase::Door(door) => door.wait_ms(device),
         }
     }
 
@@ -193,6 +173,14 @@ impl Phase {
         match self {
             Phase::Enrolling(enrolling) => enrolling.handle(device, event),
             Phase::Door(door) => (*door).handle(device, event),
+        }
+    }
+
+    /// What the phase is doing now, as the `Status` connector is told.
+    fn status(&self, device: &Device<'_>) -> StatusReport {
+        match self {
+            Phase::Enrolling(enrolling) => enrolling.live_status(),
+            Phase::Door(door) => door.live_status(device),
         }
     }
 
@@ -209,7 +197,9 @@ pub fn run(connectors: &dyn Connectors) -> Result<RunReport, RunError> {
     let provisioning = stored::provisioning(connectors.storage())?;
     let device = Device::new(connectors, &provisioning);
     let mut phase = Phase::start(&device)?;
+    let mut reported = None;
     loop {
+        reported = status::report(&device, phase.status(&device), reported);
         let event = connectors.events().next(phase.wait_ms(&device));
         if event == Some(Event::Stop) {
             break;

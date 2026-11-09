@@ -25,7 +25,7 @@ use provisioning::PROVISIONING;
 
 /// A host running firmware 2.0.0 as hardware `a1b2c3d4e5f6`, on a fresh
 /// data directory holding `stored`, with its control API on a free port,
-/// once its application runs.
+/// once its application runs and has reported its status.
 fn start(stored: &[(&str, &[u8])]) -> (TempDir, SocketAddr) {
     let directory = tempfile::tempdir().unwrap();
     let data_dir = data_dir(&directory);
@@ -45,6 +45,7 @@ fn start(stored: &[(&str, &[u8])]) -> (TempDir, SocketAddr) {
     .unwrap();
     let address = host.address();
     running(address, "2.0.0");
+    state_once(address, |state| !state["phase"].is_null());
     (directory, address)
 }
 
@@ -100,17 +101,23 @@ fn post(address: SocketAddr, path: &str, body: &str) -> (u16, Value) {
     )
 }
 
-/// The state's `field` once it reads `expected`, or as it reads after two
-/// seconds of waiting for that.
-fn field_once(address: SocketAddr, field: &str, expected: &Value) -> Value {
+/// The state once `wanted` holds of it, or as it reads after two seconds
+/// of waiting for that.
+fn state_once(address: SocketAddr, wanted: impl Fn(&Value) -> bool) -> Value {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let value = state(address)[field].clone();
-        if value == *expected || Instant::now() > deadline {
-            return value;
+        let state = state(address);
+        if wanted(&state) || Instant::now() > deadline {
+            return state;
         }
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// The state's `field` once it reads `expected`, or as it reads after two
+/// seconds of waiting for that.
+fn field_once(address: SocketAddr, field: &str, expected: &Value) -> Value {
+    state_once(address, |state| state[field] == *expected)[field].clone()
 }
 
 /// Waits until the application runs firmware `version`, and returns it.
@@ -171,6 +178,23 @@ fn a_key_pressed_while_the_timeline_holds_the_door_open_releases_the_strike() {
     assert_eq!(
         (answer, released),
         ((200, json!({"ok": true})), json!(true))
+    );
+}
+
+#[test]
+fn keys_pressed_at_a_door_show_as_the_entry_in_progress() {
+    let (_directory, address) = start(&[
+        ("door_id", b"7"),
+        ("username", b"door-7"),
+        ("token", b"token-7"),
+    ]);
+
+    post(address, "/keys", r#"{"keys": "42"}"#);
+
+    let state = state_once(address, |state| state["entry"] == json!("42"));
+    assert_eq!(
+        (&state["phase"], &state["entry"]),
+        (&json!("door"), &json!("42"))
     );
 }
 

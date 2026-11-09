@@ -122,16 +122,19 @@ fn an_image_answered_with_another_status_is_acked_failed_with_the_status_and_for
 
     app::run(&connectors).unwrap();
 
+    let updates_reported = connectors.status.reported(|status| status.update);
     assert_eq!(
         (
             connectors.broker.last_call(),
             connectors.firmware.calls(),
-            stored_update(&connectors)
+            stored_update(&connectors),
+            updates_reported
         ),
         (
             Some(failed_ack(ID, "download failed: 403")),
             vec![],
-            [None, None]
+            [None, None],
+            vec![None, None, Some(VERSION.to_owned()), None]
         )
     );
 }

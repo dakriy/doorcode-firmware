@@ -5,8 +5,8 @@ use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, Level, Log, Radio, Random,
-    Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Radio,
+    Random, Status, Storage, Strike,
 };
 use connectors_host::{
     FileStorage, FirmwareControl, HostDoorSensor, HostDownload, HostEvents, HostFirmware,
@@ -14,7 +14,7 @@ use connectors_host::{
 };
 
 use crate::image::{self, Boot};
-use crate::live::{Live, Run, WatchedBroker, WatchedEvents};
+use crate::live::{Live, Run};
 
 /// What outlives a restart: the data directory, the radio and the door
 /// sensor, and what the control API shows.
@@ -58,12 +58,28 @@ impl Log for StderrLog {
     }
 }
 
+/// The run's event queue. A restart the application asked for ends the
+/// run, as a device would restart.
+struct RunEvents {
+    events: HostEvents,
+    firmware: FirmwareControl,
+}
+
+impl Events for RunEvents {
+    fn next(&self, timeout_ms: Option<u64>) -> Option<Event> {
+        if self.firmware.restart_requested() {
+            return Some(Event::Stop);
+        }
+        self.events.next(timeout_ms)
+    }
+}
+
 /// The connectors of one run.
 struct HostConnectors<'a> {
     device: &'a Device,
     storage: FileStorage,
-    events: WatchedEvents<'a>,
-    broker: WatchedBroker<'a>,
+    events: RunEvents,
+    broker: MqttBroker,
     clock: SystemClock,
     firmware: HostFirmware,
     download: HostDownload,
@@ -78,22 +94,18 @@ impl<'a> HostConnectors<'a> {
         Self {
             device,
             storage: device.storage(),
-            broker: WatchedBroker {
-                broker: MqttBroker::new(events.sender()),
-                live: &device.live,
-            },
+            broker: MqttBroker::new(events.sender()),
             download: HostDownload::new(events.sender(), None),
-            events: WatchedEvents {
+            events: RunEvents {
                 firmware: firmware.control(),
                 events,
-                live: &device.live,
             },
             clock: SystemClock::new(),
             firmware,
             log: StderrLog {
                 level: Cell::new(Level::Info),
             },
-            strike: HostStrike::new(),
+            strike: HostStrike,
         }
     }
 
@@ -101,8 +113,7 @@ impl<'a> HostConnectors<'a> {
     fn run(&self) -> Run {
         Run {
             events: self.events.events.sender(),
-            strike: self.strike.monitor(),
-            traffic: self.broker.broker.traffic(),
+            traffic: self.broker.traffic(),
             firmware_version: self.firmware.running_version(),
         }
     }
@@ -151,6 +162,10 @@ impl Connectors for HostConnectors<'_> {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &self.device.door
+    }
+
+    fn status(&self) -> &dyn Status {
+        &self.device.live.status
     }
 }
 

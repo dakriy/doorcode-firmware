@@ -5,7 +5,8 @@
 //! credentials.
 
 use connectors::{
-    BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication, Transfer,
+    BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication, StatusReport,
+    Transfer,
 };
 use protocol::{Config, Credentials, DecodeError, Online, Timeline};
 
@@ -75,6 +76,14 @@ impl Link {
         match self {
             Link::Online { report_at } => Some(*report_at),
             Link::Connecting | Link::Paused { .. } => None,
+        }
+    }
+
+    fn connection(&self) -> ConnectionState {
+        match self {
+            Link::Connecting => ConnectionState::Connecting,
+            Link::Online { .. } => ConnectionState::Connected,
+            Link::Paused { .. } => ConnectionState::Disconnected,
         }
     }
 }
@@ -147,8 +156,9 @@ fn log_level(name: &str) -> Level {
 
 impl Door {
     /// How long the event loop may wait before this needs attention.
-    pub(crate) fn wait_ms(&self, now_ms: u64) -> Option<u64> {
+    pub(crate) fn wait_ms(&self, device: &Device<'_>) -> Option<u64> {
         let due_at = [
+            self.mode_changes_at(device),
             self.link.reconnect_at(),
             self.link.report_at(),
             self.gate.due_at(&self.config),
@@ -157,7 +167,32 @@ impl Door {
             self.boot.revert_at(),
         ];
         let soonest = due_at.into_iter().flatten().min()?;
-        Some(soonest.saturating_sub(now_ms))
+        Some(soonest.saturating_sub(device.now_ms()))
+    }
+
+    /// When the timeline may next put the door in another state, so that
+    /// the change is reported as it happens; `None` while the time is not
+    /// known.
+    fn mode_changes_at(&self, device: &Device<'_>) -> Option<u64> {
+        let now_s = device.unix_seconds()?;
+        let change_s = timeline::next_change(&self.timeline, now_s)?;
+        let in_ms = (change_s - now_s).unsigned_abs().saturating_mul(1000);
+        Some(device.now_ms().saturating_add(in_ms))
+    }
+
+    /// What the door is doing now, as the `Status` connector is told.
+    pub(crate) fn live_status(&self, device: &Device<'_>) -> StatusReport {
+        StatusReport {
+            phase: connectors::Phase::Door,
+            connection: self.link.connection(),
+            door_id: Some(self.credentials.door_id),
+            mode: self.mode(device),
+            strike_released: self.gate.strike_released(),
+            entry: self.gate.entry().to_owned(),
+            last_check: self.gate.last_check(),
+            last_reply: self.gate.last_reply(),
+            update: self.install.as_ref().map(Install::version),
+        }
     }
 
     /// Reacts to an event, or to the wait running out when it is `None`.
@@ -191,11 +226,7 @@ impl Door {
     }
 
     pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
-        let connection = match self.link {
-            Link::Connecting => ConnectionState::Connecting,
-            Link::Online { .. } => ConnectionState::Connected,
-            Link::Paused { .. } => ConnectionState::Disconnected,
-        };
+        let connection = self.link.connection();
         let counters = self.tally.counters(self.gate.latency_ms());
         RunReport::new(
             device,

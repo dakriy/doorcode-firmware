@@ -2,8 +2,8 @@
 //! the check that asks the server about it, the reply, the strike, and the
 //! states the timeline puts the door in.
 
-use app::{Access, Mode, StrikeState};
-use connectors::{Event, Level};
+use app::{Access, ConnectionState, Mode, StrikeState};
+use connectors::{Event, Level, Phase, ReceivedReply, SentCheck, StatusReport};
 use pretty_assertions::assert_eq;
 use protocol::{Check, Config, Reply, Span, Timeline};
 use testkit::{
@@ -180,8 +180,33 @@ fn the_contract_allowed_reply_releases_the_strike_for_its_strike_ms() {
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.access, connectors.strike.calls()),
-        (released_until(3100), vec![StrikeCall::Release])
+        (
+            report.access,
+            connectors.strike.calls(),
+            connectors.status.latest()
+        ),
+        (
+            released_until(3100),
+            vec![StrikeCall::Release],
+            StatusReport {
+                phase: Phase::Door,
+                connection: ConnectionState::Connected,
+                door_id: Some(7),
+                mode: Mode::Normal,
+                strike_released: true,
+                entry: String::new(),
+                last_check: Some(SentCheck {
+                    request_id: REQUEST_ID.to_owned(),
+                    digits: "4211234".to_owned(),
+                }),
+                last_reply: Some(ReceivedReply {
+                    request_id: REQUEST_ID.to_owned(),
+                    allow: true,
+                    strike_ms: 3000,
+                }),
+                update: None,
+            }
+        )
     );
 }
 
@@ -447,7 +472,10 @@ fn the_keys_typed_so_far_are_reported() {
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.access.entry, "42*1");
+    assert_eq!(
+        (report.access.entry, connectors.status.latest().entry),
+        ("42*1".to_owned(), "42*1".to_owned())
+    );
 }
 
 #[test]
@@ -739,6 +767,44 @@ fn the_door_sensor_reading_at_the_end_is_reported() {
     let report = app::run(&connectors).unwrap();
 
     assert!(report.door_open);
+}
+
+/// Unix time 1_793_001_200 at millisecond 0, with an open span starting
+/// four hours later.
+const LATER_SPAN_FROM: i64 = 1_793_001_200;
+
+fn open_span_after_four_hours() -> Timeline {
+    Timeline {
+        from: LATER_SPAN_FROM,
+        to: LATER_SPAN_FROM + 86_400,
+        spans: vec![Span {
+            start: LATER_SPAN_FROM + 14_400,
+            end: LATER_SPAN_FROM + 18_000,
+            state: "open".to_owned(),
+        }],
+    }
+}
+
+#[test]
+fn the_timeline_putting_the_door_in_another_state_is_reported_when_it_happens() {
+    let mut events = vec![(0, timeline_for(7, &open_span_after_four_hours()))];
+    events.extend(typed(14_400_010, "1"));
+    let connectors = StubConnectors::enrolled(script_online(events).at_unix(LATER_SPAN_FROM));
+
+    app::run(&connectors).unwrap();
+
+    let reported = connectors
+        .status
+        .reported(|status| (status.connection, status.mode, status.strike_released));
+    assert_eq!(
+        reported,
+        vec![
+            (ConnectionState::Connecting, Mode::Normal, false),
+            (ConnectionState::Connected, Mode::Normal, false),
+            (ConnectionState::Connected, Mode::Open, false),
+            (ConnectionState::Connected, Mode::Open, true),
+        ]
+    );
 }
 
 #[test]

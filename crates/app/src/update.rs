@@ -63,6 +63,11 @@ pub(crate) fn order(
 }
 
 impl Install {
+    /// The version the update installs.
+    pub(crate) fn version(&self) -> String {
+        self.version.clone()
+    }
+
     /// Takes what the download reports, and returns the update when it is
     /// still under way.
     pub(crate) fn transfer(

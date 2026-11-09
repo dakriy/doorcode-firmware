@@ -20,10 +20,14 @@ impl Latch {
 
     /// Locks the strike when it is released.
     pub(crate) fn lock(&mut self, device: &Device<'_>) {
-        if let StrikeState::Released { .. } = self.state {
+        if self.is_released() {
             device.connectors.strike().lock();
             self.state = StrikeState::Locked;
         }
+    }
+
+    pub(crate) fn is_released(&self) -> bool {
+        self.relock_at().is_some()
     }
 
     /// When the strike locks again; `None` while it is locked.

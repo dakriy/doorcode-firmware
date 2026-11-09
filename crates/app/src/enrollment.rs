@@ -1,7 +1,10 @@
 //! Enrolling: announcing the controller with the shared enrollment account
 //! until the server sends it the credentials of the door it now is.
 
-use connectors::{BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication};
+use connectors::{
+    BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Mode, Publication,
+    StatusReport,
+};
 use protocol::{Config, Credentials, Enrollment, Timeline};
 
 use crate::device::Device;
@@ -58,17 +61,35 @@ impl Enrolling {
         }
     }
 
-    /// Not a door yet, so the door's settings are the defaults.
-    pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
-        let connection = match self.step {
+    fn connection(&self) -> ConnectionState {
+        match self.step {
             Step::Connecting => ConnectionState::Connecting,
             Step::Waiting { .. } => ConnectionState::Connected,
             Step::Paused { .. } => ConnectionState::Disconnected,
-        };
+        }
+    }
+
+    /// Not a door yet: no door, no timeline, no keypad, and no update.
+    pub(crate) fn live_status(&self) -> StatusReport {
+        StatusReport {
+            phase: connectors::Phase::Enrolling,
+            connection: self.connection(),
+            door_id: None,
+            mode: Mode::Normal,
+            strike_released: false,
+            entry: String::new(),
+            last_check: None,
+            last_reply: None,
+            update: None,
+        }
+    }
+
+    /// Not a door yet, so the door's settings are the defaults.
+    pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
         RunReport::new(
             device,
             None,
-            connection,
+            self.connection(),
             Config::default(),
             Timeline::default(),
             Access::default(),

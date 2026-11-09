@@ -12,13 +12,15 @@ mod file_storage;
 mod firmware;
 mod radio;
 mod random;
+mod status;
 
 pub use broker::{MqttBroker, Traffic};
 pub use clock::SystemClock;
-pub use door::{DoorControl, HostDoorSensor, HostStrike, StrikeMonitor};
+pub use door::{DoorControl, HostDoorSensor, HostStrike};
 pub use download::HostDownload;
 pub use events::{EventSender, HostEvents};
 pub use file_storage::FileStorage;
 pub use firmware::{FirmwareControl, HostFirmware, BOOT_FILE, INSTALLED_FILE, WRITING_FILE};
 pub use radio::{HostRadio, RadioControl};
 pub use random::OsRandom;
+pub use status::HostStatus;

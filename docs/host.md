@@ -56,14 +56,22 @@ Read the door's state:
 
     curl localhost:8484/state
 
+The fields from `phase` to `update` are the application's own last status
+report, which it makes whenever any of them changes; the host shows them as
+reported and works none of them out itself.
+
 | Field | Meaning |
 | --- | --- |
-| `connection` | `connecting`, `connected`, or `disconnected`: the broker connection as last seen. |
+| `phase` | `enrolling`, or `door` once the controller serves as a door. |
+| `connection` | `connecting`, `connected`, or `disconnected`: where the broker connection stands. |
 | `door_id` | The door the controller was enrolled as; `null` while enrolling. |
-| `mode` | `normal`, `open`, or `locked`: the state the stored timeline puts the door in now. |
+| `mode` | `normal`, `open`, or `locked`: the state the timeline puts the door in now. |
 | `strike_released` | Whether the strike lets the door open. |
+| `entry` | The keys of the entry typed so far; empty when none is. |
+| `last_check` | The last check the door sent in this run, with its `request_id` and `digits`; `null` until there is one. |
+| `last_reply` | The last reply that answered a check in this run, with its `request_id`, `allow`, and `strike_ms` (0 for the configured pulse); `null` until there is one. A reply to a check the door no longer waits for is not shown. |
+| `update` | The version of the firmware update downloading; `null` when none is. |
 | `door_open` | Whether the door sensor sees the door open. |
-| `last_check`, `last_reply` | The last check the door published and the last reply it received, decoded from CBOR; `null` until there is one. |
 | `bytes_in`, `bytes_out` | MQTT packet bytes from and to the broker since the last restart. TCP and TLS framing are not counted. |
 | `config` | The stored configuration message, decoded; `null` when none is stored. |
 | `firmware_version` | The version the application runs. |
@@ -85,7 +93,9 @@ ESP32 app descriptor and reports that this start is the first boot of a new
 image. When the application marks the image valid, the host keeps running
 that version across later restarts; when a restart comes before it does,
 the host rolls back to the version that ran before, as the bootloader
-would. A process restart starts from `--firmware-version` again.
+would. A version kept this way lives only as long as the `doorcode-host`
+process: a process restart begins again from `--firmware-version`, whatever
+image was kept before.
 
 The version comes from the ESP32 app image header. An app image starts with
 the 24-byte `esp_image_header_t` (magic `0xE9` in its first byte) and the

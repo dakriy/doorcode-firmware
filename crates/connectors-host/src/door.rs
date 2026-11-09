@@ -3,47 +3,15 @@ use std::sync::Arc;
 
 use connectors::{DoorSensor, Strike};
 
-/// A strike on a desktop: it holds whether it was last released or locked,
-/// readable from any thread through a `StrikeMonitor`. It starts locked, as
-/// the strike of a device that has just powered up.
+/// A strike on a desktop, where there is no lock to drive. Whether it is
+/// released is what the application's status reports say.
 #[derive(Debug, Default)]
-pub struct HostStrike {
-    released: Arc<AtomicBool>,
-}
-
-/// Reads whether a `HostStrike` is released, from any thread.
-#[derive(Debug, Clone)]
-pub struct StrikeMonitor {
-    released: Arc<AtomicBool>,
-}
-
-impl HostStrike {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// A handle that reads whether this strike is released.
-    pub fn monitor(&self) -> StrikeMonitor {
-        StrikeMonitor {
-            released: Arc::clone(&self.released),
-        }
-    }
-}
-
-impl StrikeMonitor {
-    pub fn is_released(&self) -> bool {
-        self.released.load(Ordering::SeqCst)
-    }
-}
+pub struct HostStrike;
 
 impl Strike for HostStrike {
-    fn release(&self) {
-        self.released.store(true, Ordering::SeqCst);
-    }
+    fn release(&self) {}
 
-    fn lock(&self) {
-        self.released.store(false, Ordering::SeqCst);
-    }
+    fn lock(&self) {}
 }
 
 /// A door sensor on a desktop: the door is open or closed as its control

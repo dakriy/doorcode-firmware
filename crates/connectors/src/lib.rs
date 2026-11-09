@@ -48,7 +48,8 @@ pub enum Event {
     Door { open: bool },
     /// The download `Download::start` began made progress or ended.
     Download(Transfer),
-    /// The application is to stop. Production never sends it.
+    /// The application is to stop. Production wiring sends it to end a
+    /// run, as the desktop host does to restart the application.
     Stop,
 }
 
@@ -247,6 +248,80 @@ pub trait Log {
     fn set_level(&self, level: Level);
 }
 
+/// Where the application stands: enrolling, or serving as a door.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// Announced with the shared enrollment account, waiting for credentials.
+    Enrolling,
+    /// Serving as the door the server enrolled it as.
+    Door,
+}
+
+/// Where the broker connection stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionState {
+    /// A connection was asked for and the broker has not answered yet.
+    Connecting,
+    /// Connected, subscribed, and announced or online.
+    Connected,
+    /// Not connected, and waiting to connect again.
+    Disconnected,
+}
+
+/// The state the timeline puts the door in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Outside every span: entries are checked online and denied offline.
+    Normal,
+    /// Inside an `open` span: any key releases the strike.
+    Open,
+    /// Inside a `locked` span: entries are checked online and denied offline.
+    Locked,
+}
+
+/// A check the door sent the server about an entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentCheck {
+    pub request_id: String,
+    pub digits: String,
+}
+
+/// The server's reply to a check the door sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceivedReply {
+    /// The request id of the check it answers.
+    pub request_id: String,
+    pub allow: bool,
+    /// How long the strike is released for; 0 for the configured pulse.
+    pub strike_ms: u64,
+}
+
+/// What the application is doing now, as it describes itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusReport {
+    pub phase: Phase,
+    pub connection: ConnectionState,
+    /// The door the controller serves as; `None` while enrolling.
+    pub door_id: Option<u64>,
+    /// The state the timeline puts the door in now.
+    pub mode: Mode,
+    pub strike_released: bool,
+    /// The keys of the entry typed so far; empty when none is.
+    pub entry: String,
+    /// The last check sent, answered or not.
+    pub last_check: Option<SentCheck>,
+    /// The last reply that answered a check.
+    pub last_reply: Option<ReceivedReply>,
+    /// The version of the firmware update under way, if any.
+    pub update: Option<String>,
+}
+
+/// Where the application tells what it is doing.
+pub trait Status {
+    /// Tells `status`, whenever any of it changed since the last report.
+    fn report(&self, status: &StatusReport);
+}
+
 /// The connector factory. One method per connector and nothing else.
 pub trait Connectors {
     fn storage(&self) -> &dyn Storage;
@@ -260,4 +335,5 @@ pub trait Connectors {
     fn log(&self) -> &dyn Log;
     fn strike(&self) -> &dyn Strike;
     fn door_sensor(&self) -> &dyn DoorSensor;
+    fn status(&self) -> &dyn Status;
 }

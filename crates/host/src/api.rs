@@ -1,13 +1,12 @@
 //! The local HTTP JSON control API.
 
-use connectors::{Clock, DoorSensor, Event, Radio, Storage};
-use connectors_host::SystemClock;
+use connectors::{DoorSensor, Event, Radio, Storage};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tiny_http::{Header, Request, Response, Server};
 
-use crate::live::{message_json, NotRunning};
+use crate::live::NotRunning;
 use crate::run::Device;
 
 /// What a request asks, answered with JSON or a failure.
@@ -147,13 +146,7 @@ fn restart(device: &Device, _body: &str) -> Result<Value, Failure> {
 fn state(device: &Device, _body: &str) -> Result<Value, Failure> {
     let storage = device.storage();
     let mut state = device.live.json();
-    // The stored door id is its decimal digits, which read as a JSON number.
-    state["door_id"] = stored(&storage, "door_id", |id| {
-        serde_json::from_slice(id).unwrap_or(Value::Null)
-    });
-    let timeline = stored(&storage, "timeline", message_json);
-    state["mode"] = mode(&timeline, SystemClock::new().unix_seconds());
-    state["config"] = stored(&storage, "config", message_json);
+    state["config"] = stored_message(&storage, "config");
     state["door_open"] = device.door.is_open().into();
     state["signal"] = device.radio.signal_dbm().into();
     state["free_bytes"] = device.radio.free_bytes().into();
@@ -161,30 +154,9 @@ fn state(device: &Device, _body: &str) -> Result<Value, Failure> {
     Ok(state)
 }
 
-/// The value stored under `key`, read by `read`; null when nothing is
-/// stored or it does not read.
-fn stored(storage: &dyn Storage, key: &str, read: fn(&[u8]) -> Value) -> Value {
-    read(&storage.load(key).ok().flatten().unwrap_or_default())
-}
-
-/// The state the stored timeline puts the door in at `now`, as the
-/// contract defines it: the state of the span `now` falls in, and
-/// `normal` outside every span, after the timeline ends, and while the time
-/// is not known.
-fn mode(timeline: &Value, now: Option<i64>) -> Value {
-    let span = now.and_then(|now| span_at(timeline, now));
-    span.map_or_else(|| json!("normal"), |span| span["state"].clone())
-}
-
-/// The span `now` falls in, before the timeline ends.
-fn span_at(timeline: &Value, now: i64) -> Option<&Value> {
-    let ends = timeline["to"].as_i64().unwrap_or(i64::MIN);
-    let spans = timeline["spans"].as_array().filter(|_| now < ends)?;
-    spans.iter().find(|span| within(span, now))
-}
-
-fn within(span: &Value, now: i64) -> bool {
-    let start = span["start"].as_i64().unwrap_or(i64::MAX);
-    let end = span["end"].as_i64().unwrap_or(i64::MIN);
-    start <= now && now < end
+/// The CBOR message stored under `key` as JSON; null when nothing is
+/// stored or it does not read as CBOR.
+fn stored_message(storage: &dyn Storage, key: &str) -> Value {
+    let payload = storage.load(key).ok().flatten().unwrap_or_default();
+    ciborium::from_reader(payload.as_slice()).unwrap_or(Value::Null)
 }

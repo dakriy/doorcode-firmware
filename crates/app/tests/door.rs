@@ -3,7 +3,7 @@
 //! reconnecting after a drop, and enrolling again once revoked.
 
 use app::ConnectionState;
-use connectors::{Event, Level};
+use connectors::{Event, Level, Phase};
 use pretty_assertions::assert_eq;
 use protocol::{Config, Span, Timeline};
 use testkit::{
@@ -160,7 +160,18 @@ fn a_door_reports_itself_disconnected_after_a_drop() {
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.connection, ConnectionState::Disconnected);
+    let connections_reported = connectors.status.reported(|status| status.connection);
+    assert_eq!(
+        (report.connection, connections_reported),
+        (
+            ConnectionState::Disconnected,
+            vec![
+                ConnectionState::Connecting,
+                ConnectionState::Connected,
+                ConnectionState::Disconnected
+            ]
+        )
+    );
 }
 
 #[test]
@@ -678,10 +689,16 @@ fn a_door_refused_as_not_authorized_forgets_its_credentials_config_and_timeline_
 
     let report = app::run(&connectors).unwrap();
 
+    let status = connectors.status.latest();
     assert_eq!(
-        (report.door, connectors.storage.keys()),
+        (
+            report.door,
+            (status.phase, status.door_id),
+            connectors.storage.keys()
+        ),
         (
             None,
+            (Phase::Enrolling, None),
             vec![
                 "broker_ca".to_owned(),
                 "broker_host".to_owned(),

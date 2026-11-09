@@ -2,7 +2,7 @@
 //! implementations and the stubs.
 
 use connectors::{DoorSensor, Strike};
-use connectors_host::{HostDoorSensor, HostStrike};
+use connectors_host::HostDoorSensor;
 use pretty_assertions::assert_eq;
 use testkit::{StrikeCall, StubDoorSensor, StubStrike};
 
@@ -41,30 +41,6 @@ fn a_host_sensor_reports_what_its_control_last_set() {
     control.set_open(false);
 
     assert!(!sensor.is_open());
-}
-
-#[test]
-fn a_host_strike_starts_locked() {
-    assert!(!HostStrike::new().monitor().is_released());
-}
-
-#[test]
-fn a_released_host_strike_reads_as_released() {
-    let strike = HostStrike::new();
-
-    strike.release();
-
-    assert!(strike.monitor().is_released());
-}
-
-#[test]
-fn a_host_strike_locked_after_release_reads_as_locked() {
-    let strike = HostStrike::new();
-    strike.release();
-
-    strike.lock();
-
-    assert!(!strike.monitor().is_released());
 }
 
 #[test]

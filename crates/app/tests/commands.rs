@@ -3,7 +3,7 @@
 //! answering what it cannot do with a failed ack.
 
 use app::{Counters, StrikeState};
-use connectors::{Event, Level};
+use connectors::{ConnectionState, Event, Level, Phase};
 use pretty_assertions::assert_eq;
 use protocol::{Ack, Command, Config, Credentials};
 use testkit::{
@@ -425,9 +425,18 @@ fn both_credentials_refused_in_a_row_is_revocation_and_the_door_enrolls_again() 
 
     let report = app::run(&connectors).unwrap();
 
+    let status = connectors.status.latest();
     assert_eq!(
-        (report.door, connectors.storage.keys().len()),
-        (None, StubStorage::provisioned().keys().len())
+        (
+            report.door,
+            connectors.storage.keys().len(),
+            (status.phase, status.door_id, status.connection)
+        ),
+        (
+            None,
+            StubStorage::provisioned().keys().len(),
+            (Phase::Enrolling, None, ConnectionState::Connecting)
+        )
     );
 }
 

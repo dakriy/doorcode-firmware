@@ -6,7 +6,7 @@ mod placeholders;
 
 use connectors::{
     Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, FirmwareError, Level, Log,
-    Radio, Random, Storage, Strike,
+    Radio, Random, Status, StatusReport, Storage, Strike,
 };
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
@@ -90,6 +90,15 @@ impl Log for EspLog {
     }
 }
 
+/// Status reports go to the log at debug level.
+struct LogStatus;
+
+impl Status for LogStatus {
+    fn report(&self, status: &StatusReport) {
+        log::debug!("status: {status:?}");
+    }
+}
+
 struct EspConnectors {
     storage: NvsStorage,
 }
@@ -137,6 +146,10 @@ impl Connectors for EspConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &ClosedDoor
+    }
+
+    fn status(&self) -> &dyn Status {
+        &LogStatus
     }
 }
 

@@ -2,7 +2,7 @@
 //! the server about it, and the strike that opens for its reply or for any
 //! key while the timeline holds the door open.
 
-use connectors::Level;
+use connectors::{Level, ReceivedReply, SentCheck};
 use protocol::Config;
 
 use crate::check::{self, Outstanding};
@@ -25,6 +25,10 @@ pub(crate) struct Gate {
     /// The one check waiting for its reply. A newer entry replaces it.
     check: Option<Outstanding>,
     latch: Latch,
+    /// The last check sent, answered or not.
+    last_check: Option<SentCheck>,
+    /// The last reply that answered a check.
+    last_reply: Option<ReceivedReply>,
     /// The round trip of the last check that was answered; 0 until one is.
     latency_ms: u64,
 }
@@ -71,7 +75,14 @@ impl Gate {
             return;
         }
         let timeout = door.config.reply_timeout_ms;
-        self.check = check::send(device, door.door_id, digits, timeout);
+        let check = check::send(device, door.door_id, digits, timeout);
+        if let Some(sent) = &check {
+            self.last_check = Some(SentCheck {
+                request_id: sent.check.request_id.clone(),
+                digits: sent.check.digits.clone(),
+            });
+        }
+        self.check = check;
     }
 
     /// Releases the strike for the reply to the outstanding check when it
@@ -83,6 +94,11 @@ impl Gate {
         self.check = None;
         self.latency_ms = answer.round_trip_ms;
         let reply = answer.reply;
+        self.last_reply = Some(ReceivedReply {
+            request_id: reply.request_id.clone(),
+            allow: reply.allow,
+            strike_ms: reply.strike_ms,
+        });
         if !reply.allow {
             device.log(Level::Info, "the server denied the entry");
             return;
@@ -115,6 +131,23 @@ impl Gate {
     /// The round trip of the last check that was answered; 0 until one is.
     pub(crate) fn latency_ms(&self) -> u64 {
         self.latency_ms
+    }
+
+    pub(crate) fn strike_released(&self) -> bool {
+        self.latch.is_released()
+    }
+
+    /// The keys of the entry typed so far.
+    pub(crate) fn entry(&self) -> &str {
+        self.entry.keys()
+    }
+
+    pub(crate) fn last_check(&self) -> Option<SentCheck> {
+        self.last_check.clone()
+    }
+
+    pub(crate) fn last_reply(&self) -> Option<ReceivedReply> {
+        self.last_reply.clone()
     }
 
     pub(crate) fn report(self) -> Access {
