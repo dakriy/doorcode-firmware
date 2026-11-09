@@ -1,6 +1,11 @@
 # Separate workspace: this package targets xtensa-esp32-espidf and builds in
 # the Espressif Rust container (make firmware-build). The desktop workspace in
 # the repository root excludes this directory.
+#
+# The Espressif toolchain is nightly; panic-immediate-abort lets the
+# `migrate` profile below abort on a panic without formatting a message.
+cargo-features = ["panic-immediate-abort"]
+
 [workspace]
 
 [package]
@@ -23,6 +28,13 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 
+# The stepping-stone image for boards on ESP-IDF's standard two-OTA table
+# (docs/migration.md), built with `--profile migrate --features migrate`: it
+# must fit that table's 1 MB slots, so panics abort without a message.
+[profile.migrate]
+inherits = "release"
+panic = "immediate-abort"
+
 [profile.dev]
 debug = true
 opt-level = "z"
@@ -33,6 +45,11 @@ connectors = { path = "../crates/connectors" }
 protocol = { path = "../crates/protocol" }
 log = "0.4"
 esp-idf-svc = { version = "0.51", features = ["critical-section"] }
+
+[features]
+# The stepping-stone image: no keypad, strike, door sensor, or Mesh-Lite, and
+# the firmware's own log compiled down to errors.
+migrate = ["log/release_max_level_error"]
 
 [build-dependencies]
 embuild = "0.33"

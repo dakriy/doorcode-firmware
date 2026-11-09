@@ -8,22 +8,26 @@
 //! configuration, or, while those are empty, the provisioned ones, and
 //! falls back to the credentials that last associated when those fail.
 //! Since the choice is made once, a change of the mesh settings restarts
-//! the device.
+//! the device. The stepping-stone image (`migrate`) has no Mesh-Lite and
+//! always runs the plain station.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use connectors::Storage;
+use connectors::{Mesh, Storage};
 use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::{self, EspError};
 use protocol::Config;
 
 use crate::clock::{now_ms, TimeSync};
+#[cfg(not(feature = "migrate"))]
+use crate::mesh;
 use crate::nvs_storage::NvsStorage;
+use crate::radio::Position;
+use crate::station;
 use crate::storage_keys::{CONFIG, NAMESPACE, WIFI_PASSWORD, WIFI_SSID};
-use crate::{mesh, station};
 
 /// The network's own namespace, and the credentials that last associated.
 const MEMORY_NAMESPACE: &str = "wifi";
@@ -78,22 +82,24 @@ pub(crate) struct Context {
     pub(crate) mesh: Option<MeshSettings>,
 }
 
+/// Whether the image has Mesh-Lite.
+const HAS_MESH: bool = cfg!(not(feature = "migrate"));
+
 /// Starts the station the stored configuration asks for, on its own
-/// thread, and returns its link and whether it runs the mesh.
+/// thread, and returns its link and how to read where the door sits in
+/// the mesh.
 pub(crate) fn start(
     modem: Modem,
     partition: EspDefaultNvsPartition,
     time: TimeSync,
-) -> Result<(Link, bool), EspError> {
+) -> Result<(Link, Position), EspError> {
     let context = Context::open(&partition, time)?;
     let link = context.link.clone();
-    let mesh = context.mesh.clone();
-    let meshing = mesh.is_some();
-    match mesh {
-        Some(settings) => mesh::start(modem, &settings, context),
-        None => station::start(modem, partition, context),
+    #[cfg(not(feature = "migrate"))]
+    if let Some(settings) = context.mesh.clone() {
+        return mesh::start(modem, &settings, context).map(|()| (link, mesh::position as Position));
     }
-    .map(|()| (link, meshing))
+    station::start(modem, partition, context).map(|()| (link, Mesh::default as Position))
 }
 
 /// The Wi-Fi credentials of one network.
@@ -103,8 +109,8 @@ pub(crate) struct Credentials {
     pub(crate) password: String,
 }
 
-/// The mesh the door may join or offer: present when `mesh_enabled` is
-/// true and `mesh_ssid` names one.
+/// The mesh the door may join or offer: present when the image has
+/// Mesh-Lite, `mesh_enabled` is true, and `mesh_ssid` names one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MeshSettings {
     pub(crate) network: Credentials,
@@ -114,7 +120,7 @@ pub(crate) struct MeshSettings {
 
 impl MeshSettings {
     fn read(config: &Config) -> Option<Self> {
-        let named = config.mesh_enabled && !config.mesh_ssid.is_empty();
+        let named = HAS_MESH && config.mesh_enabled && !config.mesh_ssid.is_empty();
         named.then(|| Self {
             network: Credentials {
                 ssid: config.mesh_ssid.clone(),

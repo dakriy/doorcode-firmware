@@ -16,6 +16,8 @@ live outside the repository.
   that checks it.
 - `release.md`: building, signing, uploading, and rolling out a firmware
   release.
+- `migration.md`: moving boards from ESP-IDF's standard two-OTA partition
+  table to this firmware's, through a stepping-stone image.
 - `host.md`: the desktop host binary, its flags, and its control API.
 - `mesh.md`: how doors far from an access point hop through other doors,
   and the telemetry that shows it.

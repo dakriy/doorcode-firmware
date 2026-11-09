@@ -77,6 +77,14 @@ before then, the bootloader goes back to the previous image, which reports
 the old version and acknowledges the update as failed with
 `reverted: could not connect`.
 
+## Boards on the standard partition table
+
+Boards whose partition table has ESP-IDF's standard 1 MB app slots cannot
+hold a release image. They first take a stepping-stone image, built with
+`scripts/firmware-release.sh --migrate`, from the previous update
+server; it moves them to this firmware's table, and the release then
+reaches them as above. `migration.md` describes both steps.
+
 ## Bench boards and unsigned images
 
 A door whose configuration sets `accept_unsigned_firmware` to `true` skips

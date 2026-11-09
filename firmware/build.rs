@@ -6,10 +6,18 @@
 //!
 //! The keys and encodings are the ones the desktop host seeds its storage
 //! with, so the application reads the same values on both targets.
+//!
+//! With the `migrate` feature it also writes `partition-table.bin` to
+//! `OUT_DIR`: `partitions.csv` as ESP-IDF's `gen_esp32part.py` turns it into
+//! the binary table, the bytes the stepping-stone image writes at 0x8000
+//! (`src/migration.rs`).
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use embuild::espidf::sysenv;
 
 use minicbor::Encoder;
 use serde_json::{Map, Number, Value};
@@ -21,6 +29,8 @@ use storage_keys::{BROKER_CA, CONFIG, NAMESPACE, WIFI_PASSWORD, WIFI_SSID};
 
 /// The provisioning file the server makes, beside this script.
 const PROVISIONING: &str = "provisioning.json";
+/// The partition table, beside this script.
+const PARTITIONS: &str = "partitions.csv";
 /// The layout version of the provisioning file this build reads.
 const FORMAT: u64 = 1;
 /// The protocol version every message carries as `v`.
@@ -42,6 +52,34 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by cargo"));
     write(&out_dir.join("provisioning.rs"), &rust_source(&entries));
     write(&out_dir.join("provisioning.csv"), &nvs_csv(&entries));
+    if env::var_os("CARGO_FEATURE_MIGRATE").is_some() {
+        partition_table(&out_dir.join("partition-table.bin"));
+    }
+}
+
+/// Runs ESP-IDF's partition table generator on `partitions.csv` with the
+/// arguments ESP-IDF's own build gives it, in the Python environment
+/// esp-idf-sys set up, writing the binary table to `out`.
+fn partition_table(out: &Path) {
+    println!("cargo:rerun-if-changed={PARTITIONS}");
+    let idf = sysenv::idf_path().expect("ESP-IDF's path, from esp-idf-sys");
+    let path = sysenv::env_path().expect("ESP-IDF's PATH, from esp-idf-sys");
+    let generator = Path::new(&idf).join("components/partition_table/gen_esp32part.py");
+    let status = Command::new("python")
+        .env("PATH", path)
+        .arg(generator)
+        .args([
+            "-q",
+            "--offset",
+            "0x8000",
+            "--flash-size",
+            "4MB",
+            PARTITIONS,
+        ])
+        .arg(out)
+        .status()
+        .expect("running gen_esp32part.py");
+    assert!(status.success(), "gen_esp32part.py failed: {status}");
 }
 
 fn write(path: &Path, contents: &str) {

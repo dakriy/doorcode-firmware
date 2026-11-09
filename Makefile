@@ -10,7 +10,7 @@ FIRMWARE = sh scripts/firmware-container.sh
 
 .PHONY: verify-fast verify-mutation verify-mutation-diff verify-integration verify-all \
 	fmt lint build check-imports check-complexity test-fast coverage dead-code duplicates \
-	firmware-build firmware-flash firmware-check firmware-provision \
+	firmware-build firmware-build-migrate firmware-flash firmware-check firmware-provision \
 	firmware-release firmware-upload
 
 ## verify-fast: every gate except mutation; after every change.
@@ -65,8 +65,13 @@ duplicates:
 firmware-build:
 	$(FIRMWARE) 'cargo build --release && chown -R $(shell id -u):$(shell id -g) /repo/firmware/Cargo.lock'
 
+## firmware-build-migrate: builds the stepping-stone image for boards on the standard two-OTA table (docs/migration.md).
+firmware-build-migrate:
+	$(FIRMWARE) '. /repo/scripts/firmware-env.sh && migrate_cargo build && chown -R $(shell id -u):$(shell id -g) /repo/firmware/Cargo.lock'
+
 firmware-check:
-	$(FIRMWARE) 'cargo clippy --release -- -D warnings && cargo fmt --check'
+	$(FIRMWARE) '. /repo/scripts/firmware-env.sh && cargo clippy --release -- -D warnings && \
+		migrate_cargo clippy -- -D warnings && cargo fmt --check'
 
 # The built bootloader, not espflash's own, so app rollback is on; otadata
 # is erased so the board boots the image just written to ota_0.

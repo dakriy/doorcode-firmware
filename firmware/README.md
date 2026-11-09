@@ -5,6 +5,7 @@ v5.3.3 through `esp-idf-svc`. Xtensa needs Espressif's Rust fork, so builds
 run in Espressif's container rather than the desktop toolchain:
 
     make firmware-build      # builds target/xtensa-esp32-espidf/release/doorcode-firmware
+    make firmware-build-migrate  # the stepping-stone image, in target/xtensa-esp32-espidf/migrate/
     make firmware-check      # clippy at the connector complexity cap, and rustfmt
     make firmware-flash      # flashes FIRMWARE_PORT (default /dev/ttyUSB0) and opens the monitor
     make firmware-provision  # writes provisioning.json into the NVS partition on FIRMWARE_PORT
@@ -38,6 +39,24 @@ excluded from coverage and mutation and is verified by `make firmware-build`,
 
 Security decisions are in `docs/security.md`. Releasing an image is in
 `docs/release.md`.
+
+## The stepping-stone image
+
+The `migrate` feature, built with the `migrate` profile and
+`sdkconfig.migrate` on top of `sdkconfig.defaults` (`migrate_cargo` in
+`scripts/firmware-env.sh`), is the image that moves a board from ESP-IDF's
+standard two-OTA table to `partitions.csv` (`docs/migration.md`). It
+leaves out the keypad, strike, and door sensor drivers (`src/inert.rs`
+holds the strike locked and reads the door as closed) and Mesh-Lite, and
+runs `src/migration.rs` before anything else reads the partition table.
+With the feature on, `build.rs` also turns `partitions.csv` into the
+binary table with ESP-IDF's `gen_esp32part.py`, for the image to write.
+The profile aborts on a panic without formatting a message
+(`panic = "immediate-abort"`, through `-Z build-std`), and
+`sdkconfig.migrate` turns off what a board does not need on the way:
+IPv6, the soft-AP, log levels below error, error names, the TLS server,
+and every cipher suite, curve, and hash but ECDHE-ECDSA with AES-GCM,
+SHA-256, and P-256. `make firmware-check` runs clippy on both variants.
 
 ## Provisioning
 

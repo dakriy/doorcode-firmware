@@ -1,0 +1,61 @@
+# The stepping-stone image (docs/migration.md), on top of sdkconfig.defaults:
+# ESP_IDF_SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.migrate" with
+# `--profile migrate --features migrate` (scripts/firmware-env.sh). It must
+# fit the 1 MB slots of ESP-IDF's standard two-OTA table, so everything it
+# does not need is left out.
+
+# It rewrites the partition table at 0x8000, which ESP-IDF otherwise
+# refuses to write.
+CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED=y
+
+# No Mesh-Lite; the plain station joins the access point.
+# CONFIG_MESH_LITE_ENABLE is not set
+# CONFIG_ESP_WIFI_SOFTAP_SUPPORT is not set
+
+# Logs: errors only, and errors by number without their names.
+CONFIG_LOG_DEFAULT_LEVEL_ERROR=y
+CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y
+# CONFIG_LOG_COLORS is not set
+# CONFIG_ESP_ERR_TO_NAME_LOOKUP is not set
+# CONFIG_MBEDTLS_ERROR_STRINGS is not set
+
+# IPv4 only.
+# CONFIG_LWIP_IPV6 is not set
+
+# Wi-Fi: WPA2 and WPA3 personal; no enterprise authentication.
+# CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT is not set
+# CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set
+
+# TLS: a client of TLS 1.2 only, with ECDHE-ECDSA key exchange, AES-GCM,
+# SHA-256, and the P-256 curve, which is what the broker's and the
+# download server's certificates from the managed CA need. No root
+# bundle: the image trusts the provisioned CA alone.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
+# CONFIG_MBEDTLS_CERTIFICATE_BUNDLE is not set
+# CONFIG_MBEDTLS_SSL_RENEGOTIATION is not set
+# CONFIG_MBEDTLS_KEY_EXCHANGE_RSA is not set
+# CONFIG_MBEDTLS_KEY_EXCHANGE_DHE_RSA is not set
+# CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_RSA is not set
+# CONFIG_MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA is not set
+# CONFIG_MBEDTLS_KEY_EXCHANGE_ECDH_RSA is not set
+# CONFIG_MBEDTLS_PSK_MODES is not set
+# CONFIG_MBEDTLS_CCM_C is not set
+# CONFIG_MBEDTLS_CMAC_C is not set
+# CONFIG_MBEDTLS_SHA512_C is not set
+# CONFIG_MBEDTLS_PKCS7_C is not set
+# CONFIG_MBEDTLS_PEM_WRITE_C is not set
+# CONFIG_MBEDTLS_X509_CRL_PARSE_C is not set
+# CONFIG_MBEDTLS_X509_CSR_PARSE_C is not set
+# CONFIG_MBEDTLS_DHM_C is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP521R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP192K1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP224K1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED is not set
+# CONFIG_MBEDTLS_FS_IO is not set

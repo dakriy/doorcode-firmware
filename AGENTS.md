@@ -206,7 +206,8 @@ their own containers, publishing the ports on 127.0.0.1 only. The download
 tests serve HTTPS from the test process and are fast, except the one that
 asks the system's name resolver about an unknown host.
 
-Firmware commands: `make firmware-build`, `make firmware-check`,
+Firmware commands: `make firmware-build`, `make firmware-build-migrate`
+(the stepping-stone image, `docs/migration.md`), `make firmware-check`,
 `make firmware-flash` (`FIRMWARE_PORT`, default `/dev/ttyUSB0`), and for
 releases `make firmware-release VERSION= KEY=` and
 `make firmware-upload SERVER= TOKEN= FILE= VERSION=` (`docs/release.md`).

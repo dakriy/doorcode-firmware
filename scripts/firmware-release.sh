@@ -15,18 +15,45 @@
 # signature with, for trying the flow with a throwaway key; an image signed
 # with any key but the committed one is refused by every door.
 #
-# Usage: scripts/firmware-release.sh VERSION KEY_PATH
+# With --migrate it builds the stepping-stone image for boards on ESP-IDF's
+# standard two-OTA table instead (docs/migration.md). It embeds
+# firmware/provisioning.json, which must exist; its VERSION must end in
+# -migrate, so that no server takes it for a release to update to; and the
+# signed image must fit that table's 1 MB app slots.
+#
+# Usage: scripts/firmware-release.sh [--migrate] VERSION KEY_PATH
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
+variant=full
+if [ "${1:-}" = --migrate ]; then
+    variant=migrate
+    shift
+fi
 if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-    echo "usage: $0 VERSION KEY_PATH" >&2
+    echo "usage: $0 [--migrate] VERSION KEY_PATH" >&2
     exit 2
 fi
 version=$1
 key=$2
 
-if [ -e "$repo/firmware/provisioning.json" ]; then
+# A release image goes to every door, so it must not embed the
+# provisioning file's secrets. The stepping-stone image must: the boards it
+# goes to have nothing in NVS, so the embedded defaults are their broker,
+# enrollment account, and Wi-Fi network.
+if [ "$variant" = migrate ]; then
+    case "$version" in
+    *-migrate) ;;
+    *)
+        echo "the stepping-stone image's version '$version' does not end in -migrate" >&2
+        exit 1
+        ;;
+    esac
+    if [ ! -f "$repo/firmware/provisioning.json" ]; then
+        echo "the stepping-stone image embeds firmware/provisioning.json, which is missing" >&2
+        exit 1
+    fi
+elif [ -e "$repo/firmware/provisioning.json" ]; then
     echo "firmware/provisioning.json exists; a release image would embed its secrets." >&2
     echo "Move it out of the repository and run the release again." >&2
     exit 1
@@ -71,7 +98,7 @@ sh "$repo/scripts/firmware-container.sh" \
     -v "$public":/run/release/signing-public-key.bin:ro \
     "sh /repo/scripts/firmware-release-image.sh '$version' \
         /run/release/signing-key.pem /run/release/signing-public-key.bin \
-        /repo/dist/$name.bin $(id -u):$(id -g)"
+        /repo/dist/$name.bin $(id -u):$(id -g) $variant"
 
 (cd "$repo/dist" && sha256sum "$name.bin" > "$name.sha256")
 size=$(wc -c < "$repo/dist/$name.bin")
