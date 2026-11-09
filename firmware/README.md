@@ -47,13 +47,20 @@ provisioning file (format 1):
 
     {
       "format": 1,
+      "generated_at": 1767603600,
       "broker": {"host": "...", "port": 8883, "tls": true, "ca_pem": "..."},
+      "server": {"device_url": "https://..."},
       "enrollment": {"username": "...", "password": "..."},
       "wifi": {"ssid": "...", "password": "..."},
       "door_config": {"strike_pulse_ms": 3000, "...": "..."}
     }
 
-Save it as `firmware/provisioning.json`. Git ignores it, since it holds
+Download it from the server's firmware page ("Download provisioning
+file"), or from a door's page for a board meant for that door, and save it
+as `firmware/provisioning.json`. `generated_at` and `server.device_url` are
+not used: an update command carries its full download address. That
+address must present a certificate from `broker.ca_pem`, the one CA the
+board trusts (`docs/protocol.md`). Git ignores it, since it holds
 secrets. The desktop host reads the same file.
 
 The values reach the board two ways, as the same NVS entries in the

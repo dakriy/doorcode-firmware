@@ -10,7 +10,7 @@ The script creates entities on the server and deletes them again: a door,
 a user with a door code, a zone, a group, an access rule over the built-in
 Always schedule, and a firmware version. It changes the user's group into
 door commanders, overrides the door's configuration, and may set
-`public_url`. **Run it only against a development server.**
+`device_url`. **Run it only against a development server.**
 
 ## Requirements
 
@@ -101,13 +101,18 @@ created.
 17. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke` the
     controller enrolls again.
 
-The server sends firmware only while `public_url` is set, and accepts only
-an `https://` address for it. When `public_url` is empty, the script sets
-it to `--server` (and clears it again afterwards); when the server refuses
-that, as it does for an `http://` address, the two update steps print
-`SKIP` with the server's reason. The host downloads over HTTPS trusting the
-operating system's certificate roots, so the update steps need a server
-behind a certificate this computer trusts.
+The server sends firmware only while `device_url` is set: update commands
+carry a download address built from it. When it is empty, the script sets
+it to `--server` and clears it again afterwards. A server too old to have
+`device_url` builds the address from `public_url` instead, and the script
+sets that one. A development server accepts an `http://` address there,
+and the host downloads over plain HTTP as well as over HTTPS (trusting the
+operating system's certificate roots), so the update steps run against the
+server's compose stack. When the server refuses the address, the two
+update steps print `SKIP` with the server's reason.
+
+A real door downloads only over HTTPS, verified against its broker's CA
+(`protocol.md`).
 
 # The load tool
 

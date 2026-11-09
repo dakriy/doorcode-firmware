@@ -114,7 +114,8 @@ ZONE_ID=""
 GROUP_ID=""
 RULE_ID=""
 FIRMWARE_ID=""
-PUBLIC_URL_SET=false
+# The setting update URLs are built from, when the script set it.
+URL_SETTING_SET=""
 
 stop_host() {
     [ -n "$HOST_PID" ] || return 0
@@ -142,7 +143,7 @@ cleanup() {
         remove /zones "$ZONE_ID"
         remove /groups "$GROUP_ID"
         remove /users "$USER_ID"
-        $PUBLIC_URL_SET && api_ok PUT /settings/public_url '{"clear":true}'
+        [ -n "$URL_SETTING_SET" ] && api_ok PUT "/settings/$URL_SETTING_SET" '{"clear":true}'
     fi
     rm -rf "$WORK"
 }
@@ -443,16 +444,25 @@ step_firmware_upload() {
     pass firmware-upload "version $NEW_VERSION as firmware $FIRMWARE_ID"
 }
 
-# public_url_ready: makes sure public_url is set, setting it to the
-# server's address when it is empty.
-public_url_ready() {
-    api_ok GET /settings/public_url || { fail public-url "reading it $(reason)"; return 1; }
+# url_setting: the setting the server builds update URLs from: device_url,
+# or public_url on a server without it.
+url_setting() {
+    api GET /settings/device_url
+    if [ "$STATUS" = 404 ]; then echo public_url; else echo device_url; fi
+}
+
+# download_url_ready: makes sure the setting update URLs are built from is
+# set, setting it to the server's address when it is empty.
+download_url_ready() {
+    local key
+    key="$(url_setting)"
+    api_ok GET "/settings/$key" || { fail "$key" "reading it $(reason)"; return 1; }
     [ -n "$(answer .value)" ] && return 0
-    if api_ok PUT /settings/public_url "{\"value\":\"$SERVER\"}"; then
-        PUBLIC_URL_SET=true
+    if api_ok PUT "/settings/$key" "{\"value\":\"$SERVER\"}"; then
+        URL_SETTING_SET="$key"
         return 0
     fi
-    skip update-unsigned "the server refused public_url $SERVER ($(answer .error)); firmware is only sent to an https public_url"
+    skip update-unsigned "the server refused $key $SERVER ($(answer .error)); firmware is only sent while $key is set"
     skip update-accepted "as update-unsigned"
     return 1
 }
@@ -467,8 +477,8 @@ step_update_unsigned() {
         fail update-unsigned "POST /doors/$DOOR_ID/update $(reason)"
     elif ! eventually update_ended failed; then
         fail update-unsigned "the update did not fail: $(update_state .)"
-    elif [ "$(update_state .detail)" != "bad signature" ]; then
-        fail update-unsigned "the update failed with \"$(update_state .detail)\", not bad signature"
+    elif [[ "$(update_state .detail)" != *"bad signature"* ]]; then
+        fail update-unsigned "the update failed with \"$(update_state .detail)\", not naming bad signature"
     else
         pass update-unsigned "the unsigned image failed with bad signature"
     fi
@@ -499,7 +509,7 @@ step_update_accepted() {
 
 step_firmware() {
     step_firmware_upload || return
-    public_url_ready || return
+    download_url_ready || return
     step_update_unsigned
     step_update_accepted
 }

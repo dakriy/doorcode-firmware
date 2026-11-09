@@ -27,7 +27,9 @@ over the file, since the server may have changed it, as a configuration's
 `broker_host` does. Delete the data directory to start over as a new
 controller.
 
-Downloads trust the operating system's certificate roots.
+Downloads over HTTPS trust the operating system's certificate roots, not
+the provisioned CA a board trusts (`protocol.md`); an `http://` address,
+which a development server may send, is downloaded over plain HTTP.
 
 ## Web keypad
 
