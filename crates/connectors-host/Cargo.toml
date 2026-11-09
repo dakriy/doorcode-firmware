@@ -8,10 +8,16 @@ description = "Real connector implementations for running the firmware on a desk
 
 [dependencies]
 connectors.workspace = true
+getrandom = "0.4"
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"] }
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+ureq = { version = "3.5", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [dev-dependencies]
 testkit.workspace = true
 pretty_assertions.workspace = true
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 tempfile = "3"
 
 [lints]

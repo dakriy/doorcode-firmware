@@ -8,62 +8,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, FirmwareError, Level, Log,
-    Radio, Random, Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, Level, Log, Radio, Random,
+    Storage, Strike,
 };
-use connectors_host::FileStorage;
+use connectors_host::{FileStorage, HostFirmware, OsRandom, SystemClock};
 
-use placeholders::{
-    ClosedDoor, NoDownload, NoRadio, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
-};
-
-/// The image this binary stands for, built from this crate's version and
-/// trusting the firmware's signing key.
-struct BuildFirmware;
-
-/// The public key firmware images are signed with.
-const SIGNING_KEY: &[u8] = include_bytes!("../../../firmware/signing_public_key.bin");
-
-/// Installing is not supported yet; requests to install are refused.
-const NOT_SUPPORTED: &str = "not supported yet";
-
-impl Firmware for BuildFirmware {
-    fn running_version(&self) -> String {
-        env!("CARGO_PKG_VERSION").to_owned()
-    }
-
-    fn signing_key(&self) -> Vec<u8> {
-        SIGNING_KEY.to_vec()
-    }
-
-    fn first_boot_of_new_image(&self) -> bool {
-        false
-    }
-
-    fn mark_valid(&self) -> Result<(), FirmwareError> {
-        Ok(())
-    }
-
-    fn begin(&self) -> Result<(), FirmwareError> {
-        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
-    }
-
-    fn write(&self, _chunk: &[u8]) -> Result<(), FirmwareError> {
-        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
-    }
-
-    fn finish(&self) -> Result<(), FirmwareError> {
-        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
-    }
-
-    fn set_boot(&self) -> Result<(), FirmwareError> {
-        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
-    }
-
-    fn restart(&self) {
-        // The host has nothing to restart yet.
-    }
-}
+use placeholders::{ClosedDoor, NoDownload, NoRadio, NoStrike, OfflineBroker, StoppedEvents};
 
 /// Writes lines up to the level last set to standard error.
 struct StderrLog {
@@ -84,6 +34,8 @@ impl Log for StderrLog {
 
 struct HostConnectors {
     storage: FileStorage,
+    clock: SystemClock,
+    firmware: HostFirmware,
     log: StderrLog,
 }
 
@@ -101,11 +53,11 @@ impl Connectors for HostConnectors {
     }
 
     fn clock(&self) -> &dyn Clock {
-        &StartClock
+        &self.clock
     }
 
     fn random(&self) -> &dyn Random {
-        &ZeroRandom
+        &OsRandom
     }
 
     fn radio(&self) -> &dyn Radio {
@@ -113,7 +65,7 @@ impl Connectors for HostConnectors {
     }
 
     fn firmware(&self) -> &dyn Firmware {
-        &BuildFirmware
+        &self.firmware
     }
 
     fn download(&self) -> &dyn Download {
@@ -143,6 +95,8 @@ fn main() -> ExitCode {
     }
     let connectors = HostConnectors {
         storage: FileStorage::new(&data_dir),
+        clock: SystemClock::new(),
+        firmware: HostFirmware::new(env!("CARGO_PKG_VERSION"), &data_dir, false),
         log: StderrLog {
             level: Cell::new(Level::Info),
         },

@@ -1,9 +1,10 @@
-//! Stand-ins for connectors the desktop host does not implement yet. The
-//! event queue stops the run at once, so nothing reaches the others.
+//! Stand-ins for the connectors that need provisioning, which the desktop
+//! host does not read yet. The event queue stops the run at once, so
+//! nothing reaches the others.
 
 use connectors::{
-    Broker, BrokerError, Clock, ConnectOptions, DoorSensor, Download, DownloadError, Event, Events,
-    Publication, Radio, Random, Strike,
+    Broker, BrokerError, ConnectOptions, DoorSensor, Download, DownloadError, Event, Events,
+    Publication, Radio, Strike,
 };
 
 pub(crate) struct StoppedEvents;
@@ -31,26 +32,6 @@ impl Broker for OfflineBroker {
 
     fn disconnect(&self) -> Result<(), BrokerError> {
         Ok(())
-    }
-}
-
-pub(crate) struct StartClock;
-
-impl Clock for StartClock {
-    fn monotonic_ms(&self) -> u64 {
-        0
-    }
-
-    fn unix_seconds(&self) -> Option<i64> {
-        None
-    }
-}
-
-pub(crate) struct ZeroRandom;
-
-impl Random for ZeroRandom {
-    fn bytes(&self, count: usize) -> Vec<u8> {
-        vec![0; count]
     }
 }
 

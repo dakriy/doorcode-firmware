@@ -200,8 +200,11 @@ for quick iteration while working. It is not the gate: the full
 cargo-mutants' scratch copies in `target/mutants-tmp`, so an interrupted run
 leaves nothing outside the repository and `cargo clean` removes it.
 
-Slow connector test prerequisites: None yet. When a connector needs a local
-service, its slow test starts a container and this section names the image.
+Slow connector test prerequisites: `docker` with the `eclipse-mosquitto:2`
+image (`docker pull eclipse-mosquitto:2`). The broker tests start and remove
+their own containers, publishing the ports on 127.0.0.1 only. The download
+tests serve HTTPS from the test process and are fast, except the one that
+asks the system's name resolver about an unknown host.
 
 Firmware commands: `make firmware-build`, `make firmware-check`,
 `make firmware-flash` (`FIRMWARE_PORT`, default `/dev/ttyUSB0`).
@@ -222,7 +225,8 @@ because they perform I/O or read nondeterministic state.
 - Crates: `connectors-host`, `host`, `testkit`, `doorcode-firmware`
   (implementations, wiring, test support)
 - Effect crates, denied by name in `scripts/check-imports.sh`: `tokio`,
-  `async-std`, `smol`, `reqwest`, `hyper`, `ureq`, `rusqlite`, `sqlx`,
+  `async-std`, `smol`, `reqwest`, `hyper`, `ureq`, `rumqttc`, `rustls`,
+  `rcgen`, `rusqlite`, `sqlx`,
   `diesel`, `rand`, `getrandom`, `fastrand`, `uuid`, `chrono`, `time`,
   `esp-idf-svc`, `esp-idf-hal`, `esp-idf-sys`, `embedded-svc`, `tempfile`
 - Standard-library modules, denied by path in `scripts/check-imports.sh`:

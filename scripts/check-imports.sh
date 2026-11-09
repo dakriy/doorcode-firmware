@@ -31,7 +31,7 @@ for crate in app protocol; do
             connectors|protocol) ;;
             connectors-host|host|testkit|firmware|doorcode-firmware)
                 fail "$crate depends on '$dep' (connector implementation, wiring, or test support)" ;;
-            tokio|async-std|smol|reqwest|hyper|ureq|rusqlite|sqlx|diesel|rand|getrandom|fastrand|uuid|chrono|time|esp-idf-svc|esp-idf-hal|esp-idf-sys|embedded-svc|tempfile|std-io)
+            tokio|async-std|smol|reqwest|hyper|ureq|rumqttc|rustls|rcgen|rusqlite|sqlx|diesel|rand|getrandom|fastrand|uuid|chrono|time|esp-idf-svc|esp-idf-hal|esp-idf-sys|embedded-svc|tempfile|std-io)
                 fail "$crate depends on effect crate '$dep'" ;;
         esac
     done
