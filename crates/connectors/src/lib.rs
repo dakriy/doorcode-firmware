@@ -39,6 +39,10 @@ pub enum Event {
     Refused { code: u8 },
     /// A message arrived on a subscribed topic.
     Message(Incoming),
+    /// A key was pressed on the keypad: a digit, `*`, `#`, or a letter.
+    Key(char),
+    /// The door sensor changed: the door is now open, or now closed.
+    Door { open: bool },
     /// The application is to stop. Production never sends it.
     Stop,
 }
@@ -111,6 +115,21 @@ impl fmt::Display for BrokerError {
 
 impl std::error::Error for BrokerError {}
 
+/// The electric strike that holds the door shut.
+pub trait Strike {
+    /// Lets the door be pushed open.
+    fn release(&self);
+    /// Holds the door shut again.
+    fn lock(&self);
+}
+
+/// The sensor that sees whether the door stands open. Its changes arrive
+/// through `Events` as `Event::Door`.
+pub trait DoorSensor {
+    /// Whether the door is open now.
+    fn is_open(&self) -> bool;
+}
+
 /// Time.
 pub trait Clock {
     /// Milliseconds since an arbitrary start; never goes backwards.
@@ -167,4 +186,6 @@ pub trait Connectors {
     fn radio(&self) -> &dyn Radio;
     fn firmware(&self) -> &dyn Firmware;
     fn log(&self) -> &dyn Log;
+    fn strike(&self) -> &dyn Strike;
+    fn door_sensor(&self) -> &dyn DoorSensor;
 }

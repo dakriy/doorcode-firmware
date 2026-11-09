@@ -4,12 +4,17 @@
 mod nvs_storage;
 mod placeholders;
 
-use connectors::{Broker, Clock, Connectors, Events, Firmware, Level, Log, Radio, Random, Storage};
+use connectors::{
+    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Storage,
+    Strike,
+};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
 
 use nvs_storage::NvsStorage;
-use placeholders::{NoRadio, OfflineBroker, StartClock, StoppedEvents, ZeroRandom};
+use placeholders::{
+    ClosedDoor, NoRadio, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
+};
 
 /// The version this image was built as.
 const VERSION: &str = match option_env!("DOORCODE_FIRMWARE_VERSION") {
@@ -81,6 +86,14 @@ impl Connectors for EspConnectors {
 
     fn log(&self) -> &dyn Log {
         &EspLog
+    }
+
+    fn strike(&self) -> &dyn Strike {
+        &NoStrike
+    }
+
+    fn door_sensor(&self) -> &dyn DoorSensor {
+        &ClosedDoor
     }
 }
 

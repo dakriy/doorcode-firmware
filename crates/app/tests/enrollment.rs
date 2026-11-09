@@ -484,10 +484,7 @@ fn a_failed_clean_disconnect_is_logged_and_the_controller_is_still_enrolled() {
 #[test]
 fn a_controller_with_stored_door_credentials_keeps_them() {
     let connectors = StubConnectors {
-        storage: StubStorage::provisioned()
-            .with("door_id", b"7")
-            .with("username", b"door-7-0123456789ab")
-            .with("token", b"c2VjcmV0LXRva2VuLWZvci1kb29yLTc"),
+        storage: StubStorage::enrolled(),
         events: StubEvents::script([(0, Event::Connected)]),
         ..StubConnectors::default()
     };

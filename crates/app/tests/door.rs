@@ -13,16 +13,9 @@ use testkit::{
 
 const USERNAME: &str = "door-7-0123456789ab";
 
-fn enrolled_storage() -> StubStorage {
-    StubStorage::provisioned()
-        .with("door_id", b"7")
-        .with("username", USERNAME.as_bytes())
-        .with("token", b"c2VjcmV0LXRva2VuLWZvci1kb29yLTc")
-}
-
 fn door(events: StubEvents) -> StubConnectors {
     StubConnectors {
-        storage: enrolled_storage(),
+        storage: StubStorage::enrolled(),
         events,
         ..StubConnectors::default()
     }
@@ -355,7 +348,7 @@ fn a_configuration_of_another_protocol_version_is_logged_and_ignored() {
 #[test]
 fn a_stored_configuration_that_does_not_decode_is_logged_and_the_defaults_used() {
     let connectors = StubConnectors {
-        storage: enrolled_storage().with("config", b"not cbor"),
+        storage: StubStorage::enrolled().with("config", b"not cbor"),
         ..StubConnectors::default()
     };
 
@@ -654,7 +647,7 @@ fn coming_online_starts_the_waits_over_at_one_second() {
 #[test]
 fn a_random_part_of_up_to_a_quarter_is_added_to_each_wait() {
     let connectors = StubConnectors {
-        random: StubRandom { byte: 7 },
+        random: StubRandom::repeating(7),
         ..door(StubEvents::script([
             (0, Event::Connected),
             (10, Event::Disconnected),

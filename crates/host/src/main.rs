@@ -7,10 +7,15 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use connectors::{Broker, Clock, Connectors, Events, Firmware, Level, Log, Radio, Random, Storage};
+use connectors::{
+    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Storage,
+    Strike,
+};
 use connectors_host::FileStorage;
 
-use placeholders::{NoRadio, OfflineBroker, StartClock, StoppedEvents, ZeroRandom};
+use placeholders::{
+    ClosedDoor, NoRadio, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
+};
 
 struct BuildVersion;
 
@@ -73,6 +78,14 @@ impl Connectors for HostConnectors {
 
     fn log(&self) -> &dyn Log {
         &self.log
+    }
+
+    fn strike(&self) -> &dyn Strike {
+        &NoStrike
+    }
+
+    fn door_sensor(&self) -> &dyn DoorSensor {
+        &ClosedDoor
     }
 }
 

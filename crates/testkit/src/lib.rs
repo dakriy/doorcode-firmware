@@ -3,15 +3,23 @@
 //! return what the test seeded; they make no decisions.
 
 mod broker;
+mod door;
 mod events;
 mod storage;
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 
-use connectors::{Broker, Clock, Connectors, Events, Firmware, Level, Log, Radio, Random, Storage};
+use connectors::{
+    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Storage,
+    Strike,
+};
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
-pub use events::{config_for, credentials_for, door_message, timeline_for, StubEvents};
+pub use door::{StrikeCall, StubDoorSensor, StubStrike};
+pub use events::{
+    config_for, credentials_for, door_message, reply_for, timeline_for, typed, StubEvents,
+};
 pub use storage::StubStorage;
 
 /// The bytes a string of hex digits spells. Panics on anything else.
@@ -22,15 +30,38 @@ pub fn hex(digits: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Entropy that is one byte, repeated; zero unless the test sets it.
+/// Entropy that hands out the bytes the test queued, in order, and after
+/// them one byte, repeated: zero unless the test sets it.
 #[derive(Debug, Default)]
 pub struct StubRandom {
-    pub byte: u8,
+    byte: u8,
+    queued: RefCell<VecDeque<u8>>,
+}
+
+impl StubRandom {
+    /// Entropy that is `byte`, repeated.
+    pub fn repeating(byte: u8) -> Self {
+        Self {
+            byte,
+            ..Self::default()
+        }
+    }
+
+    /// Entropy that starts with `bytes`.
+    pub fn queued(bytes: Vec<u8>) -> Self {
+        Self {
+            queued: RefCell::new(bytes.into()),
+            ..Self::default()
+        }
+    }
 }
 
 impl Random for StubRandom {
     fn bytes(&self, count: usize) -> Vec<u8> {
-        vec![self.byte; count]
+        let mut queued = self.queued.borrow_mut();
+        (0..count)
+            .map(|_| queued.pop_front().unwrap_or(self.byte))
+            .collect()
     }
 }
 
@@ -126,6 +157,8 @@ pub struct StubConnectors {
     pub radio: StubRadio,
     pub firmware: StubFirmware,
     pub log: StubLog,
+    pub strike: StubStrike,
+    pub door_sensor: StubDoorSensor,
 }
 
 impl Connectors for StubConnectors {
@@ -159,5 +192,13 @@ impl Connectors for StubConnectors {
 
     fn log(&self) -> &dyn Log {
         &self.log
+    }
+
+    fn strike(&self) -> &dyn Strike {
+        &self.strike
+    }
+
+    fn door_sensor(&self) -> &dyn DoorSensor {
+        &self.door_sensor
     }
 }

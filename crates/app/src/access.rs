@@ -1,0 +1,113 @@
+//! Letting people in: the entry typed at the keypad, the check that asks
+//! the server about it, and the strike that opens for its reply or for any
+//! key while the timeline holds the door open.
+
+use connectors::Level;
+use protocol::Config;
+
+use crate::check::{self, Outstanding};
+use crate::device::Device;
+use crate::entry::Entry;
+use crate::strike::Latch;
+use crate::{Access, Mode};
+
+/// What the door around the keypad is like when a key comes.
+pub(crate) struct Situation<'a> {
+    pub(crate) door_id: u64,
+    pub(crate) config: &'a Config,
+    pub(crate) mode: Mode,
+    pub(crate) online: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct Gate {
+    entry: Entry,
+    /// The one check waiting for its reply. A newer entry replaces it.
+    check: Option<Outstanding>,
+    latch: Latch,
+}
+
+impl Gate {
+    /// The soonest time something here is due, if anything is.
+    pub(crate) fn due_at(&self, config: &Config) -> Option<u64> {
+        let deadlines = [
+            self.entry.clear_at(config),
+            self.check.as_ref().map(|check| check.deadline),
+            self.latch.relock_at(),
+        ];
+        deadlines.into_iter().flatten().min()
+    }
+
+    /// Forgets an idle entry, stops waiting for a late reply, and locks
+    /// the strike, each once its time is up.
+    pub(crate) fn expire(&mut self, device: &Device<'_>, config: &Config) {
+        if device.is_due(self.entry.clear_at(config)) {
+            self.entry.clear();
+        }
+        if device.is_due(self.check.as_ref().map(|check| check.deadline)) {
+            device.log(Level::Info, "no reply to the check in time; denied");
+            self.check = None;
+        }
+        if device.is_due(self.latch.relock_at()) {
+            self.latch.lock(device);
+        }
+    }
+
+    /// Inside an open span any key releases the strike; otherwise the key
+    /// goes to the entry, and a submitted entry is checked while online
+    /// and denied offline.
+    pub(crate) fn press(&mut self, device: &Device<'_>, key: char, door: &Situation<'_>) {
+        if door.mode == Mode::Open {
+            self.latch.release(device, door.config.strike_pulse_ms);
+            return;
+        }
+        let Some(digits) = self.entry.press(key, device.now_ms(), door.config) else {
+            return;
+        };
+        if !door.online {
+            device.log(Level::Info, "an entry was denied: not connected");
+            return;
+        }
+        let timeout = door.config.reply_timeout_ms;
+        self.check = check::send(device, door.door_id, digits, timeout);
+    }
+
+    /// Releases the strike for the reply to the outstanding check when it
+    /// allows; a reply to anything else is ignored.
+    pub(crate) fn reply(&mut self, device: &Device<'_>, payload: &[u8], config: &Config) {
+        let Some(reply) = check::answer(device, self.check.as_ref(), payload) else {
+            return;
+        };
+        self.check = None;
+        if !reply.allow {
+            device.log(Level::Info, "the server denied the entry");
+            return;
+        }
+        let ms = match reply.strike_ms {
+            0 => config.strike_pulse_ms,
+            ms => ms,
+        };
+        self.latch.release(device, ms);
+    }
+
+    /// Locks the strike as soon as the door opens.
+    pub(crate) fn door_moved(&mut self, device: &Device<'_>, open: bool) {
+        if open {
+            self.latch.lock(device);
+        }
+    }
+
+    /// Locks the strike when the door stops being a door.
+    pub(crate) fn lock(&mut self, device: &Device<'_>) {
+        self.latch.lock(device);
+    }
+
+    pub(crate) fn report(self) -> Access {
+        Access {
+            entry: self.entry.keys().to_owned(),
+            check: self.check.map(|outstanding| outstanding.check),
+            strike: self.latch.state,
+            opens: self.latch.opens,
+        }
+    }
+}

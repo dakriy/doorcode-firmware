@@ -25,6 +25,14 @@ impl StubStorage {
             .with("wifi_password", b"wifi-secret")
     }
 
+    /// Storage of a provisioned device enrolled as door 7.
+    pub fn enrolled() -> Self {
+        Self::provisioned()
+            .with("door_id", b"7")
+            .with("username", b"door-7-0123456789ab")
+            .with("token", b"c2VjcmV0LXRva2VuLWZvci1kb29yLTc")
+    }
+
     /// This storage with `value` stored under `key`.
     pub fn with(self, key: &str, value: &[u8]) -> Self {
         self.values

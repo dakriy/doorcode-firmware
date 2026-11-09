@@ -5,8 +5,9 @@
 use connectors::{BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication};
 use protocol::{Config, Credentials, DecodeError, Online, Timeline};
 
+use crate::access::{Gate, Situation};
 use crate::device::Device;
-use crate::{enrollment, stored, ConnectionState, Phase, Provisioning, RunError, RunReport};
+use crate::{enrollment, stored, timeline, ConnectionState, Phase, RunError, RunReport};
 
 /// CONNACK return codes that say the broker does not accept the
 /// credentials: bad username or password, and not authorized.
@@ -28,6 +29,7 @@ pub(crate) struct Door {
     link: Link,
     /// Connection attempts that failed since the door was last online.
     failures: u32,
+    gate: Gate,
 }
 
 enum Link {
@@ -37,6 +39,16 @@ enum Link {
     Online,
     /// Not connected; connects again at the given time.
     Paused { reconnect_at: u64 },
+}
+
+impl Link {
+    /// When the door connects again; `None` unless it is paused.
+    fn reconnect_at(&self) -> Option<u64> {
+        match self {
+            Link::Paused { reconnect_at } => Some(*reconnect_at),
+            Link::Connecting | Link::Online => None,
+        }
+    }
 }
 
 /// Starts serving as the door with the configuration and timeline stored
@@ -59,6 +71,7 @@ pub(crate) fn start(
         timeline,
         link: Link::Connecting,
         failures: 0,
+        gate: Gate::default(),
     };
     Ok(door.connect(device))
 }
@@ -96,42 +109,73 @@ fn log_level(name: &str) -> Level {
 impl Door {
     /// How long the event loop may wait before this needs attention.
     pub(crate) fn wait_ms(&self, now_ms: u64) -> Option<u64> {
-        match self.link {
-            Link::Paused { reconnect_at } => Some(reconnect_at.saturating_sub(now_ms)),
-            Link::Connecting | Link::Online => None,
-        }
+        let due_at = [self.link.reconnect_at(), self.gate.due_at(&self.config)];
+        let soonest = due_at.into_iter().flatten().min()?;
+        Some(soonest.saturating_sub(now_ms))
     }
 
     /// Reacts to an event, or to the wait running out when it is `None`.
+    /// Whatever is due goes first, so an event never meets a deadline that
+    /// has passed.
     pub(crate) fn handle(
         self,
         device: &Device<'_>,
         event: Option<Event>,
     ) -> Result<Phase, RunError> {
+        let mut door = self.when_due(device);
         let door = match event {
-            Some(Event::Connected) => self.come_online(device),
-            Some(Event::Disconnected) => self.pause(device, "connection lost"),
-            Some(Event::Refused { code }) => return self.refused(device, code),
-            Some(Event::Message(message)) => self.receive(device, &message)?,
-            // Only a pause has a deadline. `Stop` ends the loop before it gets here.
-            _ => self.connect(device),
+            Some(Event::Connected) => door.come_online(device),
+            Some(Event::Disconnected) => door.pause(device, "connection lost"),
+            Some(Event::Refused { code }) => return door.refused(device, code),
+            Some(Event::Message(message)) => door.receive(device, &message)?,
+            Some(Event::Key(key)) => {
+                door.press(device, key);
+                door
+            }
+            Some(Event::Door { open }) => {
+                door.gate.door_moved(device, open);
+                door
+            }
+            // The wait ran out. `Stop` ends the loop before it gets here.
+            None | Some(Event::Stop) => door,
         };
         Ok(Phase::Door(Box::new(door)))
     }
 
-    pub(crate) fn report(self, provisioning: Provisioning) -> RunReport {
+    pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
         let connection = match self.link {
             Link::Connecting => ConnectionState::Connecting,
             Link::Online => ConnectionState::Connected,
             Link::Paused { .. } => ConnectionState::Disconnected,
         };
-        RunReport {
-            provisioning,
-            door: Some(self.credentials),
+        RunReport::new(
+            device,
+            Some(self.credentials),
             connection,
-            config: self.config,
-            timeline: self.timeline,
+            self.config,
+            self.timeline,
+            self.gate.report(),
+        )
+    }
+
+    /// Connects again once the pause is over, and lets the keypad side
+    /// catch up with the time.
+    fn when_due(mut self, device: &Device<'_>) -> Door {
+        self.gate.expire(device, &self.config);
+        if device.is_due(self.link.reconnect_at()) {
+            return self.connect(device);
         }
+        self
+    }
+
+    fn press(&mut self, device: &Device<'_>, key: char) {
+        let situation = Situation {
+            door_id: self.credentials.door_id,
+            config: &self.config,
+            mode: timeline::mode_at(&self.timeline, device.unix_seconds()),
+            online: matches!(self.link, Link::Online),
+        };
+        self.gate.press(device, key, &situation);
     }
 
     fn topic(&self, leaf: &str) -> String {
@@ -224,11 +268,12 @@ impl Door {
         }
     }
 
-    fn refused(self, device: &Device<'_>, code: u8) -> Result<Phase, RunError> {
+    fn refused(mut self, device: &Device<'_>, code: u8) -> Result<Phase, RunError> {
         if !REVOKED_CODES.contains(&code) {
             let door = self.pause(device, &format!("refused with code {code}"));
             return Ok(Phase::Door(Box::new(door)));
         }
+        self.gate.lock(device);
         stored::forget_door(device.connectors.storage())?;
         device.log(
             Level::Warn,
@@ -240,7 +285,11 @@ impl Door {
         Ok(Phase::Enrolling(enrollment::start(device, self.broker)))
     }
 
-    fn receive(self, device: &Device<'_>, message: &Incoming) -> Result<Door, RunError> {
+    fn receive(mut self, device: &Device<'_>, message: &Incoming) -> Result<Door, RunError> {
+        if message.topic == self.topic(protocol::LEAF_REPLY) {
+            self.gate.reply(device, &message.payload, &self.config);
+            return Ok(self);
+        }
         if message.topic == self.topic(protocol::LEAF_CONFIG) {
             return self.receive_config(device, &message.payload);
         }

@@ -2,7 +2,8 @@
 //! event queue stops the run at once, so nothing reaches the others.
 
 use connectors::{
-    Broker, BrokerError, Clock, ConnectOptions, Event, Events, Publication, Radio, Random,
+    Broker, BrokerError, Clock, ConnectOptions, DoorSensor, Event, Events, Publication, Radio,
+    Random, Strike,
 };
 
 pub(crate) struct StoppedEvents;
@@ -66,5 +67,21 @@ impl Radio for NoRadio {
 
     fn hardware_id(&self) -> String {
         "000000000000".to_owned()
+    }
+}
+
+pub(crate) struct NoStrike;
+
+impl Strike for NoStrike {
+    fn release(&self) {}
+
+    fn lock(&self) {}
+}
+
+pub(crate) struct ClosedDoor;
+
+impl DoorSensor for ClosedDoor {
+    fn is_open(&self) -> bool {
+        false
     }
 }

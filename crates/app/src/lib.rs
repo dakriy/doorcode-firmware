@@ -5,13 +5,18 @@
 //! at most as long as its next timer allows, reacts to what arrived, and
 //! repeats until it is told to stop.
 
+mod access;
+mod check;
 mod device;
 mod door;
 mod enrollment;
+mod entry;
 mod stored;
+mod strike;
+mod timeline;
 
 use connectors::{BrokerAddress, Connectors, Event, StorageError};
-use protocol::{Config, Credentials, Timeline};
+use protocol::{Check, Config, Credentials, Timeline};
 
 use device::Device;
 use door::Door;
@@ -30,6 +35,68 @@ pub struct RunReport {
     pub config: Config,
     /// The timeline the door follows; empty while enrolling.
     pub timeline: Timeline,
+    /// The state the timeline puts the door in at the end.
+    pub mode: Mode,
+    /// Whether the door sensor says the door is open at the end.
+    pub door_open: bool,
+    /// The keypad, the check, and the strike at the end.
+    pub access: Access,
+}
+
+/// The state the timeline puts the door in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Outside every span: entries are checked online and denied offline.
+    Normal,
+    /// Inside an `open` span: any key releases the strike.
+    Open,
+    /// Inside a `locked` span: entries are checked online and denied offline.
+    Locked,
+}
+
+/// The keypad entry, the check waiting for its reply, and the strike.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Access {
+    /// The keys of the entry typed so far.
+    pub entry: String,
+    /// The check sent and not answered yet.
+    pub check: Option<Check>,
+    pub strike: StrikeState,
+    /// How often the strike was released since the controller started.
+    pub opens: u64,
+}
+
+/// Whether the strike holds the door.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StrikeState {
+    #[default]
+    Locked,
+    /// Released; locks again at the given time unless the door opens first.
+    Released { relock_at_ms: u64 },
+}
+
+impl RunReport {
+    /// The report of a phase that ended with these, and with the time and
+    /// the door sensor as they are now.
+    fn new(
+        device: &Device<'_>,
+        door: Option<Credentials>,
+        connection: ConnectionState,
+        config: Config,
+        timeline: Timeline,
+        access: Access,
+    ) -> RunReport {
+        RunReport {
+            provisioning: device.provisioning.clone(),
+            door,
+            connection,
+            config,
+            mode: timeline::mode_at(&timeline, device.unix_seconds()),
+            timeline,
+            door_open: device.connectors.door_sensor().is_open(),
+            access,
+        }
+    }
 }
 
 /// Where the broker connection stands.
@@ -109,10 +176,10 @@ impl Phase {
         }
     }
 
-    fn report(self, provisioning: Provisioning) -> RunReport {
+    fn report(self, device: &Device<'_>) -> RunReport {
         match self {
-            Phase::Door(door) => (*door).report(provisioning),
-            Phase::Enrolling(enrolling) => enrolling.report(provisioning),
+            Phase::Door(door) => (*door).report(device),
+            Phase::Enrolling(enrolling) => enrolling.report(device),
         }
     }
 }
@@ -129,5 +196,5 @@ pub fn run(connectors: &dyn Connectors) -> Result<RunReport, RunError> {
         }
         phase = phase.handle(&device, event)?;
     }
-    Ok(phase.report(provisioning))
+    Ok(phase.report(&device))
 }

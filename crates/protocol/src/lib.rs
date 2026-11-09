@@ -33,6 +33,8 @@ pub const LEAF_TIMELINE: &str = "timeline";
 pub const LEAF_REPLY: &str = "reply";
 /// The last level of the topic a door receives commands on.
 pub const LEAF_COMMAND: &str = "command";
+/// The last level of the topic a door asks the server about an entry on.
+pub const LEAF_CHECK: &str = "check";
 
 /// The topic of door `door_id` that ends in `leaf`.
 pub fn door_topic(door_id: u64, leaf: &str) -> String {
@@ -368,6 +370,68 @@ impl Timeline {
                 ("from", Slot::Long(&mut message.from)),
                 ("to", Slot::Long(&mut message.to)),
                 ("spans", Slot::Spans(&mut message.spans)),
+            ],
+        );
+        read.map(|()| message)
+    }
+}
+
+/// An entry typed at the door, sent to the server to decide on: the code,
+/// optionally followed by `*` and a keypad command, without the submit key.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Check {
+    pub request_id: String,
+    pub digits: String,
+}
+
+impl Check {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut map = MapWriter::new();
+        map.text("request_id", &self.request_id);
+        map.text("digits", &self.digits);
+        map.finish()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut message = Self::default();
+        let read = cbor::read_map(
+            bytes,
+            &mut [
+                ("request_id", Slot::Text(&mut message.request_id)),
+                ("digits", Slot::Text(&mut message.digits)),
+            ],
+        );
+        read.map(|()| message)
+    }
+}
+
+/// The server's answer to the check with `request_id`: whether to let the
+/// person in and, when it does, for how many milliseconds to release the
+/// strike.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reply {
+    pub request_id: String,
+    pub allow: bool,
+    pub strike_ms: u64,
+}
+
+impl Reply {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut map = MapWriter::new();
+        map.text("request_id", &self.request_id);
+        map.bool("allow", self.allow);
+        map.uint_unless_zero("strike_ms", self.strike_ms);
+        map.finish()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut message = Self::default();
+        let read = cbor::read_map(
+            bytes,
+            &mut [
+                ("request_id", Slot::Text(&mut message.request_id)),
+                ("allow", Slot::Bool(&mut message.allow)),
+                ("strike_ms", Slot::Uint(&mut message.strike_ms)),
             ],
         );
         read.map(|()| message)

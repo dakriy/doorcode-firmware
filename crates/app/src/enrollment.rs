@@ -5,7 +5,7 @@ use connectors::{BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Le
 use protocol::{Config, Credentials, Enrollment, Timeline};
 
 use crate::device::Device;
-use crate::{door, stored, ConnectionState, Phase, Provisioning, RunError, RunReport};
+use crate::{door, stored, Access, ConnectionState, Phase, RunError, RunReport};
 
 /// The broker drops the connection after one and a half of these without a packet.
 const KEEP_ALIVE_S: u16 = 30;
@@ -48,19 +48,20 @@ impl Enrolling {
     }
 
     /// Not a door yet, so the door's settings are the defaults.
-    pub(crate) fn report(self, provisioning: Provisioning) -> RunReport {
+    pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
         let connection = match self.step {
             Step::Connecting => ConnectionState::Connecting,
             Step::Waiting { .. } => ConnectionState::Connected,
             Step::Paused { .. } => ConnectionState::Disconnected,
         };
-        RunReport {
-            provisioning,
-            door: None,
+        RunReport::new(
+            device,
+            None,
             connection,
-            config: Config::default(),
-            timeline: Timeline::default(),
-        }
+            Config::default(),
+            Timeline::default(),
+            Access::default(),
+        )
     }
 
     /// Reacts to an event, or to the wait running out when it is `None`.
@@ -74,8 +75,10 @@ impl Enrolling {
             Some(Event::Disconnected) => pause(device, "connection lost"),
             Some(Event::Refused { code }) => pause(device, &format!("refused with code {code}")),
             Some(Event::Message(message)) => return self.receive(device, &message),
+            // Not a door yet, so the keypad and the door sensor mean nothing.
+            Some(Event::Key(_) | Event::Door { .. }) => return Ok(Phase::Enrolling(self)),
             // The wait ran out. `Stop` ends the loop before it gets here.
-            _ => self.when_due(device),
+            None | Some(Event::Stop) => self.when_due(device),
         };
         Ok(Phase::Enrolling(Enrolling { step, ..self }))
     }

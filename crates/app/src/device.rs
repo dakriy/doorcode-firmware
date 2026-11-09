@@ -23,6 +23,16 @@ impl<'a> Device<'a> {
         self.connectors.clock().monotonic_ms()
     }
 
+    /// Whether the time `at` has come; never when there is no time.
+    pub(crate) fn is_due(&self, at: Option<u64>) -> bool {
+        at.is_some_and(|at| at <= self.now_ms())
+    }
+
+    /// Seconds since the Unix epoch, or `None` while the time is not known.
+    pub(crate) fn unix_seconds(&self) -> Option<i64> {
+        self.connectors.clock().unix_seconds()
+    }
+
     /// The version of the image running now, as announced to the server.
     pub(crate) fn firmware_version(&self) -> String {
         self.connectors.firmware().running_version()

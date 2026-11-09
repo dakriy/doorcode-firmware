@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use connectors::{Broker, BrokerAddress, BrokerError, ConnectOptions, Publication};
-use protocol::{Enrollment, Online, Topic};
+use protocol::{Check, Enrollment, Online, Topic};
 
 /// A broker that records every request and decodes what was published.
 #[derive(Debug, Default)]
@@ -10,6 +10,8 @@ pub struct StubBroker {
     published: RefCell<Vec<Publication>>,
     failure: Option<BrokerError>,
     disconnect_failure: Option<BrokerError>,
+    /// A topic whose publications are refused, with the error.
+    topic_failure: Option<(String, BrokerError)>,
 }
 
 /// A request the application made of the broker.
@@ -46,6 +48,7 @@ pub struct Sent {
 pub enum Message {
     Enrollment(Enrollment),
     Online(Online),
+    Check(Check),
     Undecoded(Vec<u8>),
 }
 
@@ -54,6 +57,9 @@ fn decode(topic: &str, payload: &[u8]) -> Option<Message> {
         Topic::Enroll(_) => Enrollment::decode(payload).ok().map(Message::Enrollment),
         Topic::Door { leaf, .. } if leaf == protocol::LEAF_ONLINE => {
             Online::decode(payload).ok().map(Message::Online)
+        }
+        Topic::Door { leaf, .. } if leaf == protocol::LEAF_CHECK => {
+            Check::decode(payload).ok().map(Message::Check)
         }
         _ => None,
     }
@@ -82,6 +88,14 @@ impl StubBroker {
     pub fn failing_disconnect(message: &str) -> Self {
         Self {
             disconnect_failure: Some(BrokerError(message.to_owned())),
+            ..Self::default()
+        }
+    }
+
+    /// A broker that takes every request but publishing on `topic`.
+    pub fn failing_publish_on(topic: &str, message: &str) -> Self {
+        Self {
+            topic_failure: Some((topic.to_owned(), BrokerError(message.to_owned()))),
             ..Self::default()
         }
     }
@@ -127,7 +141,11 @@ impl Broker for StubBroker {
 
     fn publish(&self, publication: &Publication) -> Result<(), BrokerError> {
         self.published.borrow_mut().push(publication.clone());
-        self.record(BrokerCall::Publish(decoded(publication)))
+        self.record(BrokerCall::Publish(decoded(publication)))?;
+        match &self.topic_failure {
+            Some((topic, error)) if *topic == publication.topic => Err(error.clone()),
+            _ => Ok(()),
+        }
     }
 
     fn disconnect(&self) -> Result<(), BrokerError> {

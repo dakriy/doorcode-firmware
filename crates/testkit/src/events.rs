@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use connectors::{Clock, Event, Events, Incoming};
-use protocol::{Config, Credentials, Timeline};
+use protocol::{Config, Credentials, Reply, Timeline};
 
 /// More waits than any test needs; reaching it means the application spins.
 const MAX_WAITS: u32 = 10_000;
@@ -15,6 +15,8 @@ pub struct StubEvents {
     script: RefCell<VecDeque<(u64, Event)>>,
     now_ms: Cell<u64>,
     waits: Cell<u32>,
+    /// The Unix time at millisecond zero, when the time is known.
+    unix_at_start: Option<i64>,
 }
 
 impl StubEvents {
@@ -25,6 +27,24 @@ impl StubEvents {
             ..Self::default()
         }
     }
+
+    /// This world with the time known: `unix_seconds` at millisecond zero.
+    pub fn at_unix(self, unix_seconds: i64) -> Self {
+        Self {
+            unix_at_start: Some(unix_seconds),
+            ..self
+        }
+    }
+}
+
+/// `keys` pressed one after another at millisecond `at_ms`.
+pub fn typed(at_ms: u64, keys: &str) -> Vec<(u64, Event)> {
+    keys.chars().map(|key| (at_ms, Event::Key(key))).collect()
+}
+
+/// The reply door `door_id` receives.
+pub fn reply_for(door_id: u64, reply: &Reply) -> Event {
+    door_message(door_id, protocol::LEAF_REPLY, reply.encode())
 }
 
 /// The message an approved controller with `hardware_id` receives.
@@ -81,6 +101,7 @@ impl Clock for StubEvents {
     }
 
     fn unix_seconds(&self) -> Option<i64> {
-        None
+        let elapsed_s = i64::try_from(self.now_ms.get() / 1000).expect("a test-sized time");
+        self.unix_at_start.map(|start| start + elapsed_s)
     }
 }
