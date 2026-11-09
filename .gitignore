@@ -13,3 +13,4 @@
 /.doorcode
 # Provisioning files hold secrets.
 /provisioning.json
+/firmware/provisioning.json

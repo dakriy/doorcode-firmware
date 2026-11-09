@@ -18,7 +18,7 @@ FIRMWARE_ENV = export PATH=/home/esp/.cargo/bin:$$PATH;
 
 .PHONY: verify-fast verify-mutation verify-mutation-diff verify-integration verify-all \
 	fmt lint build check-imports check-complexity test-fast coverage dead-code duplicates \
-	firmware-build firmware-flash firmware-check
+	firmware-build firmware-flash firmware-check firmware-provision
 
 ## verify-fast: every gate except mutation; after every change.
 verify-fast: fmt lint check-imports check-complexity coverage dead-code duplicates
@@ -76,4 +76,9 @@ firmware-check:
 
 firmware-flash:
 	$(FIRMWARE_DOCKER) --device $(FIRMWARE_PORT) $(FIRMWARE_IMAGE) bash -lc \
-		'$(FIRMWARE_ENV) espflash flash --chip esp32 --port $(FIRMWARE_PORT) --monitor target/xtensa-esp32-espidf/release/doorcode-firmware'
+		'$(FIRMWARE_ENV) espflash flash --chip esp32 --port $(FIRMWARE_PORT) --partition-table partitions.csv --monitor target/xtensa-esp32-espidf/release/doorcode-firmware'
+
+## firmware-provision: writes firmware/provisioning.json into the NVS partition on FIRMWARE_PORT.
+firmware-provision:
+	$(FIRMWARE_DOCKER) --device $(FIRMWARE_PORT) $(FIRMWARE_IMAGE) bash -lc \
+		'$(FIRMWARE_ENV) sh /repo/scripts/firmware-provision.sh $(FIRMWARE_PORT)'

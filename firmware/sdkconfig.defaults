@@ -1,3 +1,27 @@
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_WIFI_MESH_ENABLE=y
+
+# Flash and partitions: 4 MB, the standard two-OTA table (partitions.csv).
+# ESP-IDF resolves the path from the project esp-idf-sys generates, in
+# target/<target>/<profile>/build/esp-idf-sys-<hash>/out, six levels below
+# this directory.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../../../../../partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# Task watchdog: the main task subscribes and the event queue feeds it; a
+# loop iteration stuck for 30 s panics, and a panic reboots.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# Brownout detector resets the chip when the supply sags.
+CONFIG_ESP_BROWNOUT_DET=y
+
+# Size: an image must fit the table's 1 MB app slots. newlib's nano printf
+# drops the formatting nothing here uses.
+CONFIG_NEWLIB_NANO_FORMAT=y

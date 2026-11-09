@@ -1,0 +1,42 @@
+//! Facts about the device: the Wi-Fi signal, the free heap, and the
+//! station MAC as the hardware id.
+
+use connectors::Radio;
+use esp_idf_svc::sys::{self, EspError};
+
+#[derive(Debug)]
+pub(crate) struct EspRadio {
+    hardware_id: String,
+}
+
+impl EspRadio {
+    /// Reads the station MAC once; it never changes.
+    pub(crate) fn new() -> Result<Self, EspError> {
+        let mut mac = [0u8; 6];
+        // SAFETY: a station MAC is six bytes, the length of `mac`.
+        sys::esp!(unsafe {
+            sys::esp_read_mac(mac.as_mut_ptr(), sys::esp_mac_type_t_ESP_MAC_WIFI_STA)
+        })?;
+        let hardware_id = mac.iter().map(|byte| format!("{byte:02x}")).collect();
+        Ok(Self { hardware_id })
+    }
+}
+
+impl Radio for EspRadio {
+    fn signal_dbm(&self) -> Option<i32> {
+        let mut access_point = sys::wifi_ap_record_t::default();
+        // SAFETY: the record is owned here and outlives the call.
+        let result = unsafe { sys::esp_wifi_sta_get_ap_info(&mut access_point) };
+        sys::esp!(result).ok()?;
+        Some(i32::from(access_point.rssi))
+    }
+
+    fn free_bytes(&self) -> u32 {
+        // SAFETY: takes no arguments and only reads the heap's counters.
+        unsafe { sys::esp_get_free_heap_size() }
+    }
+
+    fn hardware_id(&self) -> String {
+        self.hardware_id.clone()
+    }
+}

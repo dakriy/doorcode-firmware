@@ -455,6 +455,9 @@ dependencies = [
  "embuild",
  "esp-idf-svc",
  "log",
+ "minicbor",
+ "protocol",
+ "serde_json",
 ]
 
 [[package]]
