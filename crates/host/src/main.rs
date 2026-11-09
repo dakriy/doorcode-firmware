@@ -1,114 +1,53 @@
-//! Production wiring for the desktop host. Builds real connectors, calls the
-//! entrypoint, and reports. Nothing here is tested; nothing here decides.
+//! `doorcode-host`: one virtual door on a desktop, controlled through a
+//! local HTTP JSON API. See `docs/host.md`.
 
-mod placeholders;
-
-use std::cell::Cell;
-use std::path::PathBuf;
+use std::collections::HashMap;
 use std::process::ExitCode;
 
-use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, Level, Log, Radio, Random,
-    Storage, Strike,
-};
-use connectors_host::{FileStorage, HostFirmware, OsRandom, SystemClock};
+use host::Options;
 
-use placeholders::{ClosedDoor, NoDownload, NoRadio, NoStrike, OfflineBroker, StoppedEvents};
-
-/// Writes lines up to the level last set to standard error.
-struct StderrLog {
-    level: Cell<Level>,
-}
-
-impl Log for StderrLog {
-    fn log(&self, level: Level, message: &str) {
-        if level <= self.level.get() {
-            eprintln!("{level:?}: {message}");
-        }
-    }
-
-    fn set_level(&self, level: Level) {
-        self.level.set(level);
-    }
-}
-
-struct HostConnectors {
-    storage: FileStorage,
-    clock: SystemClock,
-    firmware: HostFirmware,
-    log: StderrLog,
-}
-
-impl Connectors for HostConnectors {
-    fn storage(&self) -> &dyn Storage {
-        &self.storage
-    }
-
-    fn events(&self) -> &dyn Events {
-        &StoppedEvents
-    }
-
-    fn broker(&self) -> &dyn Broker {
-        &OfflineBroker
-    }
-
-    fn clock(&self) -> &dyn Clock {
-        &self.clock
-    }
-
-    fn random(&self) -> &dyn Random {
-        &OsRandom
-    }
-
-    fn radio(&self) -> &dyn Radio {
-        &NoRadio
-    }
-
-    fn firmware(&self) -> &dyn Firmware {
-        &self.firmware
-    }
-
-    fn download(&self) -> &dyn Download {
-        &NoDownload
-    }
-
-    fn log(&self) -> &dyn Log {
-        &self.log
-    }
-
-    fn strike(&self) -> &dyn Strike {
-        &NoStrike
-    }
-
-    fn door_sensor(&self) -> &dyn DoorSensor {
-        &ClosedDoor
-    }
-}
+const USAGE: &str = "usage: doorcode-host [--provisioning PATH] [--data-dir PATH] \
+[--hardware-id ID] [--firmware-version VERSION] [--listen ADDRESS]";
 
 fn main() -> ExitCode {
-    let data_dir = std::env::var_os("DOORCODE_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".doorcode"));
-    if let Err(error) = std::fs::create_dir_all(&data_dir) {
-        eprintln!("cannot create {}: {error}", data_dir.display());
-        return ExitCode::FAILURE;
-    }
-    let connectors = HostConnectors {
-        storage: FileStorage::new(&data_dir),
-        clock: SystemClock::new(),
-        firmware: HostFirmware::new(env!("CARGO_PKG_VERSION"), &data_dir, false),
-        log: StderrLog {
-            level: Cell::new(Level::Info),
-        },
-    };
-    match app::run(&connectors) {
-        Ok(report) => {
-            println!("stopped; door {:?}", report.door.map(|door| door.door_id));
-            ExitCode::SUCCESS
-        }
+    let started = options(std::env::args().skip(1)).and_then(|options| host::start(&options));
+    let result = started.and_then(|host| {
+        eprintln!("control API on http://{}", host.address());
+        host.wait()
+    });
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("run failed: {error:?}");
+            eprintln!("doorcode-host: {error}\n{USAGE}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// The options the flags give, each defaulted when absent.
+fn options(args: impl Iterator<Item = String>) -> Result<Options, String> {
+    let mut flags = flags(args)?;
+    let mut flag = |name: &str, default: &str| flags.remove(name).unwrap_or(default.to_owned());
+    let options = Options {
+        provisioning: flag("--provisioning", "provisioning.json").into(),
+        data_dir: flag("--data-dir", ".doorcode").into(),
+        firmware_version: flag("--firmware-version", env!("CARGO_PKG_VERSION")),
+        listen: flag("--listen", "127.0.0.1:8484"),
+        hardware_id: flags.remove("--hardware-id"),
+    };
+    match flags.into_keys().next() {
+        Some(unknown) => Err(format!("unknown flag {unknown}")),
+        None => Ok(options),
+    }
+}
+
+/// The flags given, each with its value.
+fn flags(args: impl Iterator<Item = String>) -> Result<HashMap<String, String>, String> {
+    let args: Vec<String> = args.collect();
+    args.chunks(2)
+        .map(|pair| match pair {
+            [flag, value] => Ok((flag.clone(), value.clone())),
+            _ => Err(format!("{} needs a value", pair[0])),
+        })
+        .collect()
 }

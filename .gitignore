@@ -11,3 +11,5 @@
 # this repository. Never committed.
 /notes/
 /.doorcode
+# Provisioning files hold secrets.
+/provisioning.json

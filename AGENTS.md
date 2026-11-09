@@ -228,7 +228,8 @@ because they perform I/O or read nondeterministic state.
   `async-std`, `smol`, `reqwest`, `hyper`, `ureq`, `rumqttc`, `rustls`,
   `rcgen`, `rusqlite`, `sqlx`,
   `diesel`, `rand`, `getrandom`, `fastrand`, `uuid`, `chrono`, `time`,
-  `esp-idf-svc`, `esp-idf-hal`, `esp-idf-sys`, `embedded-svc`, `tempfile`
+  `esp-idf-svc`, `esp-idf-hal`, `esp-idf-sys`, `embedded-svc`, `tempfile`,
+  `tiny_http`
 - Standard-library modules, denied by path in `scripts/check-imports.sh`:
   `std::fs`, `std::net`, `std::env`, `std::process`, `std::thread`,
   `std::time`, `std::io::stdin`, `std::io::stdout`, `std::io::stderr`

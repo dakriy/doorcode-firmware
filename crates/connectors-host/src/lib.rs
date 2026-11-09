@@ -5,6 +5,7 @@
 
 mod broker;
 mod clock;
+mod door;
 mod download;
 mod events;
 mod file_storage;
@@ -14,6 +15,7 @@ mod random;
 
 pub use broker::{MqttBroker, Traffic};
 pub use clock::SystemClock;
+pub use door::{DoorControl, HostDoorSensor, HostStrike, StrikeMonitor};
 pub use download::HostDownload;
 pub use events::{EventSender, HostEvents};
 pub use file_storage::FileStorage;
