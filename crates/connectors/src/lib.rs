@@ -11,6 +11,8 @@ pub trait Storage {
     fn load(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError>;
     /// Stores `value` under `key`, replacing any previous value.
     fn store(&self, key: &str, value: &[u8]) -> Result<(), StorageError>;
+    /// Removes whatever is stored under `key`; nothing stored is not a failure.
+    fn remove(&self, key: &str) -> Result<(), StorageError>;
 }
 
 /// What a storage connector reports when the underlying system fails.
@@ -32,6 +34,9 @@ pub enum Event {
     Connected,
     /// The broker connection ended or could not be made.
     Disconnected,
+    /// The broker answered the connection request with a refusal; `code` is
+    /// the CONNACK return code it sent.
+    Refused { code: u8 },
     /// A message arrived on a subscribed topic.
     Message(Incoming),
     /// The application is to stop. Production never sends it.
@@ -148,6 +153,8 @@ pub enum Level {
 /// The device log.
 pub trait Log {
     fn log(&self, level: Level, message: &str);
+    /// Keeps lines up to and including `level` from now on.
+    fn set_level(&self, level: Level);
 }
 
 /// The connector factory. One method per connector and nothing else.

@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use connectors::{Clock, Event, Events, Incoming};
-use protocol::Credentials;
+use protocol::{Config, Credentials, Timeline};
 
 /// More waits than any test needs; reaching it means the application spins.
 const MAX_WAITS: u32 = 10_000;
@@ -32,6 +32,24 @@ pub fn credentials_for(hardware_id: &str, credentials: &Credentials) -> Event {
     Event::Message(Incoming {
         topic: protocol::credentials_topic(hardware_id),
         payload: credentials.encode(),
+    })
+}
+
+/// The retained configuration door `door_id` receives.
+pub fn config_for(door_id: u64, config: &Config) -> Event {
+    door_message(door_id, protocol::LEAF_CONFIG, config.encode())
+}
+
+/// The retained timeline door `door_id` receives.
+pub fn timeline_for(door_id: u64, timeline: &Timeline) -> Event {
+    door_message(door_id, protocol::LEAF_TIMELINE, timeline.encode())
+}
+
+/// A message on the topic of door `door_id` that ends in `leaf`.
+pub fn door_message(door_id: u64, leaf: &str, payload: Vec<u8>) -> Event {
+    Event::Message(Incoming {
+        topic: protocol::door_topic(door_id, leaf),
+        payload,
     })
 }
 

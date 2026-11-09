@@ -38,6 +38,32 @@ fn storing_again_replaces_the_value() {
 }
 
 #[test]
+fn a_removed_value_loads_as_nothing() {
+    with_each_storage(|storage| {
+        storage.store("boot_count", &[1]).unwrap();
+        storage.remove("boot_count").unwrap();
+        assert_eq!(storage.load("boot_count").unwrap(), None);
+    });
+}
+
+#[test]
+fn removing_a_key_never_stored_succeeds() {
+    with_each_storage(|storage| {
+        assert_eq!(storage.remove("missing"), Ok(()));
+    });
+}
+
+#[test]
+fn removing_one_key_keeps_the_others() {
+    with_each_storage(|storage| {
+        storage.store("boot_count", &[1]).unwrap();
+        storage.store("door_id", &[7]).unwrap();
+        storage.remove("boot_count").unwrap();
+        assert_eq!(storage.load("door_id").unwrap(), Some(vec![7]));
+    });
+}
+
+#[test]
 fn a_file_storage_in_a_missing_directory_reports_the_failure() {
     let directory = tempfile::tempdir().unwrap();
     let storage = FileStorage::new(&directory.path().join("does-not-exist"));

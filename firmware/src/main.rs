@@ -27,15 +27,22 @@ impl Firmware for BuildVersion {
 
 struct EspLog;
 
+fn log_level(level: Level) -> log::Level {
+    match level {
+        Level::Error => log::Level::Error,
+        Level::Warn => log::Level::Warn,
+        Level::Info => log::Level::Info,
+        Level::Debug => log::Level::Debug,
+    }
+}
+
 impl Log for EspLog {
     fn log(&self, level: Level, message: &str) {
-        let level = match level {
-            Level::Error => log::Level::Error,
-            Level::Warn => log::Level::Warn,
-            Level::Info => log::Level::Info,
-            Level::Debug => log::Level::Debug,
-        };
-        log::log!(level, "{message}");
+        log::log!(log_level(level), "{message}");
+    }
+
+    fn set_level(&self, level: Level) {
+        log::set_max_level(log_level(level).to_level_filter());
     }
 }
 

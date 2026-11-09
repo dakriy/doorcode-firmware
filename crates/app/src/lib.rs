@@ -6,13 +6,15 @@
 //! repeats until it is told to stop.
 
 mod device;
+mod door;
 mod enrollment;
 mod stored;
 
 use connectors::{BrokerAddress, Connectors, Event, StorageError};
-use protocol::Credentials;
+use protocol::{Config, Credentials, Timeline};
 
 use device::Device;
+use door::Door;
 use enrollment::Enrolling;
 
 /// What the controller ends a run with.
@@ -22,6 +24,23 @@ pub struct RunReport {
     pub provisioning: Provisioning,
     /// The door credentials held at the end, if the controller is enrolled.
     pub door: Option<Credentials>,
+    /// Where the broker connection stood at the end.
+    pub connection: ConnectionState,
+    /// The configuration the door runs with; the defaults while enrolling.
+    pub config: Config,
+    /// The timeline the door follows; empty while enrolling.
+    pub timeline: Timeline,
+}
+
+/// Where the broker connection stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionState {
+    /// A connection was asked for and the broker has not answered yet.
+    Connecting,
+    /// Connected, subscribed, and announced or online.
+    Connected,
+    /// Not connected, and waiting to connect again.
+    Disconnected,
 }
 
 /// What the device is set up with before it first talks to a server.
@@ -60,15 +79,16 @@ pub enum RunError {
 
 enum Phase {
     Enrolling(Enrolling),
-    Door(Credentials),
+    Door(Box<Door>),
 }
 
 impl Phase {
     /// A door when its credentials are stored, otherwise enrolling.
     fn start(device: &Device<'_>) -> Result<Phase, RunError> {
+        let broker = device.provisioning.broker.clone();
         let phase = match stored::door_credentials(device.connectors.storage())? {
-            Some(credentials) => Phase::Door(credentials),
-            None => Phase::Enrolling(enrollment::start(device)),
+            Some(credentials) => Phase::Door(Box::new(door::start(device, credentials, broker)?)),
+            None => Phase::Enrolling(enrollment::start(device, broker)),
         };
         Ok(phase)
     }
@@ -77,7 +97,7 @@ impl Phase {
     fn wait_ms(&self, device: &Device<'_>) -> Option<u64> {
         match self {
             Phase::Enrolling(enrolling) => enrolling.wait_ms(device.now_ms()),
-            Phase::Door(_) => None,
+            Phase::Door(door) => door.wait_ms(device.now_ms()),
         }
     }
 
@@ -85,14 +105,14 @@ impl Phase {
     fn handle(self, device: &Device<'_>, event: Option<Event>) -> Result<Phase, RunError> {
         match self {
             Phase::Enrolling(enrolling) => enrolling.handle(device, event),
-            door => Ok(door),
+            Phase::Door(door) => (*door).handle(device, event),
         }
     }
 
-    fn door(self) -> Option<Credentials> {
+    fn report(self, provisioning: Provisioning) -> RunReport {
         match self {
-            Phase::Door(credentials) => Some(credentials),
-            Phase::Enrolling(_) => None,
+            Phase::Door(door) => (*door).report(provisioning),
+            Phase::Enrolling(enrolling) => enrolling.report(provisioning),
         }
     }
 }
@@ -109,6 +129,5 @@ pub fn run(connectors: &dyn Connectors) -> Result<RunReport, RunError> {
         }
         phase = phase.handle(&device, event)?;
     }
-    let door = phase.door();
-    Ok(RunReport { provisioning, door })
+    Ok(phase.report(provisioning))
 }

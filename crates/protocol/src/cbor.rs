@@ -3,17 +3,17 @@
 use std::convert::Infallible;
 
 use minicbor::decode::Error;
-use minicbor::{encode, Decoder, Encoder};
+use minicbor::{encode, Decode, Decoder, Encoder};
+
+use crate::Span;
 
 const VERSION: u64 = 1;
 
 /// Why a payload is not a message of this protocol version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
-    /// Not a well-formed map of the expected field types.
+    /// Not a well-formed definite-length map of the expected field types.
     Malformed(String),
-    /// A map of indefinite length, which no sender of this protocol writes.
-    IndefiniteMap,
     /// `v` is missing or names a version this side does not speak.
     Version,
 }
@@ -26,9 +26,10 @@ impl From<Error> for DecodeError {
 
 enum Value<'a> {
     Bool(bool),
-    Int(i32),
+    Int(i64),
     Uint(u64),
     Text(&'a str),
+    Spans(&'a [Span]),
 }
 
 /// Collects a message's fields and writes them in deterministic order.
@@ -48,60 +49,100 @@ impl<'a> MapWriter<'a> {
         self.entries.push((key, Value::Bool(value)));
     }
 
-    /// A field omitted when zero.
-    pub(crate) fn int(&mut self, key: &'static str, value: i32) {
-        if value != 0 {
-            self.entries.push((key, Value::Int(value)));
-        }
+    /// A field sent always, zero included.
+    pub(crate) fn int(&mut self, key: &'static str, value: i64) {
+        self.entries.push((key, Value::Int(value)));
     }
 
     /// A field omitted when zero.
-    pub(crate) fn uint(&mut self, key: &'static str, value: u64) {
+    pub(crate) fn int_unless_zero(&mut self, key: &'static str, value: i64) {
         if value != 0 {
-            self.entries.push((key, Value::Uint(value)));
+            self.int(key, value);
         }
+    }
+
+    /// A field sent always, zero included.
+    pub(crate) fn uint(&mut self, key: &'static str, value: u64) {
+        self.entries.push((key, Value::Uint(value)));
+    }
+
+    /// A field omitted when zero.
+    pub(crate) fn uint_unless_zero(&mut self, key: &'static str, value: u64) {
+        if value != 0 {
+            self.uint(key, value);
+        }
+    }
+
+    /// A field sent always, empty included.
+    pub(crate) fn text(&mut self, key: &'static str, value: &'a str) {
+        self.entries.push((key, Value::Text(value)));
     }
 
     /// A field omitted when empty.
-    pub(crate) fn text(&mut self, key: &'static str, value: &'a str) {
+    pub(crate) fn text_unless_empty(&mut self, key: &'static str, value: &'a str) {
         if !value.is_empty() {
-            self.entries.push((key, Value::Text(value)));
+            self.text(key, value);
         }
+    }
+
+    /// An array of spans, sent always.
+    pub(crate) fn spans(&mut self, key: &'static str, value: &'a [Span]) {
+        self.entries.push((key, Value::Spans(value)));
     }
 
     /// The map, keys shorter first and then bytewise.
     pub(crate) fn finish(mut self) -> Vec<u8> {
-        self.entries
-            .sort_by(|(a, _), (b, _)| a.len().cmp(&b.len()).then(a.cmp(b)));
+        self.entries.sort_by(|(a, _), (b, _)| deterministic(a, b));
         let mut encoder = Encoder::new(Vec::new());
         write_map(&mut encoder, &self.entries).expect("writing to a Vec cannot fail");
         encoder.into_writer()
     }
 }
 
-fn write_map(
-    encoder: &mut Encoder<Vec<u8>>,
-    entries: &[(&str, Value<'_>)],
-) -> Result<(), encode::Error<Infallible>> {
+fn deterministic(a: &str, b: &str) -> std::cmp::Ordering {
+    a.len().cmp(&b.len()).then(a.cmp(b))
+}
+
+type Written = Result<(), encode::Error<Infallible>>;
+
+fn write_map(encoder: &mut Encoder<Vec<u8>>, entries: &[(&str, Value<'_>)]) -> Written {
     encoder.map(entries.len() as u64)?;
     for (key, value) in entries {
         encoder.str(key)?;
         match value {
             Value::Bool(value) => encoder.bool(*value)?,
-            Value::Int(value) => encoder.i32(*value)?,
+            Value::Int(value) => encoder.i64(*value)?,
             Value::Uint(value) => encoder.u64(*value)?,
             Value::Text(value) => encoder.str(value)?,
+            Value::Spans(spans) => write_spans(encoder, spans)?,
         };
     }
     Ok(())
+}
+
+/// Each span is a map of `end`, `start`, and `state`, in that order.
+fn write_spans<'e>(
+    encoder: &'e mut Encoder<Vec<u8>>,
+    spans: &[Span],
+) -> Result<&'e mut Encoder<Vec<u8>>, encode::Error<Infallible>> {
+    encoder.array(spans.len() as u64)?;
+    for span in spans {
+        encoder.map(3)?;
+        encoder.str("end")?.i64(span.end)?;
+        encoder.str("start")?.i64(span.start)?;
+        encoder.str("state")?.str(&span.state)?;
+    }
+    Ok(encoder)
 }
 
 /// Where a decoded field's value goes.
 pub(crate) enum Slot<'a> {
     Bool(&'a mut bool),
     Int(&'a mut i32),
+    Long(&'a mut i64),
     Uint(&'a mut u64),
     Text(&'a mut String),
+    Spans(&'a mut Vec<Span>),
 }
 
 impl Slot<'_> {
@@ -109,18 +150,50 @@ impl Slot<'_> {
         match self {
             Slot::Bool(target) => **target = decoder.bool()?,
             Slot::Int(target) => **target = decoder.i32()?,
+            Slot::Long(target) => **target = decoder.i64()?,
             Slot::Uint(target) => **target = decoder.u64()?,
             Slot::Text(target) => **target = decoder.str()?.to_owned(),
+            Slot::Spans(target) => **target = read_spans(decoder)?,
         }
         Ok(())
     }
 }
 
+/// A span as an element of a CBOR array, definite or indefinite.
+struct SpanEntry(Span);
+
+impl<'b, C> Decode<'b, C> for SpanEntry {
+    fn decode(decoder: &mut Decoder<'b>, _context: &mut C) -> Result<Self, Error> {
+        let mut span = Span::default();
+        read_entries(
+            decoder,
+            &mut [
+                ("start", Slot::Long(&mut span.start)),
+                ("end", Slot::Long(&mut span.end)),
+                ("state", Slot::Text(&mut span.state)),
+            ],
+        )?;
+        Ok(SpanEntry(span))
+    }
+}
+
+fn read_spans(decoder: &mut Decoder<'_>) -> Result<Vec<Span>, Error> {
+    let mut spans = Vec::new();
+    for entry in decoder.array_iter::<SpanEntry>()? {
+        spans.push(entry?.0);
+    }
+    Ok(spans)
+}
+
 /// Reads a definite-length map into `slots` by key, skipping keys it does
-/// not know, and checks `v`.
-pub(crate) fn read_map(bytes: &[u8], slots: &mut [(&str, Slot<'_>)]) -> Result<(), DecodeError> {
-    let mut decoder = Decoder::new(bytes);
-    let length = decoder.map()?.ok_or(DecodeError::IndefiniteMap)?;
+/// not know, and returns `v` when the map has it.
+fn read_entries(
+    decoder: &mut Decoder<'_>,
+    slots: &mut [(&str, Slot<'_>)],
+) -> Result<Option<u64>, Error> {
+    let length = decoder
+        .map()?
+        .ok_or_else(|| Error::message("a map of indefinite length"))?;
     let mut version = None;
     for _ in 0..length {
         let key = decoder.str()?;
@@ -129,10 +202,17 @@ pub(crate) fn read_map(bytes: &[u8], slots: &mut [(&str, Slot<'_>)]) -> Result<(
             continue;
         }
         match slots.iter_mut().find(|(name, _)| *name == key) {
-            Some((_, slot)) => slot.read(&mut decoder)?,
+            Some((_, slot)) => slot.read(decoder)?,
             None => decoder.skip()?,
         }
     }
+    Ok(version)
+}
+
+/// Reads a message into `slots` and checks its `v`.
+pub(crate) fn read_map(bytes: &[u8], slots: &mut [(&str, Slot<'_>)]) -> Result<(), DecodeError> {
+    let mut decoder = Decoder::new(bytes);
+    let version = read_entries(&mut decoder, slots)?;
     if version != Some(VERSION) {
         return Err(DecodeError::Version);
     }

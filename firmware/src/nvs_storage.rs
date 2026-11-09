@@ -37,4 +37,10 @@ impl Storage for NvsStorage {
         nvs.set_raw(key, value).map_err(to_storage_error)?;
         Ok(())
     }
+
+    fn remove(&self, key: &str) -> Result<(), StorageError> {
+        let mut nvs = self.nvs.lock().expect("NVS lock");
+        nvs.remove(key).map_err(to_storage_error)?;
+        Ok(())
+    }
 }

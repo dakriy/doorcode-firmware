@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use connectors::{Broker, Clock, Connectors, Events, Firmware, Level, Log, Radio, Random, Storage};
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
-pub use events::{credentials_for, StubEvents};
+pub use events::{config_for, credentials_for, door_message, timeline_for, StubEvents};
 pub use storage::StubStorage;
 
 /// The bytes a string of hex digits spells. Panics on anything else.
@@ -22,13 +22,15 @@ pub fn hex(digits: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Entropy that is all zeros.
+/// Entropy that is one byte, repeated; zero unless the test sets it.
 #[derive(Debug, Default)]
-pub struct StubRandom;
+pub struct StubRandom {
+    pub byte: u8,
+}
 
 impl Random for StubRandom {
     fn bytes(&self, count: usize) -> Vec<u8> {
-        vec![0; count]
+        vec![self.byte; count]
     }
 }
 
@@ -84,21 +86,31 @@ impl Firmware for StubFirmware {
     }
 }
 
-/// A log that keeps every line.
+/// A log that keeps every line, and every level it was set to.
 #[derive(Debug, Default)]
 pub struct StubLog {
     lines: RefCell<Vec<(Level, String)>>,
+    levels: RefCell<Vec<Level>>,
 }
 
 impl StubLog {
     pub fn lines(&self) -> Vec<(Level, String)> {
         self.lines.borrow().clone()
     }
+
+    /// Every level the log was set to, in order.
+    pub fn levels(&self) -> Vec<Level> {
+        self.levels.borrow().clone()
+    }
 }
 
 impl Log for StubLog {
     fn log(&self, level: Level, message: &str) {
         self.lines.borrow_mut().push((level, message.to_owned()));
+    }
+
+    fn set_level(&self, level: Level) {
+        self.levels.borrow_mut().push(level);
     }
 }
 

@@ -34,4 +34,12 @@ impl Storage for FileStorage {
     fn store(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
         fs::write(self.path_for(key), value).map_err(|error| StorageError(error.to_string()))
     }
+
+    fn remove(&self, key: &str) -> Result<(), StorageError> {
+        match fs::remove_file(self.path_for(key)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(StorageError(error.to_string())),
+        }
+    }
 }

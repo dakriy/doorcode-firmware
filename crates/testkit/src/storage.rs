@@ -50,25 +50,37 @@ impl StubStorage {
     pub fn stored(&self, key: &str) -> Option<Vec<u8>> {
         self.values.borrow().get(key).cloned()
     }
+
+    /// Every key with something stored under it, in order.
+    pub fn keys(&self) -> Vec<String> {
+        self.values.borrow().keys().cloned().collect()
+    }
+
+    fn succeed(&self) -> Result<(), StorageError> {
+        match &self.failure {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
+    }
 }
 
 impl Storage for StubStorage {
     fn load(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        match &self.failure {
-            Some(error) => Err(error.clone()),
-            None => Ok(self.values.borrow().get(key).cloned()),
-        }
+        self.succeed()?;
+        Ok(self.values.borrow().get(key).cloned())
     }
 
     fn store(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
-        match &self.failure {
-            Some(error) => Err(error.clone()),
-            None => {
-                self.values
-                    .borrow_mut()
-                    .insert(key.to_owned(), value.to_vec());
-                Ok(())
-            }
-        }
+        self.succeed()?;
+        self.values
+            .borrow_mut()
+            .insert(key.to_owned(), value.to_vec());
+        Ok(())
+    }
+
+    fn remove(&self, key: &str) -> Result<(), StorageError> {
+        self.succeed()?;
+        self.values.borrow_mut().remove(key);
+        Ok(())
     }
 }

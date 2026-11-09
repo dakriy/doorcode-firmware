@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use connectors::{Broker, BrokerAddress, BrokerError, ConnectOptions, Publication};
-use protocol::Enrollment;
+use protocol::{Enrollment, Online, Topic};
 
 /// A broker that records every request and decodes what was published.
 #[derive(Debug, Default)]
@@ -45,19 +45,23 @@ pub struct Sent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
     Enrollment(Enrollment),
+    Online(Online),
     Undecoded(Vec<u8>),
 }
 
+fn decode(topic: &str, payload: &[u8]) -> Option<Message> {
+    match protocol::parse_topic(topic)? {
+        Topic::Enroll(_) => Enrollment::decode(payload).ok().map(Message::Enrollment),
+        Topic::Door { leaf, .. } if leaf == protocol::LEAF_ONLINE => {
+            Online::decode(payload).ok().map(Message::Online)
+        }
+        _ => None,
+    }
+}
+
 fn decoded(publication: &Publication) -> Sent {
-    let enrollment = publication
-        .topic
-        .starts_with("doorcode/enroll/")
-        .then(|| Enrollment::decode(&publication.payload).ok())
-        .flatten();
-    let message = match enrollment {
-        Some(enrollment) => Message::Enrollment(enrollment),
-        None => Message::Undecoded(publication.payload.clone()),
-    };
+    let message = decode(&publication.topic, &publication.payload)
+        .unwrap_or_else(|| Message::Undecoded(publication.payload.clone()));
     Sent {
         topic: publication.topic.clone(),
         retain: publication.retain,

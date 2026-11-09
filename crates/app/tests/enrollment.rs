@@ -2,9 +2,10 @@
 //! announces itself with the enrollment account until the server sends it
 //! the credentials of the door it now is.
 
+use app::ConnectionState;
 use connectors::{BrokerAddress, Event, Incoming, Level};
 use pretty_assertions::assert_eq;
-use protocol::{Credentials, Enrollment};
+use protocol::{Credentials, Enrollment, Online};
 use testkit::{
     credentials_for, hex, BrokerCall, Connection, Message, Sent, StubBroker, StubConnectors,
     StubEvents, StubFirmware, StubRadio, StubStorage,
@@ -138,7 +139,7 @@ fn an_announcement_without_a_signal_or_version_carries_only_the_version_and_onli
 }
 
 #[test]
-fn received_credentials_are_stored_and_the_controller_disconnects_cleanly() {
+fn received_credentials_are_stored_and_the_controller_disconnects_cleanly_to_connect_as_the_door() {
     let connectors = controller(StubEvents::script([
         (0, Event::Connected),
         (5_000, credentials_for(HARDWARE_ID, &door_seven())),
@@ -153,7 +154,28 @@ fn received_credentials_are_stored_and_the_controller_disconnects_cleanly() {
             enrollment_connection(),
             credentials_subscription(),
             announcement(),
-            BrokerCall::Disconnect
+            BrokerCall::Disconnect,
+            BrokerCall::Connect(Connection {
+                address: BrokerAddress {
+                    host: "broker.example.org".to_owned(),
+                    port: 8883,
+                    tls: true,
+                    ca_pem: "-----BEGIN CERTIFICATE-----".to_owned(),
+                },
+                client_id: HARDWARE_ID.to_owned(),
+                username: "door-7-0123456789ab".to_owned(),
+                password: "c2VjcmV0LXRva2VuLWZvci1kb29yLTc".to_owned(),
+                keep_alive_s: 30,
+                will: Sent {
+                    topic: "doorcode/doors/7/online".to_owned(),
+                    retain: true,
+                    message: Message::Online(Online {
+                        online: false,
+                        username: "door-7-0123456789ab".to_owned(),
+                        ..Online::default()
+                    }),
+                },
+            })
         ]
     );
     assert_eq!(connectors.storage.stored("door_id"), Some(b"7".to_vec()));
@@ -310,6 +332,55 @@ fn a_refused_connection_request_is_logged_and_made_again_a_second_later() {
             "not connected (broker: no route to host); connecting again shortly".to_owned()
         )
     );
+}
+
+#[test]
+fn a_refused_enrollment_connection_is_logged_and_made_again_a_second_later() {
+    let connectors = controller(StubEvents::script([
+        (0, Event::Refused { code: 5 }),
+        (1_500, Event::Stop),
+    ]));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.broker.calls(),
+        vec![enrollment_connection(), enrollment_connection()]
+    );
+    assert_eq!(
+        connectors.log.lines()[1],
+        (
+            Level::Warn,
+            "not connected (refused with code 5); connecting again shortly".to_owned()
+        )
+    );
+}
+
+#[test]
+fn an_enrolling_controller_reports_itself_connected_once_announced() {
+    let connectors = controller(StubEvents::script([(0, Event::Connected)]));
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(report.connection, ConnectionState::Connected);
+}
+
+#[test]
+fn an_enrolling_controller_reports_itself_disconnected_while_it_waits_to_connect_again() {
+    let connectors = controller(StubEvents::script([(0, Event::Disconnected)]));
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(report.connection, ConnectionState::Disconnected);
+}
+
+#[test]
+fn an_enrolling_controller_reports_itself_connecting_until_the_broker_answers() {
+    let connectors = controller(StubEvents::default());
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(report.connection, ConnectionState::Connecting);
 }
 
 #[test]

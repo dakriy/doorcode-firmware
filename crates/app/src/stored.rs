@@ -18,6 +18,8 @@ const WIFI_PASSWORD: &str = "wifi_password";
 const DOOR_ID: &str = "door_id";
 const USERNAME: &str = "username";
 const TOKEN: &str = "token";
+pub(crate) const CONFIG: &str = "config";
+pub(crate) const TIMELINE: &str = "timeline";
 
 pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunError> {
     let broker = BrokerAddress {
@@ -66,14 +68,34 @@ pub(crate) fn store_door_credentials(
     store(storage, TOKEN, &credentials.token)
 }
 
+/// Forgets everything that belongs to the door the controller was, so it
+/// starts over as a new controller would.
+pub(crate) fn forget_door(storage: &dyn Storage) -> Result<(), RunError> {
+    for key in [DOOR_ID, USERNAME, TOKEN, CONFIG, TIMELINE] {
+        storage.remove(key).map_err(RunError::Storage)?;
+    }
+    Ok(())
+}
+
+/// Moves the controller to another broker host, from the next start on too.
+pub(crate) fn store_broker_host(storage: &dyn Storage, host: &str) -> Result<(), RunError> {
+    store(storage, BROKER_HOST, host)
+}
+
+pub(crate) fn bytes(storage: &dyn Storage, key: &str) -> Result<Option<Vec<u8>>, RunError> {
+    storage.load(key).map_err(RunError::Storage)
+}
+
+pub(crate) fn store_bytes(storage: &dyn Storage, key: &str, value: &[u8]) -> Result<(), RunError> {
+    storage.store(key, value).map_err(RunError::Storage)
+}
+
 fn store(storage: &dyn Storage, key: &str, value: &str) -> Result<(), RunError> {
-    storage
-        .store(key, value.as_bytes())
-        .map_err(RunError::Storage)
+    store_bytes(storage, key, value.as_bytes())
 }
 
 fn text(storage: &dyn Storage, key: &'static str) -> Result<Option<String>, RunError> {
-    let Some(bytes) = storage.load(key).map_err(RunError::Storage)? else {
+    let Some(bytes) = bytes(storage, key)? else {
         return Ok(None);
     };
     match String::from_utf8(bytes) {

@@ -23,6 +23,17 @@ impl<'a> Device<'a> {
         self.connectors.clock().monotonic_ms()
     }
 
+    /// The version of the image running now, as announced to the server.
+    pub(crate) fn firmware_version(&self) -> String {
+        self.connectors.firmware().running_version()
+    }
+
+    /// The signal strength to announce; zero, which leaves it out, when the
+    /// radio has none.
+    pub(crate) fn signal_dbm(&self) -> i32 {
+        self.connectors.radio().signal_dbm().unwrap_or(0)
+    }
+
     pub(crate) fn log(&self, level: Level, message: &str) {
         self.connectors.log().log(level, message);
     }

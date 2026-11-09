@@ -3,6 +3,7 @@
 
 mod placeholders;
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -19,16 +20,26 @@ impl Firmware for BuildVersion {
     }
 }
 
-struct StderrLog;
+/// Writes lines up to the level last set to standard error.
+struct StderrLog {
+    level: Cell<Level>,
+}
 
 impl Log for StderrLog {
     fn log(&self, level: Level, message: &str) {
-        eprintln!("{level:?}: {message}");
+        if level <= self.level.get() {
+            eprintln!("{level:?}: {message}");
+        }
+    }
+
+    fn set_level(&self, level: Level) {
+        self.level.set(level);
     }
 }
 
 struct HostConnectors {
     storage: FileStorage,
+    log: StderrLog,
 }
 
 impl Connectors for HostConnectors {
@@ -61,7 +72,7 @@ impl Connectors for HostConnectors {
     }
 
     fn log(&self) -> &dyn Log {
-        &StderrLog
+        &self.log
     }
 }
 
@@ -75,6 +86,9 @@ fn main() -> ExitCode {
     }
     let connectors = HostConnectors {
         storage: FileStorage::new(&data_dir),
+        log: StderrLog {
+            level: Cell::new(Level::Info),
+        },
     };
     match app::run(&connectors) {
         Ok(report) => {

@@ -1,11 +1,11 @@
 //! Enrolling: announcing the controller with the shared enrollment account
 //! until the server sends it the credentials of the door it now is.
 
-use connectors::{BrokerError, ConnectOptions, Event, Incoming, Level, Publication};
-use protocol::{Credentials, Enrollment};
+use connectors::{BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication};
+use protocol::{Config, Credentials, Enrollment, Timeline};
 
 use crate::device::Device;
-use crate::{stored, Phase, RunError};
+use crate::{door, stored, ConnectionState, Phase, Provisioning, RunError, RunReport};
 
 /// The broker drops the connection after one and a half of these without a packet.
 const KEEP_ALIVE_S: u16 = 30;
@@ -16,7 +16,13 @@ const REANNOUNCE_AFTER_MS: u64 = 10 * 60 * 1000;
 /// How long to wait before connecting again after a failure or a drop.
 const RECONNECT_PAUSE_MS: u64 = 1000;
 
-pub(crate) enum Enrolling {
+pub(crate) struct Enrolling {
+    /// The broker to enroll at.
+    broker: BrokerAddress,
+    step: Step,
+}
+
+enum Step {
     /// A connection was asked for; the broker has not answered yet.
     Connecting,
     /// Announced, and listening for credentials.
@@ -25,18 +31,35 @@ pub(crate) enum Enrolling {
     Paused { reconnect_at: u64 },
 }
 
-pub(crate) fn start(device: &Device<'_>) -> Enrolling {
+pub(crate) fn start(device: &Device<'_>, broker: BrokerAddress) -> Enrolling {
     device.log(Level::Info, &format!("enrolling as {}", device.hardware_id));
-    connect(device)
+    let step = connect(device, &broker);
+    Enrolling { broker, step }
 }
 
 impl Enrolling {
     /// How long the event loop may wait before this needs attention.
     pub(crate) fn wait_ms(&self, now_ms: u64) -> Option<u64> {
-        match self {
-            Enrolling::Connecting => None,
-            Enrolling::Waiting { reannounce_at } => Some(reannounce_at.saturating_sub(now_ms)),
-            Enrolling::Paused { reconnect_at } => Some(reconnect_at.saturating_sub(now_ms)),
+        match self.step {
+            Step::Connecting => None,
+            Step::Waiting { reannounce_at } => Some(reannounce_at.saturating_sub(now_ms)),
+            Step::Paused { reconnect_at } => Some(reconnect_at.saturating_sub(now_ms)),
+        }
+    }
+
+    /// Not a door yet, so the door's settings are the defaults.
+    pub(crate) fn report(self, provisioning: Provisioning) -> RunReport {
+        let connection = match self.step {
+            Step::Connecting => ConnectionState::Connecting,
+            Step::Waiting { .. } => ConnectionState::Connected,
+            Step::Paused { .. } => ConnectionState::Disconnected,
+        };
+        RunReport {
+            provisioning,
+            door: None,
+            connection,
+            config: Config::default(),
+            timeline: Timeline::default(),
         }
     }
 
@@ -46,21 +69,22 @@ impl Enrolling {
         device: &Device<'_>,
         event: Option<Event>,
     ) -> Result<Phase, RunError> {
-        let next = match event {
+        let step = match event {
             Some(Event::Connected) => subscribe_and_announce(device),
             Some(Event::Disconnected) => pause(device, "connection lost"),
+            Some(Event::Refused { code }) => pause(device, &format!("refused with code {code}")),
             Some(Event::Message(message)) => return self.receive(device, &message),
             // The wait ran out. `Stop` ends the loop before it gets here.
             _ => self.when_due(device),
         };
-        Ok(Phase::Enrolling(next))
+        Ok(Phase::Enrolling(Enrolling { step, ..self }))
     }
 
-    fn when_due(self, device: &Device<'_>) -> Enrolling {
-        match self {
-            Enrolling::Waiting { .. } => outcome(device, announce(device)),
+    fn when_due(&self, device: &Device<'_>) -> Step {
+        match self.step {
+            Step::Waiting { .. } => outcome(device, announce(device)),
             // Connecting has no deadline, so only a pause runs out here.
-            Enrolling::Paused { .. } | Enrolling::Connecting => connect(device),
+            Step::Paused { .. } | Step::Connecting => connect(device, &self.broker),
         }
     }
 
@@ -83,38 +107,35 @@ impl Enrolling {
             Level::Info,
             &format!("enrolled as door {}", credentials.door_id),
         );
-        Ok(Phase::Door(credentials))
+        let door = door::start(device, credentials, self.broker)?;
+        Ok(Phase::Door(Box::new(door)))
     }
 }
 
-fn connect(device: &Device<'_>) -> Enrolling {
-    let options = connect_options(device);
+fn connect(device: &Device<'_>, broker: &BrokerAddress) -> Step {
+    let options = connect_options(device, broker);
     match device.connectors.broker().connect(&options) {
-        Ok(()) => Enrolling::Connecting,
+        Ok(()) => Step::Connecting,
         Err(error) => pause(device, &error.to_string()),
     }
 }
 
-fn connect_options(device: &Device<'_>) -> ConnectOptions {
-    let provisioning = device.provisioning;
+fn connect_options(device: &Device<'_>, broker: &BrokerAddress) -> ConnectOptions {
+    let enrollment = &device.provisioning.enrollment;
     // Offline, and nothing else.
     let will = Enrollment::default();
     ConnectOptions {
-        address: provisioning.broker.clone(),
+        address: broker.clone(),
         client_id: device.hardware_id.clone(),
-        username: provisioning.enrollment.username.clone(),
-        password: provisioning.enrollment.password.clone(),
+        username: enrollment.username.clone(),
+        password: enrollment.password.clone(),
         keep_alive_s: KEEP_ALIVE_S,
-        will: Publication {
-            topic: protocol::enroll_topic(&device.hardware_id),
-            payload: will.encode(),
-            retain: true,
-        },
+        will: status(device, &will),
     }
 }
 
 /// The credentials are not retained, so the subscription comes first.
-fn subscribe_and_announce(device: &Device<'_>) -> Enrolling {
+fn subscribe_and_announce(device: &Device<'_>) -> Step {
     let topic = protocol::credentials_topic(&device.hardware_id);
     let result = device
         .connectors
@@ -127,31 +148,40 @@ fn subscribe_and_announce(device: &Device<'_>) -> Enrolling {
 fn announce(device: &Device<'_>) -> Result<(), BrokerError> {
     let announcement = Enrollment {
         online: true,
-        firmware_version: device.connectors.firmware().running_version(),
-        signal: device.connectors.radio().signal_dbm().unwrap_or(0),
+        firmware_version: device.firmware_version(),
+        signal: device.signal_dbm(),
     };
-    device.connectors.broker().publish(&Publication {
-        topic: protocol::enroll_topic(&device.hardware_id),
-        payload: announcement.encode(),
-        retain: true,
-    })
+    device
+        .connectors
+        .broker()
+        .publish(&status(device, &announcement))
 }
 
-fn outcome(device: &Device<'_>, result: Result<(), BrokerError>) -> Enrolling {
+/// The announcement, or the last will standing in for it, retained on the
+/// controller's enrollment topic.
+fn status(device: &Device<'_>, enrollment: &Enrollment) -> Publication {
+    Publication {
+        topic: protocol::enroll_topic(&device.hardware_id),
+        payload: enrollment.encode(),
+        retain: true,
+    }
+}
+
+fn outcome(device: &Device<'_>, result: Result<(), BrokerError>) -> Step {
     match result {
-        Ok(()) => Enrolling::Waiting {
+        Ok(()) => Step::Waiting {
             reannounce_at: device.now_ms() + REANNOUNCE_AFTER_MS,
         },
         Err(error) => pause(device, &error.to_string()),
     }
 }
 
-fn pause(device: &Device<'_>, reason: &str) -> Enrolling {
+fn pause(device: &Device<'_>, reason: &str) -> Step {
     device.log(
         Level::Warn,
         &format!("not connected ({reason}); connecting again shortly"),
     );
-    Enrolling::Paused {
+    Step::Paused {
         reconnect_at: device.now_ms() + RECONNECT_PAUSE_MS,
     }
 }
