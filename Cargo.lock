@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "connectors",
  "pretty_assertions",
+ "protocol",
  "testkit",
 ]
 
@@ -92,6 +93,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "minicbor"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7244eafd1e09e7c4e33043881997aa6ab6dffff3ed2cee3395a278980481d6e"
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -105,6 +112,13 @@ checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
 dependencies = [
  "diff",
  "yansi",
+]
+
+[[package]]
+name = "protocol"
+version = "0.1.0"
+dependencies = [
+ "minicbor",
 ]
 
 [[package]]
@@ -144,6 +158,7 @@ name = "testkit"
 version = "0.1.0"
 dependencies = [
  "connectors",
+ "protocol",
 ]
 
 [[package]]

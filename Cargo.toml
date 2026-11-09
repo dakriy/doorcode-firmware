@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/connectors",
+    "crates/protocol",
     "crates/app",
     "crates/testkit",
     "crates/connectors-host",
@@ -19,6 +20,7 @@ publish = false
 
 [workspace.dependencies]
 connectors = { path = "crates/connectors" }
+protocol = { path = "crates/protocol" }
 app = { path = "crates/app" }
 testkit = { path = "crates/testkit" }
 connectors-host = { path = "crates/connectors-host" }

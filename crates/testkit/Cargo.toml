@@ -8,6 +8,7 @@ description = "Hand-written connector stubs and the stub factory. Test support o
 
 [dependencies]
 connectors.workspace = true
+protocol.workspace = true
 
 [lints]
 workspace = true

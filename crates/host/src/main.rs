@@ -1,11 +1,31 @@
 //! Production wiring for the desktop host. Builds real connectors, calls the
 //! entrypoint, and reports. Nothing here is tested; nothing here decides.
 
+mod placeholders;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use connectors::{Connectors, Storage};
+use connectors::{Broker, Clock, Connectors, Events, Firmware, Level, Log, Radio, Random, Storage};
 use connectors_host::FileStorage;
+
+use placeholders::{NoRadio, OfflineBroker, StartClock, StoppedEvents, ZeroRandom};
+
+struct BuildVersion;
+
+impl Firmware for BuildVersion {
+    fn running_version(&self) -> String {
+        env!("CARGO_PKG_VERSION").to_owned()
+    }
+}
+
+struct StderrLog;
+
+impl Log for StderrLog {
+    fn log(&self, level: Level, message: &str) {
+        eprintln!("{level:?}: {message}");
+    }
+}
 
 struct HostConnectors {
     storage: FileStorage,
@@ -14,6 +34,34 @@ struct HostConnectors {
 impl Connectors for HostConnectors {
     fn storage(&self) -> &dyn Storage {
         &self.storage
+    }
+
+    fn events(&self) -> &dyn Events {
+        &StoppedEvents
+    }
+
+    fn broker(&self) -> &dyn Broker {
+        &OfflineBroker
+    }
+
+    fn clock(&self) -> &dyn Clock {
+        &StartClock
+    }
+
+    fn random(&self) -> &dyn Random {
+        &ZeroRandom
+    }
+
+    fn radio(&self) -> &dyn Radio {
+        &NoRadio
+    }
+
+    fn firmware(&self) -> &dyn Firmware {
+        &BuildVersion
+    }
+
+    fn log(&self) -> &dyn Log {
+        &StderrLog
     }
 }
 
@@ -30,11 +78,11 @@ fn main() -> ExitCode {
     };
     match app::run(&connectors) {
         Ok(report) => {
-            println!("boot {}", report.boot_count);
+            println!("stopped; door {:?}", report.door.map(|door| door.door_id));
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("boot failed: {error:?}");
+            eprintln!("run failed: {error:?}");
             ExitCode::FAILURE
         }
     }

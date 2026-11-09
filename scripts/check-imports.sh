@@ -7,8 +7,9 @@
 # allowed without being listed.
 #
 # The entrypoint suite (crates/app/tests) is gated by an allowlist: it may use
-# the entrypoint crate, the connector interfaces, test support, and the
-# assertion library. Nothing else.
+# the entrypoint crate, the connector interfaces, the protocol's message
+# types (which the stubs decode to), test support, and the assertion library.
+# Nothing else.
 #
 # Mocking libraries are banned everywhere.
 set -u
@@ -21,29 +22,32 @@ fail() {
 }
 
 # --- application crate dependencies (denylist) -------------------------------
-app_deps=$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
-    | jq -r '.packages[] | select(.name == "app") | .dependencies[] | select(.kind == null) | .name')
-for dep in $app_deps; do
-    case "$dep" in
-        connectors) ;;
-        connectors-host|host|testkit|firmware|doorcode-firmware)
-            fail "application crate depends on '$dep' (connector implementation, wiring, or test support)" ;;
-        tokio|async-std|smol|reqwest|hyper|ureq|rusqlite|sqlx|diesel|rand|getrandom|fastrand|uuid|chrono|time|esp-idf-svc|esp-idf-hal|esp-idf-sys|embedded-svc|tempfile|std-io)
-            fail "application crate depends on effect crate '$dep'" ;;
-    esac
+# Application code is the `app` crate and the pure `protocol` crate it uses.
+for crate in app protocol; do
+    deps=$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
+        | jq -r --arg crate "$crate" '.packages[] | select(.name == $crate) | .dependencies[] | select(.kind == null) | .name')
+    for dep in $deps; do
+        case "$dep" in
+            connectors|protocol) ;;
+            connectors-host|host|testkit|firmware|doorcode-firmware)
+                fail "$crate depends on '$dep' (connector implementation, wiring, or test support)" ;;
+            tokio|async-std|smol|reqwest|hyper|ureq|rusqlite|sqlx|diesel|rand|getrandom|fastrand|uuid|chrono|time|esp-idf-svc|esp-idf-hal|esp-idf-sys|embedded-svc|tempfile|std-io)
+                fail "$crate depends on effect crate '$dep'" ;;
+        esac
+    done
 done
 
 # --- application source: effect modules of std ---------------------------------
 # Matches `std::fs::read`, `use std::{fs, time}`, and `std::io::stdin`.
 effect_paths='std::(\{[^}]*)?\b(fs|net|env|process|thread|time)\b|std::io::std(in|out|err)|\bcore::time\b'
-if grep -rnE "$effect_paths" crates/app/src >/dev/null; then
-    grep -rnE "$effect_paths" crates/app/src >&2
+if grep -rnE "$effect_paths" crates/app/src crates/protocol/src >/dev/null; then
+    grep -rnE "$effect_paths" crates/app/src crates/protocol/src >&2
     fail "application code reaches an effect module of std directly"
 fi
 
 # --- application source: no unit tests of internals -----------------------------
-if grep -rnE '#\[(cfg\(test\)|test)\]' crates/app/src >/dev/null; then
-    grep -rnE '#\[(cfg\(test\)|test)\]' crates/app/src >&2
+if grep -rnE '#\[(cfg\(test\)|test)\]' crates/app/src crates/protocol/src >/dev/null; then
+    grep -rnE '#\[(cfg\(test\)|test)\]' crates/app/src crates/protocol/src >&2
     fail "application code contains unit tests; tests enter at the entrypoint in crates/app/tests"
 fi
 
@@ -62,7 +66,7 @@ done
 suite_uses=$(grep -rhoE '^\s*use\s+[a-z_]+' crates/app/tests | sed -E 's/^\s*use\s+//' | sort -u)
 for root in $suite_uses; do
     case "$root" in
-        app|connectors|testkit|pretty_assertions|std|core) ;;
+        app|connectors|protocol|testkit|pretty_assertions|std|core) ;;
         *) fail "entrypoint suite uses crate '$root', which is not in the allowlist" ;;
     esac
 done

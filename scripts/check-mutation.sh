@@ -1,13 +1,14 @@
 #!/bin/sh
-# Mutation testing of application code. The gate is the survivor list, not a
-# percentage: any missed or timed-out mutant fails. Suppressions live in
+# Mutation testing of application code: the app and protocol crates, both
+# exercised by the entrypoint suite in crates/app/tests. The gate is the
+# survivor list, not a percentage: any missed or timed-out mutant fails. Suppressions live in
 # .cargo/mutants.toml with a written reason (see AGENTS.md).
 set -u
 cd "$(dirname "$0")/.." || exit 1
 . ./scripts/env.sh
 
 out=target/mutants
-cargo mutants -p app --output "$out" --timeout 30 "$@"
+cargo mutants -p app -p protocol --test-package app --output "$out" --timeout 30 "$@"
 code=$?
 missed="$out/mutants.out/missed.txt"
 timeout="$out/mutants.out/timeout.txt"

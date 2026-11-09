@@ -2,12 +2,42 @@
 //! entrypoint, and logs. Nothing here is tested; nothing here decides.
 
 mod nvs_storage;
+mod placeholders;
 
-use connectors::{Connectors, Storage};
+use connectors::{Broker, Clock, Connectors, Events, Firmware, Level, Log, Radio, Random, Storage};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
 
 use nvs_storage::NvsStorage;
+use placeholders::{NoRadio, OfflineBroker, StartClock, StoppedEvents, ZeroRandom};
+
+/// The version this image was built as.
+const VERSION: &str = match option_env!("DOORCODE_FIRMWARE_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+struct BuildVersion;
+
+impl Firmware for BuildVersion {
+    fn running_version(&self) -> String {
+        VERSION.to_owned()
+    }
+}
+
+struct EspLog;
+
+impl Log for EspLog {
+    fn log(&self, level: Level, message: &str) {
+        let level = match level {
+            Level::Error => log::Level::Error,
+            Level::Warn => log::Level::Warn,
+            Level::Info => log::Level::Info,
+            Level::Debug => log::Level::Debug,
+        };
+        log::log!(level, "{message}");
+    }
+}
 
 struct EspConnectors {
     storage: NvsStorage,
@@ -16,6 +46,34 @@ struct EspConnectors {
 impl Connectors for EspConnectors {
     fn storage(&self) -> &dyn Storage {
         &self.storage
+    }
+
+    fn events(&self) -> &dyn Events {
+        &StoppedEvents
+    }
+
+    fn broker(&self) -> &dyn Broker {
+        &OfflineBroker
+    }
+
+    fn clock(&self) -> &dyn Clock {
+        &StartClock
+    }
+
+    fn random(&self) -> &dyn Random {
+        &ZeroRandom
+    }
+
+    fn radio(&self) -> &dyn Radio {
+        &NoRadio
+    }
+
+    fn firmware(&self) -> &dyn Firmware {
+        &BuildVersion
+    }
+
+    fn log(&self) -> &dyn Log {
+        &EspLog
     }
 }
 
@@ -29,7 +87,7 @@ fn main() {
     };
 
     match app::run(&connectors) {
-        Ok(report) => log::info!("boot {}", report.boot_count),
-        Err(error) => log::error!("boot failed: {error:?}"),
+        Ok(report) => log::info!("stopped; door {:?}", report.door.map(|door| door.door_id)),
+        Err(error) => log::error!("run failed: {error:?}"),
     }
 }

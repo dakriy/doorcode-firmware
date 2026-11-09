@@ -29,7 +29,7 @@ check() {
     done
 }
 
-check "$APP_CAP" "application" crates/app/src
+check "$APP_CAP" "application" crates/app/src crates/protocol/src
 check "$CONNECTOR_CAP" "connector" crates/connectors-host/src crates/host/src firmware/src
 
 [ "$status" -eq 0 ] && echo "complexity caps: ok (application $APP_CAP, connector $CONNECTOR_CAP)"

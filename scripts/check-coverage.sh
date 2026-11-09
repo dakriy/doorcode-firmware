@@ -45,7 +45,7 @@ connector_seconds=$(echo "$end - $start" | bc)
 
 # 4. Connector coverage, for information only.
 echo "coverage of connector code from the fast connector tests (informational):"
-cargo llvm-cov report --locked --ignore-filename-regex '(crates/(app|connectors|testkit|host)/|/tests/|/\.cargo/registry/|/rustc/)' || true
+cargo llvm-cov report --locked --ignore-filename-regex '(crates/(app|protocol|connectors|testkit|host)/|/tests/|/\.cargo/registry/|/rustc/)' || true
 
 # 5. Runtime budget over everything verify-fast ran as tests.
 total=$(echo "$entrypoint_seconds + $connector_seconds" | bc)

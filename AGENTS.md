@@ -127,7 +127,8 @@ The runtime budget covers everything `verify-fast` runs.
 - Assertion library with diff output: `pretty_assertions`
 - Coverage tool: `cargo-llvm-cov` with the system LLVM (`LLVM_COV` and
   `LLVM_PROFDATA` from `scripts/env.sh`)
-- Mutation tool: `cargo-mutants`, configured in `.cargo/mutants.toml`
+- Mutation tool: `cargo-mutants`, configured in `.cargo/mutants.toml`;
+  mutates `app` and `protocol` and runs the entrypoint suite against each
 - Import-rule tool: crate boundaries plus `scripts/check-imports.sh`
 - Effect-call linter: clippy `disallowed_methods`, `disallowed_types`, and
   `disallowed_macros` from `crates/app/clippy.toml`
@@ -149,7 +150,7 @@ Tool installation on a fresh machine (none needs root):
 | What | Location |
 | --- | --- |
 | Entrypoints | `crates/app/src/lib.rs`: `app::run` |
-| Application code | `crates/app/src` |
+| Application code | `crates/app/src`, and `crates/protocol/src` (the pure protocol crate: topics and CBOR messages) |
 | Connector interfaces | `crates/connectors/src/lib.rs` |
 | Connector implementations | `crates/connectors-host/src` (desktop), `firmware/src` (ESP32) |
 | Connector factory interface | `connectors::Connectors` in `crates/connectors/src/lib.rs` |
@@ -159,11 +160,16 @@ Tool installation on a fresh machine (none needs root):
 | Test support, stubs, and the stub factory | `crates/testkit/src/lib.rs`: `StubConnectors` and one `Stub*` per connector |
 
 The entry function and how tests pass it the stub factory:
-`app::run(&dyn connectors::Connectors) -> Result<BootReport, BootError>`.
-A test builds `testkit::StubConnectors { .. }` with seeded stubs and calls
-`app::run(&connectors)`. The application crate's public surface is `run` and
-its result types; everything else is `pub(crate)`, so the compiler refuses a
-test that reaches inside.
+`app::run(&dyn connectors::Connectors) -> Result<RunReport, RunError>`.
+`run` is one event loop: it waits on the `Events` connector and returns when
+an event says stop. A test builds `testkit::StubConnectors { .. }` with seeded
+stubs and calls `app::run(&connectors)`; the stub event script is also the
+stub clock, and yields `Stop` once it runs out. The application crate's
+public surface is `run` and its result types; everything else is
+`pub(crate)`, so the compiler refuses a test that reaches inside. The
+protocol crate's public surface is its topics and message types with their
+`encode` and `decode`, since test support encodes what the server sends and
+decodes what the controller publishes.
 
 The firmware workspace holds only connector implementations and production
 wiring for the ESP32. It is excluded from the root workspace because it
@@ -221,8 +227,9 @@ because they perform I/O or read nondeterministic state.
   socket types, and the `print`, `println`, `eprint`, `eprintln`, and `dbg`
   macros
 
-The application crate's `[dependencies]` is the live list; a pure crate may
-be added there without appearing here. The denylist is extended when a new
+The `[dependencies]` of `app` and `protocol` are the live list; a pure crate
+may be added there without appearing here. `scripts/check-imports.sh`
+applies the same denylist to both. The denylist is extended when a new
 effect crate enters the workspace.
 
 ## Fast-suite dependencies
@@ -230,8 +237,10 @@ effect crate enters the workspace.
 Test libraries the entrypoint suite may import: the test runner and the
 assertion library, nothing that can replace a collaborator.
 
-- `app` (the entrypoint), `connectors` (interface types), `testkit`
-  (stubs and the stub factory), `pretty_assertions`
+- `app` (the entrypoint), `connectors` (interface types), `protocol`
+  (message types the stub broker decodes to and tests compare against;
+  tests never call its encoders or decoders), `testkit` (stubs and the stub
+  factory), `pretty_assertions`
 - The application crate's `[dev-dependencies]` is the live list and
   `scripts/check-imports.sh` fails on any other entry
 - Mocking libraries (`mockall`, `mockito`, `faux`, `unimock`, `mry`,
