@@ -1,6 +1,6 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
-use connectors::{DoorSensor, Restart, Strike};
+use connectors::{DoorSensor, Strike};
 
 /// A strike that records what it was told.
 #[derive(Debug, Default)]
@@ -42,23 +42,5 @@ pub struct StubDoorSensor {
 impl DoorSensor for StubDoorSensor {
     fn is_open(&self) -> bool {
         self.open
-    }
-}
-
-/// A device that counts how often it was restarted, and then goes on.
-#[derive(Debug, Default)]
-pub struct StubRestart {
-    restarts: Cell<u32>,
-}
-
-impl StubRestart {
-    pub fn restarts(&self) -> u32 {
-        self.restarts.get()
-    }
-}
-
-impl Restart for StubRestart {
-    fn restart(&self) {
-        self.restarts.set(self.restarts.get() + 1);
     }
 }

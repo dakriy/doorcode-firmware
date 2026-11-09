@@ -6,25 +6,29 @@ mod broker;
 mod door;
 mod enrolled;
 mod events;
+mod firmware;
 mod storage;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Restart,
-    Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Radio,
+    Random, Storage, Strike,
 };
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
-pub use door::{StrikeCall, StubDoorSensor, StubRestart, StubStrike};
+pub use door::{StrikeCall, StubDoorSensor, StubStrike};
 pub use enrolled::{
     door_coming_online, door_coming_online_as, door_connection_as, door_connection_to,
     door_online_status, door_online_status_as, DOOR_TOKEN, DOOR_USERNAME,
 };
 pub use events::{
-    command_for, config_for, credentials_for, door_message, reply_for, timeline_for, typed,
-    StubEvents,
+    command_for, config_for, credentials_for, door_message, downloaded, reply_for, timeline_for,
+    typed, StubEvents,
+};
+pub use firmware::{
+    sha256_hex, signed_by_another_key, signed_image, FirmwareCall, StubDownload, StubFirmware,
 };
 pub use storage::StubStorage;
 
@@ -103,26 +107,6 @@ impl Radio for StubRadio {
     }
 }
 
-/// A running image whose version the test sets.
-#[derive(Debug)]
-pub struct StubFirmware {
-    pub version: String,
-}
-
-impl Default for StubFirmware {
-    fn default() -> Self {
-        Self {
-            version: "2.0.0".to_owned(),
-        }
-    }
-}
-
-impl Firmware for StubFirmware {
-    fn running_version(&self) -> String {
-        self.version.clone()
-    }
-}
-
 /// A log that keeps every line, and every level it was set to.
 #[derive(Debug, Default)]
 pub struct StubLog {
@@ -171,10 +155,10 @@ pub struct StubConnectors {
     pub random: StubRandom,
     pub radio: StubRadio,
     pub firmware: StubFirmware,
+    pub download: StubDownload,
     pub log: StubLog,
     pub strike: StubStrike,
     pub door_sensor: StubDoorSensor,
-    pub restart: StubRestart,
 }
 
 impl StubConnectors {
@@ -185,6 +169,14 @@ impl StubConnectors {
             events,
             ..Self::default()
         }
+    }
+
+    /// The stubs of door 7, which comes online at millisecond 0 and then
+    /// sees `events`.
+    pub fn online(events: impl IntoIterator<Item = (u64, Event)>) -> Self {
+        Self::enrolled(StubEvents::script(
+            [(0, Event::Connected)].into_iter().chain(events),
+        ))
     }
 }
 
@@ -217,6 +209,10 @@ impl Connectors for StubConnectors {
         &self.firmware
     }
 
+    fn download(&self) -> &dyn Download {
+        &self.download
+    }
+
     fn log(&self) -> &dyn Log {
         &self.log
     }
@@ -227,9 +223,5 @@ impl Connectors for StubConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &self.door_sensor
-    }
-
-    fn restart(&self) -> &dyn Restart {
-        &self.restart
     }
 }

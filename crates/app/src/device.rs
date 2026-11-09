@@ -61,6 +61,12 @@ impl<'a> Device<'a> {
         self.connectors.broker().publish(&publication)
     }
 
+    /// Logs why at `level`, and restarts as a power cycle would.
+    pub(crate) fn restart(&self, level: Level, why: &str) {
+        self.log(level, why);
+        self.connectors.firmware().restart();
+    }
+
     pub(crate) fn log(&self, level: Level, message: &str) {
         self.connectors.log().log(level, message);
     }

@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
-use connectors::{Clock, Event, Events, Incoming};
+use connectors::{Clock, Event, Events, Incoming, Transfer};
 use protocol::{Command, Config, Credentials, Reply, Timeline};
 
 /// More waits than any test needs; reaching it means the application spins.
@@ -68,6 +68,22 @@ pub fn config_for(door_id: u64, config: &Config) -> Event {
 /// The retained timeline door `door_id` receives.
 pub fn timeline_for(door_id: u64, timeline: &Timeline) -> Event {
     door_message(door_id, protocol::LEAF_TIMELINE, timeline.encode())
+}
+
+/// How many bytes of a body each download chunk carries.
+const CHUNK_BYTES: usize = 128;
+
+/// A download, all at millisecond `at_ms`, answered with `status` and
+/// `body` in chunks of 128 bytes, and then complete.
+pub fn downloaded(at_ms: u64, status: u16, body: &[u8]) -> Vec<(u64, Event)> {
+    let chunks = body
+        .chunks(CHUNK_BYTES)
+        .map(|chunk| Transfer::Chunk(chunk.to_vec()));
+    std::iter::once(Transfer::Status(status))
+        .chain(chunks)
+        .chain([Transfer::Complete])
+        .map(|transfer| (at_ms, Event::Download(transfer)))
+        .collect()
 }
 
 /// A message on the topic of door `door_id` that ends in `leaf`.

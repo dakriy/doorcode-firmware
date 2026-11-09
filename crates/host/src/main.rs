@@ -8,20 +8,60 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Restart,
-    Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, FirmwareError, Level, Log,
+    Radio, Random, Storage, Strike,
 };
 use connectors_host::FileStorage;
 
 use placeholders::{
-    ClosedDoor, NoRadio, NoRestart, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
+    ClosedDoor, NoDownload, NoRadio, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
 };
 
-struct BuildVersion;
+/// The image this binary stands for, built from this crate's version and
+/// trusting the firmware's signing key.
+struct BuildFirmware;
 
-impl Firmware for BuildVersion {
+/// The public key firmware images are signed with.
+const SIGNING_KEY: &[u8] = include_bytes!("../../../firmware/signing_public_key.bin");
+
+/// Installing is not supported yet; requests to install are refused.
+const NOT_SUPPORTED: &str = "not supported yet";
+
+impl Firmware for BuildFirmware {
     fn running_version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_owned()
+    }
+
+    fn signing_key(&self) -> Vec<u8> {
+        SIGNING_KEY.to_vec()
+    }
+
+    fn first_boot_of_new_image(&self) -> bool {
+        false
+    }
+
+    fn mark_valid(&self) -> Result<(), FirmwareError> {
+        Ok(())
+    }
+
+    fn begin(&self) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
+    fn write(&self, _chunk: &[u8]) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
+    fn finish(&self) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
+    fn set_boot(&self) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
+    fn restart(&self) {
+        // The host has nothing to restart yet.
     }
 }
 
@@ -73,7 +113,11 @@ impl Connectors for HostConnectors {
     }
 
     fn firmware(&self) -> &dyn Firmware {
-        &BuildVersion
+        &BuildFirmware
+    }
+
+    fn download(&self) -> &dyn Download {
+        &NoDownload
     }
 
     fn log(&self) -> &dyn Log {
@@ -86,10 +130,6 @@ impl Connectors for HostConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &ClosedDoor
-    }
-
-    fn restart(&self) -> &dyn Restart {
-        &NoRestart
     }
 }
 

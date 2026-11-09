@@ -411,7 +411,7 @@ fn a_broker_host_in_the_configuration_is_used_from_the_next_connection_on() {
 
     assert_eq!(
         (
-            connectors.broker.calls().last().cloned(),
+            connectors.broker.last_call(),
             connectors.storage.stored("broker_host")
         ),
         (

@@ -175,9 +175,7 @@ fn the_signal_free_memory_version_and_door_come_from_the_device_as_they_are_then
             free_bytes: 123_456,
             ..StubRadio::default()
         },
-        firmware: StubFirmware {
-            version: "2.1.0".to_owned(),
-        },
+        firmware: StubFirmware::running("2.1.0"),
         door_sensor: StubDoorSensor { open: true },
         ..online_until(1001, [])
     };

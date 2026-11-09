@@ -13,10 +13,12 @@ mod door;
 mod enrollment;
 mod entry;
 mod rotation;
+mod signature;
 mod stored;
 mod strike;
 mod telemetry;
 mod timeline;
+mod update;
 
 use connectors::{BrokerAddress, Connectors, Event, StorageError};
 use protocol::{Check, Config, Credentials, Timeline};

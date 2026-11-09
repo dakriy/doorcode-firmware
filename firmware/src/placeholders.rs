@@ -2,8 +2,8 @@
 //! event queue stops the run at once, so nothing reaches the others.
 
 use connectors::{
-    Broker, BrokerError, Clock, ConnectOptions, DoorSensor, Event, Events, Publication, Radio,
-    Random, Strike,
+    Broker, BrokerError, Clock, ConnectOptions, DoorSensor, Download, DownloadError, Event, Events,
+    Publication, Radio, Random, Strike,
 };
 
 pub(crate) struct StoppedEvents;
@@ -83,5 +83,13 @@ pub(crate) struct ClosedDoor;
 impl DoorSensor for ClosedDoor {
     fn is_open(&self) -> bool {
         false
+    }
+}
+
+pub(crate) struct NoDownload;
+
+impl Download for NoDownload {
+    fn start(&self, _url: &str) -> Result<(), DownloadError> {
+        Err(DownloadError("no network yet".to_owned()))
     }
 }

@@ -46,8 +46,24 @@ pub enum Event {
     Key(char),
     /// The door sensor changed: the door is now open, or now closed.
     Door { open: bool },
+    /// The download `Download::start` began made progress or ended.
+    Download(Transfer),
     /// The application is to stop. Production never sends it.
     Stop,
+}
+
+/// What a download reports, in order: the status, the body in chunks, and
+/// then that it completed or failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Transfer {
+    /// The HTTP status code the server answered with.
+    Status(u16),
+    /// The next bytes of the body.
+    Chunk(Vec<u8>),
+    /// The whole body has arrived.
+    Complete,
+    /// The download ended before the body was complete, for this reason.
+    Failed(String),
 }
 
 /// A message the broker delivered.
@@ -158,19 +174,62 @@ pub trait Radio {
     fn hardware_id(&self) -> String;
 }
 
-/// The firmware image the device runs.
+/// HTTPS downloads. Calls start work; progress arrives through `Events` as
+/// `Event::Download`.
+pub trait Download {
+    /// Starts an HTTPS `GET` of `url`, verifying the server's certificate.
+    fn start(&self, url: &str) -> Result<(), DownloadError>;
+}
+
+/// What a download connector reports when the download could not start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadError(pub String);
+
+impl fmt::Display for DownloadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for DownloadError {}
+
+/// The firmware images the device boots, and the device as a whole.
 pub trait Firmware {
     /// The version of the running image.
     fn running_version(&self) -> String;
-}
-
-/// The device as a whole.
-pub trait Restart {
+    /// The raw P-256 public key, `x || y`, that images must be signed with.
+    fn signing_key(&self) -> Vec<u8>;
+    /// Whether this boot is the first on a newly installed image, which the
+    /// bootloader rolls back on the next restart unless it is marked valid.
+    fn first_boot_of_new_image(&self) -> bool;
+    /// Keeps the running image from being rolled back.
+    fn mark_valid(&self) -> Result<(), FirmwareError>;
+    /// Starts installing a new image into the inactive slot, abandoning any
+    /// install begun before.
+    fn begin(&self) -> Result<(), FirmwareError>;
+    /// Appends `chunk` to the image being installed.
+    fn write(&self, chunk: &[u8]) -> Result<(), FirmwareError>;
+    /// Ends the install of the image written.
+    fn finish(&self) -> Result<(), FirmwareError>;
+    /// Boots the installed image from the next restart on.
+    fn set_boot(&self) -> Result<(), FirmwareError>;
     /// Restarts the device as a power cycle would, without closing the
     /// broker connection cleanly, so the broker sends the last will. On a
     /// device it does not return.
     fn restart(&self);
 }
+
+/// What a firmware connector reports when the system refused a request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirmwareError(pub String);
+
+impl fmt::Display for FirmwareError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for FirmwareError {}
 
 /// How much a log line matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -197,8 +256,8 @@ pub trait Connectors {
     fn random(&self) -> &dyn Random;
     fn radio(&self) -> &dyn Radio;
     fn firmware(&self) -> &dyn Firmware;
+    fn download(&self) -> &dyn Download;
     fn log(&self) -> &dyn Log;
     fn strike(&self) -> &dyn Strike;
     fn door_sensor(&self) -> &dyn DoorSensor;
-    fn restart(&self) -> &dyn Restart;
 }

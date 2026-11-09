@@ -1,9 +1,12 @@
 //! Serving as the door: connecting with the door's own credentials,
 //! following the configuration and timeline the server sends, obeying its
-//! commands, handing over to new credentials, and going back to enrolling
-//! when the broker no longer accepts the credentials.
+//! commands, updating its firmware, handing over to new credentials, and
+//! going back to enrolling when the broker no longer accepts the
+//! credentials.
 
-use connectors::{BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication};
+use connectors::{
+    BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication, Transfer,
+};
 use protocol::{Config, Credentials, DecodeError, Online, Timeline};
 
 use crate::access::{Gate, Situation};
@@ -11,6 +14,7 @@ use crate::command::{self, Order, PendingRestart};
 use crate::device::Device;
 use crate::rotation::Rotation;
 use crate::telemetry::{self, Tally};
+use crate::update::{self, Boot, Install};
 use crate::{enrollment, stored, timeline, ConnectionState, Mode, Phase, RunError, RunReport};
 
 /// CONNACK return codes that say the broker does not accept the
@@ -41,6 +45,10 @@ pub(crate) struct Door {
     /// The restart a reboot command asked for, waiting for its ack to be
     /// acknowledged.
     restart: Option<PendingRestart>,
+    /// The firmware update downloading, if any.
+    install: Option<Install>,
+    /// What this boot is to an update.
+    boot: Boot,
 }
 
 enum Link {
@@ -89,6 +97,7 @@ pub(crate) fn start(
         .connectors
         .log()
         .set_level(log_level(&config.log_level));
+    let boot = update::boot(device, &config)?;
     let door = Door {
         credentials,
         rotation: next.map(|next| Rotation::to(next).tried()),
@@ -100,6 +109,8 @@ pub(crate) fn start(
         gate: Gate::default(),
         tally: Tally::after(connections),
         restart: None,
+        install: None,
+        boot,
     };
     Ok(door.connect(device))
 }
@@ -143,6 +154,7 @@ impl Door {
             self.gate.due_at(&self.config),
             self.retry_at(),
             self.restart_at(),
+            self.boot.revert_at(),
         ];
         let soonest = due_at.into_iter().flatten().min()?;
         Some(soonest.saturating_sub(now_ms))
@@ -171,6 +183,7 @@ impl Door {
                 door
             }
             Some(Event::Delivered { message_id }) => door.delivered(device, message_id),
+            Some(Event::Download(transfer)) => door.transfer(device, transfer)?,
             // The wait ran out. `Stop` ends the loop before it gets here.
             None | Some(Event::Stop) => door,
         };
@@ -197,7 +210,8 @@ impl Door {
 
     /// Connects again once the pause is over, reports telemetry when it is
     /// time, lets the keypad side catch up with the time, restarts once a
-    /// reboot has waited long enough, and tries new credentials again.
+    /// reboot has waited long enough or a new image has not come online in
+    /// time, and tries new credentials again.
     fn when_due(mut self, device: &Device<'_>) -> Door {
         self.gate.expire(device, &self.config);
         if device.is_due(self.link.report_at()) {
@@ -210,6 +224,10 @@ impl Door {
             );
             self.restart = None;
             command::restart(device);
+        }
+        if device.is_due(self.boot.revert_at()) {
+            self.boot = Boot::Settled;
+            Boot::revert(device);
         }
         if device.is_due(self.retry_at()) {
             return self.hand_over(device);
@@ -243,6 +261,19 @@ impl Door {
             restart: None,
             ..self
         }
+    }
+
+    /// Hands what the download reports to the update under way.
+    fn transfer(mut self, device: &Device<'_>, transfer: Transfer) -> Result<Door, RunError> {
+        let door_id = self.credentials.door_id;
+        self.install = match self.install.take() {
+            Some(install) => install.transfer(device, door_id, &self.config, transfer)?,
+            None => {
+                device.log(Level::Debug, "ignored a download with no update under way");
+                None
+            }
+        };
+        Ok(self)
     }
 
     /// Reports telemetry, and the next report one interval later.
@@ -331,6 +362,8 @@ impl Door {
         if let Err(error) = self.subscribe_and_publish_online(device) {
             return Ok(self.pause(device, &error.to_string()));
         }
+        std::mem::replace(&mut self.boot, Boot::Settled)
+            .online(device, self.credentials.door_id)?;
         let door = Door {
             link: Link::Online {
                 report_at: device.now_ms() + telemetry::FIRST_REPORT_AFTER_MS,
@@ -499,6 +532,11 @@ impl Door {
             Order::Open { strike_ms } => self.gate.open(device, strike_ms, &self.config),
             Order::Rotate(next) => return self.rotate_to(device, next),
             Order::Restart(pending) => self.restart = Some(pending),
+            Order::Update(command) => {
+                let under_way = self.install.take();
+                self.install =
+                    update::order(device, self.credentials.door_id, under_way, &command)?;
+            }
             Order::Nothing => {}
         }
         Ok(self)

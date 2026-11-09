@@ -101,9 +101,7 @@ fn once_connected_it_subscribes_to_its_credentials_and_then_announces_itself_ret
 #[test]
 fn the_announcement_is_encoded_exactly_as_the_contract_shows() {
     let connectors = StubConnectors {
-        firmware: StubFirmware {
-            version: "1.4.2".to_owned(),
-        },
+        firmware: StubFirmware::running("1.4.2"),
         ..controller(StubEvents::script([(0, Event::Connected)]))
     };
 
@@ -124,9 +122,7 @@ fn an_announcement_without_a_signal_or_version_carries_only_the_version_and_onli
             signal_dbm: None,
             ..StubRadio::default()
         },
-        firmware: StubFirmware {
-            version: String::new(),
-        },
+        firmware: StubFirmware::running(""),
         ..controller(StubEvents::script([(0, Event::Connected)]))
     };
 

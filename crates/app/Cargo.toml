@@ -10,7 +10,9 @@ description = "Application code. Reaches the world only through connector interf
 # scripts/check-imports.sh fails the build on anything else.
 [dependencies]
 connectors.workspace = true
+p256.workspace = true
 protocol.workspace = true
+sha2.workspace = true
 
 # Allowlist for the entrypoint suite in tests/: these and nothing more.
 [dev-dependencies]

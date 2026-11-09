@@ -22,6 +22,10 @@ const TOKEN: &str = "token";
 /// has worked.
 const NEXT_USERNAME: &str = "next_username";
 const NEXT_TOKEN: &str = "next_token";
+/// The command id and version of the update under way, kept to ack its
+/// failure after the new image was rolled back.
+const UPDATE_ID: &str = "update_id";
+const UPDATE_VERSION: &str = "update_version";
 pub(crate) const CONFIG: &str = "config";
 pub(crate) const TIMELINE: &str = "timeline";
 
@@ -132,6 +136,23 @@ fn remove(storage: &dyn Storage, keys: &[&str]) -> Result<(), RunError> {
         storage.remove(key).map_err(RunError::Storage)?;
     }
     Ok(())
+}
+
+/// The command id and version of the update under way, when one is.
+pub(crate) fn update(storage: &dyn Storage) -> Result<Option<(String, String)>, RunError> {
+    let Some(id) = text(storage, UPDATE_ID)? else {
+        return Ok(None);
+    };
+    Ok(Some((id, optional(storage, UPDATE_VERSION)?)))
+}
+
+pub(crate) fn store_update(storage: &dyn Storage, id: &str, version: &str) -> Result<(), RunError> {
+    store(storage, UPDATE_ID, id)?;
+    store(storage, UPDATE_VERSION, version)
+}
+
+pub(crate) fn forget_update(storage: &dyn Storage) -> Result<(), RunError> {
+    remove(storage, &[UPDATE_ID, UPDATE_VERSION])
 }
 
 /// Moves the controller to another broker host, from the next start on too.

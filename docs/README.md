@@ -6,3 +6,5 @@ operational decisions. Working notes that only make sense on one machine
 live outside the repository.
 
 - `security.md`: the security posture and why.
+- `firmware-signing.md`: the signature block on firmware images and the key
+  that checks it.

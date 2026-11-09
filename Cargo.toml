@@ -25,6 +25,8 @@ app = { path = "crates/app" }
 testkit = { path = "crates/testkit" }
 connectors-host = { path = "crates/connectors-host" }
 pretty_assertions = "1.4"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+sha2 = { version = "0.10", default-features = false }
 
 [workspace.lints.rust]
 dead_code = "deny"

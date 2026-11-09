@@ -5,15 +5,15 @@ mod nvs_storage;
 mod placeholders;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Events, Firmware, Level, Log, Radio, Random, Restart,
-    Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, FirmwareError, Level, Log,
+    Radio, Random, Storage, Strike,
 };
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys;
 
 use nvs_storage::NvsStorage;
 use placeholders::{
-    ClosedDoor, NoRadio, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
+    ClosedDoor, NoDownload, NoRadio, NoStrike, OfflineBroker, StartClock, StoppedEvents, ZeroRandom,
 };
 
 /// The version this image was built as.
@@ -22,18 +22,48 @@ const VERSION: &str = match option_env!("DOORCODE_FIRMWARE_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
-struct BuildVersion;
+/// The running image. Installing is not wired yet; restarting is.
+struct BuildFirmware;
 
-impl Firmware for BuildVersion {
+/// The public key firmware images are signed with.
+const SIGNING_KEY: &[u8] = include_bytes!("../signing_public_key.bin");
+
+/// Installing is not supported yet; requests to install are refused.
+const NOT_SUPPORTED: &str = "not supported yet";
+
+impl Firmware for BuildFirmware {
     fn running_version(&self) -> String {
         VERSION.to_owned()
     }
-}
 
-/// Restarts the chip; the broker connection drops without a clean close.
-struct ChipRestart;
+    fn signing_key(&self) -> Vec<u8> {
+        SIGNING_KEY.to_vec()
+    }
 
-impl Restart for ChipRestart {
+    fn first_boot_of_new_image(&self) -> bool {
+        false
+    }
+
+    fn mark_valid(&self) -> Result<(), FirmwareError> {
+        Ok(())
+    }
+
+    fn begin(&self) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
+    fn write(&self, _chunk: &[u8]) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
+    fn finish(&self) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
+    fn set_boot(&self) -> Result<(), FirmwareError> {
+        Err(FirmwareError(NOT_SUPPORTED.to_owned()))
+    }
+
     fn restart(&self) {
         esp_idf_svc::hal::reset::restart();
     }
@@ -90,7 +120,11 @@ impl Connectors for EspConnectors {
     }
 
     fn firmware(&self) -> &dyn Firmware {
-        &BuildVersion
+        &BuildFirmware
+    }
+
+    fn download(&self) -> &dyn Download {
+        &NoDownload
     }
 
     fn log(&self) -> &dyn Log {
@@ -103,10 +137,6 @@ impl Connectors for EspConnectors {
 
     fn door_sensor(&self) -> &dyn DoorSensor {
         &ClosedDoor
-    }
-
-    fn restart(&self) -> &dyn Restart {
-        &ChipRestart
     }
 }
 

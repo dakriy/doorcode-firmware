@@ -19,11 +19,6 @@ const IN_OPEN_SPAN: i64 = 1_793_010_000;
 /// A time inside the locked span of `spans`.
 const IN_LOCKED_SPAN: i64 = 1_793_020_000;
 
-/// A door that comes online at once and then sees `events`.
-fn online(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
-    StubConnectors::enrolled(script_online(events))
-}
-
 fn script_online(events: impl IntoIterator<Item = (u64, Event)>) -> StubEvents {
     StubEvents::script([(0, Event::Connected)].into_iter().chain(events))
 }
@@ -32,7 +27,7 @@ fn script_online(events: impl IntoIterator<Item = (u64, Event)>) -> StubEvents {
 fn online_with_contract_id(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
     StubConnectors {
         random: StubRandom::queued(hex(REQUEST_ID)),
-        ..online(events)
+        ..StubConnectors::online(events)
     }
 }
 
@@ -152,7 +147,7 @@ fn each_check_has_a_fresh_request_id_of_sixteen_lowercase_hex_digits() {
     bytes.extend(hex("fedcba9876543210"));
     let connectors = StubConnectors {
         random: StubRandom::queued(bytes),
-        ..online(typed(10, "1234#").into_iter().chain(typed(20, "5678#")))
+        ..StubConnectors::online(typed(10, "1234#").into_iter().chain(typed(20, "5678#")))
     };
 
     app::run(&connectors).unwrap();
@@ -411,7 +406,7 @@ fn a_new_entry_while_a_check_waits_replaces_it_and_the_old_reply_is_ignored() {
     events.push((200, allowed("fedcba9876543210", 3000)));
     let connectors = StubConnectors {
         random: StubRandom::queued(bytes),
-        ..online(events)
+        ..StubConnectors::online(events)
     };
 
     let report = app::run(&connectors).unwrap();
@@ -429,7 +424,7 @@ fn a_new_entry_while_a_check_waits_replaces_it_and_the_old_reply_is_ignored() {
 fn a_check_the_broker_does_not_take_is_logged_and_nothing_waits() {
     let connectors = StubConnectors {
         broker: StubBroker::failing_publish_on("doorcode/doors/7/check", "queue full"),
-        ..online(typed(10, "1234#"))
+        ..StubConnectors::online(typed(10, "1234#"))
     };
 
     let report = app::run(&connectors).unwrap();
@@ -448,7 +443,7 @@ fn a_check_the_broker_does_not_take_is_logged_and_nothing_waits() {
 
 #[test]
 fn the_keys_typed_so_far_are_reported() {
-    let connectors = online(typed(10, "42*1"));
+    let connectors = StubConnectors::online(typed(10, "42*1"));
 
     let report = app::run(&connectors).unwrap();
 
@@ -457,7 +452,7 @@ fn the_keys_typed_so_far_are_reported() {
 
 #[test]
 fn keys_other_than_digits_star_and_the_submit_key_are_not_taken() {
-    let connectors = online(typed(10, "4AB2C1D1#"));
+    let connectors = StubConnectors::online(typed(10, "4AB2C1D1#"));
 
     app::run(&connectors).unwrap();
 
@@ -472,7 +467,7 @@ fn the_submit_key_comes_from_the_configuration_and_the_hash_is_then_not_taken() 
     };
     let mut events = vec![(5, config_for(7, &config))];
     events.extend(typed(10, "42#11A"));
-    let connectors = online(events);
+    let connectors = StubConnectors::online(events);
 
     app::run(&connectors).unwrap();
 
@@ -481,7 +476,7 @@ fn the_submit_key_comes_from_the_configuration_and_the_hash_is_then_not_taken() 
 
 #[test]
 fn an_entry_with_a_keypad_command_is_checked_with_the_star_and_the_command() {
-    let connectors = online(typed(10, "4211234*00130#"));
+    let connectors = StubConnectors::online(typed(10, "4211234*00130#"));
 
     app::run(&connectors).unwrap();
 
@@ -496,7 +491,7 @@ fn an_entry_whose_code_is_shorter_than_the_shortest_code_is_discarded_unasked() 
     let mut events = typed(10, "123#");
     events.extend(typed(20, "123*00130#"));
     events.extend(typed(30, "1234#"));
-    let connectors = online(events);
+    let connectors = StubConnectors::online(events);
 
     let report = app::run(&connectors).unwrap();
 
@@ -515,7 +510,7 @@ fn the_shortest_code_comes_from_the_configuration() {
     let mut events = vec![(5, config_for(7, &config))];
     events.extend(typed(10, "12345#"));
     events.extend(typed(20, "123456#"));
-    let connectors = online(events);
+    let connectors = StubConnectors::online(events);
 
     app::run(&connectors).unwrap();
 
@@ -533,7 +528,7 @@ fn no_more_keys_are_taken_once_the_entry_is_as_long_as_it_may_be() {
     };
     let mut events = vec![(5, config_for(7, &config))];
     events.extend(typed(10, "12345678901234567890#"));
-    let connectors = online(events);
+    let connectors = StubConnectors::online(events);
 
     app::run(&connectors).unwrap();
 
@@ -549,7 +544,10 @@ fn an_entry_is_discarded_on_the_millisecond_the_idle_time_after_its_last_key_is_
         let mut events = typed(0, "12");
         events.extend(typed(5000, "3"));
         events.push((at_ms, Event::Door { open: false }));
-        app::run(&online(events)).unwrap().access.entry
+        app::run(&StubConnectors::online(events))
+            .unwrap()
+            .access
+            .entry
     };
 
     assert_eq!(
@@ -565,7 +563,7 @@ fn an_entry_is_discarded_on_the_millisecond_the_idle_time_after_its_last_key_is_
 fn an_entry_is_discarded_once_no_key_came_for_the_idle_time() {
     let mut events = typed(0, "12");
     events.extend(typed(10_000, "34"));
-    let connectors = online(events);
+    let connectors = StubConnectors::online(events);
 
     let report = app::run(&connectors).unwrap();
 
@@ -581,7 +579,7 @@ fn the_idle_time_comes_from_the_configuration() {
     let mut events = vec![(0, config_for(7, &config))];
     events.extend(typed(10, "12"));
     events.extend(typed(2010, "3456#"));
-    let connectors = online(events);
+    let connectors = StubConnectors::online(events);
 
     app::run(&connectors).unwrap();
 

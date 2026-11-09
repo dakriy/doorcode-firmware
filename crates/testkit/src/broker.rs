@@ -119,6 +119,11 @@ impl StubBroker {
         self.calls.borrow().clone()
     }
 
+    /// The last request made, if any.
+    pub fn last_call(&self) -> Option<BrokerCall> {
+        self.calls.borrow().last().cloned()
+    }
+
     /// The payload bytes of every publication, in order.
     pub fn published_payloads(&self) -> Vec<Vec<u8>> {
         self.published

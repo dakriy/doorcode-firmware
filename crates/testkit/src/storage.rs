@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use connectors::{Storage, StorageError};
+use protocol::Config;
 
 use crate::{DOOR_TOKEN, DOOR_USERNAME};
 
@@ -41,6 +42,17 @@ impl StubStorage {
             .borrow_mut()
             .insert(key.to_owned(), value.to_vec());
         self
+    }
+
+    /// This storage with `config` stored as the last configuration received.
+    pub fn with_config(self, config: &Config) -> Self {
+        self.with("config", &config.encode())
+    }
+
+    /// This storage with update `id` to `version` remembered as under way.
+    pub fn with_update(self, id: &str, version: &str) -> Self {
+        self.with("update_id", id.as_bytes())
+            .with("update_version", version.as_bytes())
     }
 
     /// This storage with nothing under `key`.

@@ -18,6 +18,8 @@ pub(crate) enum Order {
     Rotate(Credentials),
     /// Restart once the ack is acknowledged.
     Restart(PendingRestart),
+    /// Install the firmware the command names.
+    Update(Command),
     /// Nothing more.
     Nothing,
 }
@@ -53,7 +55,6 @@ pub(crate) fn receive(device: &Device<'_>, door_id: u64, payload: &[u8]) -> Orde
         Level::Info,
         &format!("command {} ({})", command.command, command.id),
     );
-    let failed = |detail: &str| ack(device, door_id, &command.id, protocol::ACK_FAILED, detail);
     match command.command.as_str() {
         protocol::COMMAND_OPEN => {
             ack(device, door_id, &command.id, protocol::ACK_DONE, "");
@@ -67,12 +68,9 @@ pub(crate) fn receive(device: &Device<'_>, door_id: u64, payload: &[u8]) -> Orde
             token: command.token,
         }),
         protocol::COMMAND_REBOOT => reboot(device, door_id, &command.id),
-        protocol::COMMAND_UPDATE => {
-            failed("not supported yet");
-            Order::Nothing
-        }
+        protocol::COMMAND_UPDATE => Order::Update(command),
         _ => {
-            failed("unknown command");
+            failed(device, door_id, &command.id, "unknown command");
             Order::Nothing
         }
     }
@@ -93,8 +91,12 @@ fn reboot(device: &Device<'_>, door_id: u64, id: &str) -> Order {
 
 /// Restarts the device as a power cycle would.
 pub(crate) fn restart(device: &Device<'_>) {
-    device.log(Level::Info, "restarting");
-    device.connectors.restart().restart();
+    device.restart(Level::Info, "restarting");
+}
+
+/// Acks command `id` as failed, saying why in `detail`.
+pub(crate) fn failed(device: &Device<'_>, door_id: u64, id: &str, detail: &str) {
+    ack(device, door_id, id, protocol::ACK_FAILED, detail);
 }
 
 /// Publishes the ack of command `id` and returns its number, or `None`

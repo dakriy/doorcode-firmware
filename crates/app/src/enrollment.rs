@@ -89,9 +89,9 @@ impl Enrolling {
             Some(Event::Message(message)) => return self.receive(device, &message),
             // Not a door yet, so the keypad and the door sensor mean nothing,
             // and nothing published waits for its acknowledgement.
-            Some(Event::Key(_) | Event::Door { .. } | Event::Delivered { .. }) => {
-                return Ok(Phase::Enrolling(self))
-            }
+            Some(
+                Event::Key(_) | Event::Door { .. } | Event::Delivered { .. } | Event::Download(_),
+            ) => return Ok(Phase::Enrolling(self)),
             // The wait ran out. `Stop` ends the loop before it gets here.
             None | Some(Event::Stop) => self.when_due(device),
         };
