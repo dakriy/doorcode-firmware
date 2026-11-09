@@ -4,6 +4,7 @@
 
 use std::sync::{LockResult, Mutex, MutexGuard, PoisonError};
 use std::thread;
+use std::time::Duration;
 
 use esp_idf_svc::sys::{self, EspError};
 
@@ -20,6 +21,14 @@ pub(crate) fn spawn(
         .spawn(work)
         .map(drop)
         .map_err(|_| EspError::from_infallible::<{ sys::ESP_ERR_NO_MEM }>())
+}
+
+/// Runs `step` forever, waiting after each run for as long as it returns.
+pub(crate) fn repeat(mut step: impl FnMut() -> Duration) -> ! {
+    loop {
+        let pause = step();
+        thread::sleep(pause);
+    }
 }
 
 /// Takes `mutex`, whether or not its last holder panicked.

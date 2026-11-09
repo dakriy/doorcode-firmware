@@ -11,7 +11,6 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use connectors::Storage;
@@ -168,10 +167,7 @@ impl Station {
             log::error!("starting Wi-Fi: {error}");
             return;
         }
-        loop {
-            let pause = self.check();
-            thread::sleep(pause);
-        }
+        threads::repeat(|| self.check())
     }
 
     /// Looks at the link once, and returns how long to wait before the next
