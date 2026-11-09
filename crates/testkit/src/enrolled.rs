@@ -71,7 +71,7 @@ pub fn door_coming_online_as(username: &str) -> Vec<BrokerCall> {
 }
 
 /// Door 7's retained online status as `username`.
-pub fn door_online_status_as(username: &str) -> Sent {
+fn door_online_status_as(username: &str) -> Sent {
     door_status(Online {
         online: true,
         username: username.to_owned(),

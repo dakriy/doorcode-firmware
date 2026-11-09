@@ -9,7 +9,7 @@ mod cbor;
 
 pub use cbor::DecodeError;
 
-use cbor::{MapWriter, Optional, Slot};
+use cbor::message;
 
 const PREFIX: &str = "doorcode/";
 
@@ -76,29 +76,11 @@ pub struct Enrollment {
     pub signal: i32,
 }
 
-impl Enrollment {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.bool("online", self.online);
-        map.int_unless_zero("signal", self.signal.into());
-        map.text_unless_empty("firmware_version", &self.firmware_version);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("online", Slot::Bool(&mut message.online)),
-                ("signal", Slot::Int(&mut message.signal)),
-                (
-                    "firmware_version",
-                    Slot::Text(&mut message.firmware_version),
-                ),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Enrollment {
+        online: always,
+        signal: unless_default,
+        firmware_version: unless_default,
     }
 }
 
@@ -111,26 +93,11 @@ pub struct Credentials {
     pub token: String,
 }
 
-impl Credentials {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.uint_unless_zero("door_id", self.door_id);
-        map.text_unless_empty("username", &self.username);
-        map.text_unless_empty("token", &self.token);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("door_id", Slot::Uint(&mut message.door_id)),
-                ("username", Slot::Text(&mut message.username)),
-                ("token", Slot::Text(&mut message.token)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Credentials {
+        door_id: unless_default,
+        username: unless_default,
+        token: unless_default,
     }
 }
 
@@ -143,31 +110,12 @@ pub struct Online {
     pub signal: i32,
 }
 
-impl Online {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.bool("online", self.online);
-        map.text("username", &self.username);
-        map.text_unless_empty("firmware_version", &self.firmware_version);
-        map.int_unless_zero("signal", self.signal.into());
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("online", Slot::Bool(&mut message.online)),
-                ("username", Slot::Text(&mut message.username)),
-                (
-                    "firmware_version",
-                    Slot::Text(&mut message.firmware_version),
-                ),
-                ("signal", Slot::Int(&mut message.signal)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Online {
+        online: always,
+        username: always,
+        firmware_version: unless_default,
+        signal: unless_default,
     }
 }
 
@@ -250,114 +198,37 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.uint("strike_pulse_ms", self.strike_pulse_ms);
-        map.uint("keypad_idle_clear_ms", self.keypad_idle_clear_ms);
-        map.uint("min_code_length", self.min_code_length);
-        map.uint("max_code_length", self.max_code_length);
-        map.uint("reply_timeout_ms", self.reply_timeout_ms);
-        map.uint("telemetry_interval_s", self.telemetry_interval_s);
-        map.uint("held_open_s", self.held_open_s);
-        map.uint("timeline_refresh_hours", self.timeline_refresh_hours);
-        map.uint("credential_rotation_days", self.credential_rotation_days);
-        map.uint("rate_limit_per_minute", self.rate_limit_per_minute);
-        map.uint("rate_limit_burst", self.rate_limit_burst);
-        map.text("ntp_server", &self.ntp_server);
-        map.text("broker_host", &self.broker_host);
-        map.uint_unless_none("broker_port", self.broker_port);
-        map.bool_unless_none("broker_tls", self.broker_tls);
-        map.text("broker_ca_pem", &self.broker_ca_pem);
-        map.text("log_level", &self.log_level);
-        map.text("wifi_ssid", &self.wifi_ssid);
-        map.text("wifi_password", &self.wifi_password);
-        map.int("wifi_roam_rssi", self.wifi_roam_rssi.into());
-        map.uint("keepalive_s", self.keepalive_s);
-        map.uint("reconnect_max_s", self.reconnect_max_s);
-        map.uint("update_connect_timeout_s", self.update_connect_timeout_s);
-        map.bool("accept_unsigned_firmware", self.accept_unsigned_firmware);
-        map.bool("mesh_enabled", self.mesh_enabled);
-        map.text("mesh_ssid", &self.mesh_ssid);
-        map.text("mesh_password", &self.mesh_password);
-        map.int("mesh_min_router_rssi", self.mesh_min_router_rssi.into());
-        map.uint("mesh_max_layer", self.mesh_max_layer);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("strike_pulse_ms", Slot::Uint(&mut message.strike_pulse_ms)),
-                (
-                    "keypad_idle_clear_ms",
-                    Slot::Uint(&mut message.keypad_idle_clear_ms),
-                ),
-                ("min_code_length", Slot::Uint(&mut message.min_code_length)),
-                ("max_code_length", Slot::Uint(&mut message.max_code_length)),
-                (
-                    "reply_timeout_ms",
-                    Slot::Uint(&mut message.reply_timeout_ms),
-                ),
-                (
-                    "telemetry_interval_s",
-                    Slot::Uint(&mut message.telemetry_interval_s),
-                ),
-                ("held_open_s", Slot::Uint(&mut message.held_open_s)),
-                (
-                    "timeline_refresh_hours",
-                    Slot::Uint(&mut message.timeline_refresh_hours),
-                ),
-                (
-                    "credential_rotation_days",
-                    Slot::Uint(&mut message.credential_rotation_days),
-                ),
-                (
-                    "rate_limit_per_minute",
-                    Slot::Uint(&mut message.rate_limit_per_minute),
-                ),
-                (
-                    "rate_limit_burst",
-                    Slot::Uint(&mut message.rate_limit_burst),
-                ),
-                ("ntp_server", Slot::Text(&mut message.ntp_server)),
-                ("broker_host", Slot::Text(&mut message.broker_host)),
-                (
-                    "broker_port",
-                    Slot::Optional(Optional::Uint(&mut message.broker_port)),
-                ),
-                (
-                    "broker_tls",
-                    Slot::Optional(Optional::Bool(&mut message.broker_tls)),
-                ),
-                ("broker_ca_pem", Slot::Text(&mut message.broker_ca_pem)),
-                ("log_level", Slot::Text(&mut message.log_level)),
-                ("wifi_ssid", Slot::Text(&mut message.wifi_ssid)),
-                ("wifi_password", Slot::Text(&mut message.wifi_password)),
-                ("wifi_roam_rssi", Slot::Int(&mut message.wifi_roam_rssi)),
-                ("keepalive_s", Slot::Uint(&mut message.keepalive_s)),
-                ("reconnect_max_s", Slot::Uint(&mut message.reconnect_max_s)),
-                (
-                    "update_connect_timeout_s",
-                    Slot::Uint(&mut message.update_connect_timeout_s),
-                ),
-                (
-                    "accept_unsigned_firmware",
-                    Slot::Bool(&mut message.accept_unsigned_firmware),
-                ),
-                ("mesh_enabled", Slot::Bool(&mut message.mesh_enabled)),
-                ("mesh_ssid", Slot::Text(&mut message.mesh_ssid)),
-                ("mesh_password", Slot::Text(&mut message.mesh_password)),
-                (
-                    "mesh_min_router_rssi",
-                    Slot::Int(&mut message.mesh_min_router_rssi),
-                ),
-                ("mesh_max_layer", Slot::Uint(&mut message.mesh_max_layer)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Config {
+        strike_pulse_ms: always,
+        keypad_idle_clear_ms: always,
+        min_code_length: always,
+        max_code_length: always,
+        reply_timeout_ms: always,
+        telemetry_interval_s: always,
+        held_open_s: always,
+        timeline_refresh_hours: always,
+        credential_rotation_days: always,
+        rate_limit_per_minute: always,
+        rate_limit_burst: always,
+        ntp_server: always,
+        broker_host: always,
+        broker_port: unless_none,
+        broker_tls: unless_none,
+        broker_ca_pem: always,
+        log_level: always,
+        wifi_ssid: always,
+        wifi_password: always,
+        wifi_roam_rssi: always,
+        keepalive_s: always,
+        reconnect_max_s: always,
+        update_connect_timeout_s: always,
+        accept_unsigned_firmware: always,
+        mesh_enabled: always,
+        mesh_ssid: always,
+        mesh_password: always,
+        mesh_min_router_rssi: always,
+        mesh_max_layer: always,
     }
 }
 
@@ -379,26 +250,11 @@ pub struct Timeline {
     pub spans: Vec<Span>,
 }
 
-impl Timeline {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.int("from", self.from);
-        map.int("to", self.to);
-        map.spans("spans", &self.spans);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("from", Slot::Long(&mut message.from)),
-                ("to", Slot::Long(&mut message.to)),
-                ("spans", Slot::Spans(&mut message.spans)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Timeline {
+        from: always,
+        to: always,
+        spans: always,
     }
 }
 
@@ -410,24 +266,10 @@ pub struct Check {
     pub digits: String,
 }
 
-impl Check {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.text("request_id", &self.request_id);
-        map.text("digits", &self.digits);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("request_id", Slot::Text(&mut message.request_id)),
-                ("digits", Slot::Text(&mut message.digits)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Check {
+        request_id: always,
+        digits: always,
     }
 }
 
@@ -441,26 +283,11 @@ pub struct Reply {
     pub strike_ms: u64,
 }
 
-impl Reply {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.text("request_id", &self.request_id);
-        map.bool("allow", self.allow);
-        map.uint_unless_zero("strike_ms", self.strike_ms);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("request_id", Slot::Text(&mut message.request_id)),
-                ("allow", Slot::Bool(&mut message.allow)),
-                ("strike_ms", Slot::Uint(&mut message.strike_ms)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Reply {
+        request_id: always,
+        allow: always,
+        strike_ms: unless_default,
     }
 }
 
@@ -487,45 +314,19 @@ pub struct Telemetry {
     pub mesh_children: u64,
 }
 
-impl Telemetry {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.int("signal", self.signal.into());
-        map.uint("latency_ms", self.latency_ms);
-        map.uint("uptime_s", self.uptime_s);
-        map.uint("free_bytes", self.free_bytes);
-        map.text("firmware_version", &self.firmware_version);
-        map.uint("reconnects", self.reconnects);
-        map.bool("door_open", self.door_open);
-        map.uint("opens", self.opens);
-        map.uint("mesh_layer", self.mesh_layer);
-        map.text("mesh_parent", &self.mesh_parent);
-        map.uint("mesh_children", self.mesh_children);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("signal", Slot::Int(&mut message.signal)),
-                ("latency_ms", Slot::Uint(&mut message.latency_ms)),
-                ("uptime_s", Slot::Uint(&mut message.uptime_s)),
-                ("free_bytes", Slot::Uint(&mut message.free_bytes)),
-                (
-                    "firmware_version",
-                    Slot::Text(&mut message.firmware_version),
-                ),
-                ("reconnects", Slot::Uint(&mut message.reconnects)),
-                ("door_open", Slot::Bool(&mut message.door_open)),
-                ("opens", Slot::Uint(&mut message.opens)),
-                ("mesh_layer", Slot::Uint(&mut message.mesh_layer)),
-                ("mesh_parent", Slot::Text(&mut message.mesh_parent)),
-                ("mesh_children", Slot::Uint(&mut message.mesh_children)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Telemetry {
+        signal: always,
+        latency_ms: always,
+        uptime_s: always,
+        free_bytes: always,
+        firmware_version: always,
+        reconnects: always,
+        door_open: always,
+        opens: always,
+        mesh_layer: always,
+        mesh_parent: always,
+        mesh_children: always,
     }
 }
 
@@ -540,17 +341,9 @@ pub struct DoorEvent {
     pub event: String,
 }
 
-impl DoorEvent {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.text("event", &self.event);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(bytes, &mut [("event", Slot::Text(&mut message.event))]);
-        read.map(|()| message)
+message! {
+    DoorEvent {
+        event: always,
     }
 }
 
@@ -580,36 +373,16 @@ pub struct Command {
     pub url: String,
 }
 
-impl Command {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.text("id", &self.id);
-        map.text("command", &self.command);
-        map.uint_unless_zero("strike_ms", self.strike_ms);
-        map.text_unless_empty("username", &self.username);
-        map.text_unless_empty("token", &self.token);
-        map.text_unless_empty("version", &self.version);
-        map.text_unless_empty("sha256", &self.sha256);
-        map.text_unless_empty("url", &self.url);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("id", Slot::Text(&mut message.id)),
-                ("command", Slot::Text(&mut message.command)),
-                ("strike_ms", Slot::Uint(&mut message.strike_ms)),
-                ("username", Slot::Text(&mut message.username)),
-                ("token", Slot::Text(&mut message.token)),
-                ("version", Slot::Text(&mut message.version)),
-                ("sha256", Slot::Text(&mut message.sha256)),
-                ("url", Slot::Text(&mut message.url)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Command {
+        id: always,
+        command: always,
+        strike_ms: unless_default,
+        username: unless_default,
+        token: unless_default,
+        version: unless_default,
+        sha256: unless_default,
+        url: unless_default,
     }
 }
 
@@ -627,25 +400,10 @@ pub struct Ack {
     pub detail: String,
 }
 
-impl Ack {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut map = MapWriter::new();
-        map.text("id", &self.id);
-        map.text("result", &self.result);
-        map.text_unless_empty("detail", &self.detail);
-        map.finish()
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut message = Self::default();
-        let read = cbor::read_map(
-            bytes,
-            &mut [
-                ("id", Slot::Text(&mut message.id)),
-                ("result", Slot::Text(&mut message.result)),
-                ("detail", Slot::Text(&mut message.detail)),
-            ],
-        );
-        read.map(|()| message)
+message! {
+    Ack {
+        id: always,
+        result: always,
+        detail: unless_default,
     }
 }

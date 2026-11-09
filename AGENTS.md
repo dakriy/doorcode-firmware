@@ -152,12 +152,12 @@ Tool installation on a fresh machine (none needs root):
 | Entrypoints | `crates/app/src/lib.rs`: `app::run` |
 | Application code | `crates/app/src`, and `crates/protocol/src` (the pure protocol crate: topics and CBOR messages) |
 | Connector interfaces | `crates/connectors/src/lib.rs` |
-| Connector implementations | `crates/connectors-host/src` (desktop), `firmware/src` (ESP32) |
+| Connector implementations | `crates/connectors-host/src` (desktop), `firmware/src` (ESP32; see `firmware/README.md`) |
 | Connector factory interface | `connectors::Connectors` in `crates/connectors/src/lib.rs` |
-| Production wiring | `crates/host/src/main.rs` (desktop binary `doorcode-host`; `crates/host/src/desktop.rs` builds one desktop door's connectors), `crates/swarm/src` (load tool `doorcode-swarm`, with its report library), `firmware/src/main.rs` (ESP32) |
+| Production wiring | `crates/host/src` (desktop binary `doorcode-host` in `main.rs` over the host library: `lib.rs` starts the door and its control API, `desktop.rs` builds one desktop door's connectors for each run and is shared with the swarm), `crates/swarm/src` (load tool `doorcode-swarm` in `main.rs` and `lib.rs`, with its tested report library `report.rs`), `firmware/src` (ESP32: `main.rs` wires the connectors, one module per connector or part of the Wi-Fi network) |
 | Entrypoint suite | `crates/app/tests` |
 | Connector suite, and how a test is marked slow | `crates/connectors-host/tests`, `crates/host/tests`, `crates/swarm/tests`; a slow test carries `#[ignore = "slow"]` and runs only under `cargo test -- --ignored` |
-| Test support, stubs, and the stub factory | `crates/testkit/src/lib.rs`: `StubConnectors` and one `Stub*` per connector |
+| Test support, stubs, and the stub factory | `crates/testkit/src`: `StubConnectors` in `lib.rs`, one `Stub*` per connector, the scripted events and messages a server sends in `events.rs`, and what enrolled door 7 asks of the broker in `enrolled.rs` |
 
 The entry function and how tests pass it the stub factory:
 `app::run(&dyn connectors::Connectors) -> Result<RunReport, RunError>`.

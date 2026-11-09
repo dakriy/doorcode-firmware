@@ -58,25 +58,18 @@ pub enum Message {
 }
 
 fn decode(topic: &str, payload: &[u8]) -> Option<Message> {
-    match protocol::parse_topic(topic)? {
-        Topic::Enroll(_) => Enrollment::decode(payload).ok().map(Message::Enrollment),
-        Topic::Door { leaf, .. } if leaf == protocol::LEAF_ONLINE => {
-            Online::decode(payload).ok().map(Message::Online)
-        }
-        Topic::Door { leaf, .. } if leaf == protocol::LEAF_CHECK => {
-            Check::decode(payload).ok().map(Message::Check)
-        }
-        Topic::Door { leaf, .. } if leaf == protocol::LEAF_TELEMETRY => {
-            Telemetry::decode(payload).ok().map(Message::Telemetry)
-        }
-        Topic::Door { leaf, .. } if leaf == protocol::LEAF_EVENT => {
-            DoorEvent::decode(payload).ok().map(Message::DoorEvent)
-        }
-        Topic::Door { leaf, .. } if leaf == protocol::LEAF_ACK => {
-            Ack::decode(payload).ok().map(Message::Ack)
-        }
-        _ => None,
-    }
+    let message = match protocol::parse_topic(topic)? {
+        Topic::Enroll(_) => Enrollment::decode(payload).map(Message::Enrollment),
+        Topic::Door { leaf, .. } => match leaf {
+            protocol::LEAF_ONLINE => Online::decode(payload).map(Message::Online),
+            protocol::LEAF_CHECK => Check::decode(payload).map(Message::Check),
+            protocol::LEAF_TELEMETRY => Telemetry::decode(payload).map(Message::Telemetry),
+            protocol::LEAF_EVENT => DoorEvent::decode(payload).map(Message::DoorEvent),
+            protocol::LEAF_ACK => Ack::decode(payload).map(Message::Ack),
+            _ => return None,
+        },
+    };
+    message.ok()
 }
 
 fn decoded(publication: &Publication) -> Sent {
