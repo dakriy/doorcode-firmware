@@ -1,0 +1,16 @@
+[build]
+target = "xtensa-esp32-espidf"
+
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[env]
+MCU = "esp32"
+ESP_IDF_VERSION = "v5.3.3"
+# GitHub release downloads time out often; Espressif mirrors them.
+IDF_GITHUB_ASSETS = "dl.espressif.com/github_assets"

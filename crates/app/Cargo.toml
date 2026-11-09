@@ -1,0 +1,20 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Application code. Reaches the world only through connector interfaces."
+
+# Denylist in effect: only `connectors` and pure crates may appear here.
+# scripts/check-imports.sh fails the build on anything else.
+[dependencies]
+connectors.workspace = true
+
+# Allowlist for the entrypoint suite in tests/: these and nothing more.
+[dev-dependencies]
+testkit.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

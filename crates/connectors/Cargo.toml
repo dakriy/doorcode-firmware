@@ -1,0 +1,12 @@
+[package]
+name = "connectors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Connector interfaces and the connector factory. No implementations live here."
+
+[dependencies]
+
+[lints]
+workspace = true

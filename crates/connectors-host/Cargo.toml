@@ -1,0 +1,18 @@
+[package]
+name = "connectors-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Real connector implementations for running the firmware on a desktop computer."
+
+[dependencies]
+connectors.workspace = true
+
+[dev-dependencies]
+testkit.workspace = true
+pretty_assertions.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

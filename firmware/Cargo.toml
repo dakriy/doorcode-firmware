@@ -1,0 +1,36 @@
+# Separate workspace: this package targets xtensa-esp32-espidf and builds in
+# the Espressif Rust container (make firmware-build). The desktop workspace in
+# the repository root excludes this directory.
+[workspace]
+
+[package]
+name = "doorcode-firmware"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+rust-version = "1.77"
+description = "ESP32 connector implementations and production wiring for the door controller."
+
+[[bin]]
+name = "doorcode-firmware"
+harness = false
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+[dependencies]
+app = { path = "../crates/app" }
+connectors = { path = "../crates/connectors" }
+log = "0.4"
+esp-idf-svc = { version = "0.51", features = ["critical-section"] }
+
+[build-dependencies]
+embuild = "0.33"
+
+[lints.clippy]
+cognitive_complexity = "deny"

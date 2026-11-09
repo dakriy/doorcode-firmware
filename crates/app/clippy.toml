@@ -1,0 +1,38 @@
+# Application code: complexity cap and banned effect calls.
+cognitive-complexity-threshold = 15
+
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "clock reads go through a connector" },
+    { path = "std::time::Instant::now", reason = "clock reads go through a connector" },
+    { path = "std::thread::sleep", reason = "waiting goes through a connector" },
+    { path = "std::env::var", reason = "environment is read by production wiring, not application code" },
+    { path = "std::env::var_os", reason = "environment is read by production wiring, not application code" },
+    { path = "std::env::args", reason = "environment is read by production wiring, not application code" },
+    { path = "std::fs::read", reason = "filesystem access goes through a connector" },
+    { path = "std::fs::write", reason = "filesystem access goes through a connector" },
+    { path = "std::fs::read_to_string", reason = "filesystem access goes through a connector" },
+    { path = "std::process::exit", reason = "process control belongs to production wiring" },
+    { path = "std::process::Command::new", reason = "processes go through a connector" },
+    { path = "std::net::TcpStream::connect", reason = "network goes through a connector" },
+    { path = "std::net::TcpListener::bind", reason = "network goes through a connector" },
+    { path = "std::net::UdpSocket::bind", reason = "network goes through a connector" },
+]
+
+disallowed-types = [
+    { path = "std::fs::File", reason = "filesystem access goes through a connector" },
+    { path = "std::fs::OpenOptions", reason = "filesystem access goes through a connector" },
+    { path = "std::net::TcpStream", reason = "network goes through a connector" },
+    { path = "std::net::TcpListener", reason = "network goes through a connector" },
+    { path = "std::net::UdpSocket", reason = "network goes through a connector" },
+    { path = "std::process::Command", reason = "processes go through a connector" },
+    { path = "std::time::SystemTime", reason = "clock reads go through a connector" },
+    { path = "std::time::Instant", reason = "clock reads go through a connector" },
+]
+
+disallowed-macros = [
+    { path = "std::println", reason = "output goes through the entrypoint's handles or a connector" },
+    { path = "std::eprintln", reason = "output goes through the entrypoint's handles or a connector" },
+    { path = "std::print", reason = "output goes through the entrypoint's handles or a connector" },
+    { path = "std::eprint", reason = "output goes through the entrypoint's handles or a connector" },
+    { path = "std::dbg", reason = "debug output does not ship" },
+]

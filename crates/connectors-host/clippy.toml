@@ -1,0 +1,2 @@
+# Connector code: a connector is thin, so its cap is low.
+cognitive-complexity-threshold = 5

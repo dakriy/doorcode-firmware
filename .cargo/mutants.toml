@@ -1,0 +1,3 @@
+# cargo-mutants configuration. Each exclusion is an equivalent mutant with a
+# written reason, mirrored in AGENTS.md "Mutation exclusions".
+exclude_re = []

@@ -1,0 +1,13 @@
+/target
+/firmware/target
+/firmware/.embuild
+/firmware/sdkconfig
+/firmware/sdkconfig.old
+/HANDOFF.md
+*.log
+*.profraw
+
+# Local-only notes: machine-specific setup and references to systems outside
+# this repository. Never committed.
+/notes/
+/.doorcode

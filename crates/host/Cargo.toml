@@ -1,0 +1,19 @@
+[package]
+name = "host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Production wiring for running the firmware on a desktop computer."
+
+[[bin]]
+name = "doorcode-host"
+path = "src/main.rs"
+
+[dependencies]
+app.workspace = true
+connectors.workspace = true
+connectors-host.workspace = true
+
+[lints]
+workspace = true
