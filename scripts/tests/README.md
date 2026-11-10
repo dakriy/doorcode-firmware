@@ -124,16 +124,18 @@ open command and the strike, a temporary user's code allowed and a wrong
 code denied, the keypad commands for a locked and an open override, the
 free memory, and a reboot. From `GET /api/v1/events`, looking only at
 events newer than the newest one of the door when the step began, it also
-checks what the server recorded: `sensor-closed` and `code-closed`, a
-closing (type `door`, reason `closed`) whose `open_ms` is more than 0 and
+checks what the server recorded: `sensor-opened` and `code-opened`, an
+opening (type `door`, reason `opened`); `sensor-closed` and `code-closed`,
+a closing (type `door`, reason `closed`) whose `open_ms` is more than 0 and
 no longer than the step watched; `sensor-forced`, the forced open alarm of
-the door opened by hand without a code (`sensor-closed` and
-`sensor-forced` skip when the door's timeline holds it open as it opens,
-since the server then records neither); `code-unforced`, no forced open
-alarm for the door opened while the strike was released (when the
+the door opened by hand without a code (the server records every opening
+and closing in open mode too, so `sensor-opened` and `sensor-closed` run
+when the door's timeline holds it open as it opens, but no forced open
+alarm, so `sensor-forced` skips with the span); `code-unforced`, no forced
+open alarm for the door opened while the strike was released (when the
 door's timeline holds it open at the code step, a key opens the door
-without asking the server and no closing is recorded, so `code`,
-`code-closed`, `code-unforced`, and `wrong-code` skip with the span); and
+without asking the server, so `code`, `code-opened`, `code-closed`,
+`code-unforced`, and `wrong-code` skip with the span); and
 `reboot-started`, a start that says a restart the firmware asked for. Each
 waits up to the timeout and fails naming the event it looked after. The
 door must already be enrolled, installed, and online; nothing is flashed

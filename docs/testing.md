@@ -436,25 +436,28 @@ before it fails, naming the event it looked after.
    an access rule, at all times, over a new zone holding only this door,
    and a second user with another code is a door commander.
 3. **sensor**: the server sees the door closed, opened by hand, and closed
-   again. **sensor-closed**: the events record a closing (type `door`,
-   reason `closed`) whose `open_ms` is more than 0 and no longer than the
-   step watched, plus two seconds. **sensor-forced**: they record a
-   forced open alarm (type `alarm`, reason `forced open`), since the door
-   opened while it should have been locked. When the door's timeline
+   again. **sensor-opened**: the events record an opening (type `door`,
+   reason `opened`). **sensor-closed**: they record a closing (type
+   `door`, reason `closed`) whose `open_ms` is more than 0 and no longer
+   than the step watched, plus two seconds. **sensor-forced**: they record
+   a forced open alarm (type `alarm`, reason `forced open`), since the
+   door opened while it should have been locked. The server records every
+   opening and closing, in open mode as well, so when the door's timeline
    (`GET /api/v1/doors/{id}/timeline`) holds it open as it opens, in open
-   mode or under an open override, the server records neither, and both
-   print `SKIP` with the span instead.
+   mode or under an open override, `sensor-opened` and `sensor-closed`
+   still run; no forced open alarm is recorded then, and `sensor-forced`
+   prints `SKIP` with the span instead.
 4. **open**: `POST /api/v1/doors/{id}/open` answers with an allowed event,
    and the person sees the strike release and lock again.
 5. **code**: the user's code and `#` give an allowed check for that user;
    the strike releases, the server sees the door open and close, and the
-   strike locks. **code-closed**: the events record a closing with a
-   plausible `open_ms`, as in step 3. **code-unforced**: once that closing
+   strike locks. **code-opened**: the events record an opening, and
+   **code-closed** a closing with a plausible `open_ms`, as in step 3. **code-unforced**: once that closing
    is recorded, no forced open alarm is, since the door opened while the
    strike was released. **wrong-code**: another code is denied and the strike
    stays locked. When the door's timeline holds it open at the step, in
    open mode or under an open override, a key opens the door without
-   asking the server and no closing is recorded, so `code`, `code-closed`,
+   asking the server, so `code`, `code-opened`, `code-closed`,
    `code-unforced`, and `wrong-code` print `SKIP` with the span instead.
 6. **locked-command**: the commander's `<code>*0021#` makes a one-minute
    locked override; the user's code is then denied and the strike stays

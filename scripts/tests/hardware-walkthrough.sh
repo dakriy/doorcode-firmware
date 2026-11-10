@@ -75,9 +75,9 @@ done
 STEPS=(
     "1 door: the door is enrolled and online; its version, door state, signal, uptime, and free memory are shown"
     "2 setup: the door's telemetry_interval_s override \"5\"; a user with a code under an access rule over a new zone of this door only, and a door commander"
-    "3 sensor, sensor-closed, sensor-forced: the server sees the door closed, opened by hand, and closed again; GET /events records, newer than the step's start, a closing whose open_ms is more than 0 and no longer than the step watched, and a forced open alarm; sensor-closed and sensor-forced SKIP when the door's timeline holds it open (open mode or an open override) as it opens"
+    "3 sensor, sensor-opened, sensor-closed, sensor-forced: the server sees the door closed, opened by hand, and closed again; GET /events records, newer than the step's start, an opening, a closing whose open_ms is more than 0 and no longer than the step watched, and a forced open alarm; sensor-forced SKIPs when the door's timeline holds it open (open mode or an open override) as it opens, while the opening and the closing are still checked"
     "4 open: POST open logs an allowed event, and the person sees the strike release and lock again"
-    "5 code, code-closed, code-unforced, wrong-code: the user's code is allowed, the strike releases, the server sees the door open and close, and the strike locks; GET /events records a newer closing with a plausible open_ms and no forced open alarm; a wrong code is denied and the strike stays locked; code, code-closed, code-unforced, and wrong-code SKIP when the door's timeline holds it open (open mode or an open override) at the step"
+    "5 code, code-opened, code-closed, code-unforced, wrong-code: the user's code is allowed, the strike releases, the server sees the door open and close, and the strike locks; GET /events records a newer opening, a newer closing with a plausible open_ms, and no forced open alarm; a wrong code is denied and the strike stays locked; code, code-opened, code-closed, code-unforced, and wrong-code SKIP when the door's timeline holds it open (open mode or an open override) at the step"
     "6 locked-command, open-command: *0021 makes a locked override that denies the user's code, *000 ends it; *0011 makes an open override in which a key releases the strike, and ending it locks the door"
     "7 free-memory: free_bytes at the end is at most 10% below the start"
     "8 reboot, reboot-started: POST reboot; the door is online again within twice the timeout and the strike stayed locked; GET /events records a newer start, a restart its firmware asked for"
@@ -251,6 +251,13 @@ recorded() {
     eventually new_event "$2" "$3" && return 0
     fail "$1" "no $2 event \"$3\" of door $DOOR_ID after event $EVENT_MARK within $TIMEOUT s${4:+: $4}"
     return 1
+}
+
+# opening STEP: waits for the door's opening after EVENT_MARK, and fails
+# STEP when none comes.
+opening() {
+    recorded "$1" door opened "the server records every opening of a door, in open mode as well" &&
+        pass "$1" "$(described)"
 }
 
 # closing STEP SINCE: waits for the door's closing after EVENT_MARK, and
@@ -448,7 +455,7 @@ step_setup() {
     api_ok GET "/doors/$DOOR_ID/overrides" || abort setup "reading the overrides $(reason)"
     OVERRIDES_IN_FORCE="$(answer -c '[.overrides[] | select(.active) | .id]')"
     [ "$OVERRIDES_IN_FORCE" = "[]" ] ||
-        echo "note: door $DOOR_ID already has overrides $OVERRIDES_IN_FORCE in force, which the run leaves alone; while one holds the door open, the sensor, code, and wrong-code steps skip their checks, and the keypad commands may not behave as described" >&2
+        echo "note: door $DOOR_ID already has overrides $OVERRIDES_IN_FORCE in force, which the run leaves alone; while one holds the door open, the forced open check and the code and wrong-code steps skip, and the keypad commands may not behave as described" >&2
     # Telemetry every 5 s soon corrects the server's view of the door sensor
     # should a door event be lost, and keeps the free memory current.
     OVERRIDES_BEFORE="$overrides"
@@ -491,19 +498,20 @@ step_sensor() {
         return
     fi
     say "Seen open. Close it now."
-    # An opening in an open span is neither forced nor timed by the server.
+    # An opening in an open span is not forced.
     local held=false
-    held_open sensor-closed sensor-forced && held=true
+    held_open sensor-forced && held=true
     if ! eventually door_is closed; then
         fail sensor "the server never saw the door close again: $(door_state .)"
         return
     fi
     pass sensor "the server saw the door closed, open, and closed again"
+    opening sensor-opened
+    closing sensor-closed "$since"
     if $held; then
-        skip_held_open "the server records neither a closing nor a forced open alarm" sensor-closed sensor-forced
+        skip_held_open "the server records no forced open alarm" sensor-forced
         return
     fi
-    closing sensor-closed "$since"
     recorded sensor-forced alarm "forced open" "a door opened without a code while it should be locked is forced open" &&
         pass sensor-forced "$(described)"
 }
@@ -544,9 +552,9 @@ typed() {
 
 step_code() {
     # In an open span a key releases the strike without asking the server.
-    if held_open code code-closed code-unforced; then
-        skip_held_open "a key opens the door without asking the server, and no closing is recorded" \
-            code code-closed code-unforced
+    if held_open code code-opened code-closed code-unforced; then
+        skip_held_open "a key opens the door without asking the server, which then has no check to show" \
+            code code-opened code-closed code-unforced
         return
     fi
     say "Keypad, the right code. Type:   $CODE #" \
@@ -566,6 +574,7 @@ step_code() {
     eventually door_is closed || { fail code "$check, but the server never saw the door close: $(door_state .)"; return; }
     saw code "Did the strike lock again once the door opened, or a few seconds after?" || return
     pass code "$check; the strike released, the door opened and closed, the strike locked"
+    opening code-opened
     closing code-closed "$since" || return
     # The closing comes after the opening, so any alarm the opening raised
     # is recorded by now.
