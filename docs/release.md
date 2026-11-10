@@ -92,3 +92,12 @@ the signature check, so it installs a development image that was not signed
 with the release key: one released with a throwaway key as above, or any
 app image without a signature block. Every other check still applies. Set
 it only for bench boards; it is `false` by default.
+
+## Trying a release on the bench
+
+`scripts/bench-test.sh` goes through this flow on a bench board against a
+development server: it releases and uploads the next patch versions with
+`make firmware-release` and `make firmware-upload`, updates the board to a
+signed image, has an unsigned one refused and then accepted with
+`accept_unsigned_firmware`, and fails a download on purpose. "The bench
+run" in `testing.md` describes its steps and settings.

@@ -9,9 +9,9 @@ Run it with esptool's Python, which carries pyserial:
 `watch` prints the board's log with its colour codes removed as it arrives.
 It exits 0 when a line matches --until, printing that line last; 1 when the
 time runs out first; 2 when --fail-on-crash is given and a line holds crash
-text; 3 on a bad command line. `--from-file FILE` reads a recorded log instead of the port, and the
-end of the file counts as the time running out. docs/testing.md describes
-the bench files.
+text; 3 on a bad command line. `--from-file FILE` reads a recorded log
+instead of the port, and the end of the file counts as the time running
+out. docs/testing.md describes the bench files.
 """
 
 import argparse

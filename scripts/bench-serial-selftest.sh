@@ -62,10 +62,11 @@ WATCHDOG="E (12010) task_wdt: Task watchdog got triggered. The following tasks d
 serial watch --seconds 5 --until 'sta ip:' --fail-on-crash
 check match 0 "$STATION_IP"
 
-if grep -q $'\x1b' "$WORK/out"; then
-    fail stripped "the output holds colour codes"
+BOOTLOADER="I (31) boot: ESP-IDF v5.3.2 2nd stage bootloader"
+if [ "$(sed -n 4p "$WORK/out")" = "$BOOTLOADER" ]; then
+    pass stripped "the fixture's first coloured line reads \"$BOOTLOADER\""
 else
-    pass stripped "no colour codes in $(wc -l <"$WORK/out") lines"
+    fail stripped "line 4 is \"$(sed -n 4p "$WORK/out" | cat -v)\", want \"$BOOTLOADER\""
 fi
 
 serial watch --seconds 5 --until 'never printed'

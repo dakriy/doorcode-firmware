@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Runs the bench board on its USB serial port against a development doorcode
 # server and checks it end to end: flashing and booting, enrollment, telemetry,
-# the open and reboot commands, a configuration override, and credential
-# rotation and revocation. It creates or restores a door for the board and
-# deletes it again: run it only against a development server. Settings come
-# from test.env (scripts/bench-env.sh); docs/testing.md describes the run.
+# the open and reboot commands, a configuration override, credential rotation
+# and revocation, signed and unsigned firmware updates, a failed download,
+# and the board's health over the run. It creates or restores a door for the
+# board, uploads firmware, and changes the device_url setting, and undoes all
+# of it again: run it only against a development server. Settings come from
+# test.env (scripts/bench-env.sh); docs/testing.md describes the run.
 
 # The checks are called through within, eventually, and the EXIT trap,
 # which the linter does not follow.
@@ -17,9 +19,9 @@ source "$(dirname "$0")/bench-env.sh"
 
 usage() {
     cat <<'EOF'
-usage: scripts/bench-test.sh [--no-flash] [--keep] [--dry-run]
-           [--server URL] [--token TOKEN] [--port PORT]
-           [--door-name NAME] [--timeout SECONDS]
+usage: scripts/bench-test.sh [--no-flash] [--skip-ota] [--keep] [--dry-run]
+           [--server URL] [--token TOKEN] [--signing-key PATH]
+           [--port PORT] [--door-name NAME] [--timeout SECONDS]
 
 Settings come from test.env at the repository root (see test.env.example);
 a flag overrides its key.
@@ -27,13 +29,19 @@ a flag overrides its key.
   --no-flash          skip downloading the provisioning file, building,
                       flashing, and provisioning: the board already runs the
                       image and waits to enroll
-  --keep              leave the door on the server, and print its id
+  --skip-ota          skip the firmware updates (steps 8 to 10), which need
+                      the signing key
+  --keep              leave the door and the uploaded firmware on the server,
+                      and print their ids
   --dry-run           print the steps and settings, and touch nothing
   --server URL        DOORCODE_SERVER, the server's base address
   --token TOKEN       DOORCODE_TOKEN, an administrator's API token
+  --signing-key PATH  DOORCODE_SIGNING_KEY, the private signing key's PEM
+                      file, outside the repository
   --port PORT         DOORCODE_SERIAL_PORT, the board's serial port
   --door-name NAME    DOORCODE_DOOR_NAME, the door the board becomes
-  --timeout SECONDS   DOORCODE_TIMEOUT_S, how long each step waits
+  --timeout SECONDS   DOORCODE_TIMEOUT_S, how long each step waits; firmware
+                      updates wait three times as long
   --help              print this and exit
 EOF
 }
@@ -41,15 +49,18 @@ EOF
 misuse() { usage >&2; exit 2; }
 
 FLASH=true
+OTA=true
 KEEP=false
 DRY_RUN=false
 while [ $# -gt 0 ]; do
     case "$1" in
     --no-flash) FLASH=false; shift ;;
+    --skip-ota) OTA=false; shift ;;
     --keep) KEEP=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --server) DOORCODE_SERVER="${2:-}"; shift 2 || misuse ;;
     --token) DOORCODE_TOKEN="${2:-}"; shift 2 || misuse ;;
+    --signing-key) DOORCODE_SIGNING_KEY="${2:-}"; shift 2 || misuse ;;
     --port) DOORCODE_SERIAL_PORT="${2:-}"; shift 2 || misuse ;;
     --door-name) DOORCODE_DOOR_NAME="${2:-}"; shift 2 || misuse ;;
     --timeout) DOORCODE_TIMEOUT_S="${2:-}"; shift 2 || misuse ;;
@@ -63,21 +74,31 @@ STEPS=(
     "2 enroll: the hardware id appears in GET /enrollments; the door DOORCODE_DOOR_NAME is created (or restored) and the board approved as it; the door comes online"
     "3 telemetry: a new sample with signal, uptime_s, and free_bytes, and mesh fields of 0"
     "4 open: POST open logs an allowed event and the board logs command open"
-    "5 override: with telemetry_interval_s \"10\" a sample follows the next one within 15 s; restoring the overrides restores the effective configuration"
-    "6 reboot: POST reboot; the board logs rst: and the door is online again, with the time it took"
-    "7 credentials: rotate, then revoke; the door goes offline, enrolls again, is approved into the same door, and comes online"
+    "5 override, override-restore: with telemetry_interval_s \"10\" a sample follows the next one within 15 s; restoring the overrides restores the effective configuration"
+    "6 reboot: POST reboot; the board logs rst: and sta ip:, and the door is online again, with the time it took"
+    "7 rotate, revoke: rotate, then revoke; the door goes offline, enrolls again, is approved into the same door, and comes online"
+    "8 release, ota-signed: release the next two patch versions above the one the door runs with DOORCODE_SIGNING_KEY (firmware/provisioning.json moved aside and back); upload the first, choose it for the door, update; the update succeeds and the board boots the other slot and logs the new firmware is kept"
+    "9 ota-unsigned, ota-unsigned-accepted, override-cleared: upload the second image without its 68-byte signature block, update; it fails with bad signature; with the override accept_unsigned_firmware \"true\" it succeeds; the overrides are put back"
+    "10 bad-download, device-url-restored: with the device_url setting at an address that refuses, update to the first image; it fails; device_url is put back and the door is online"
+    "11 no-crash, free-memory: the run's serial log holds no crash text; free_bytes in the last telemetry sample is at most 10% below the first"
+    "12 cleanup: put device_url and the overrides back; unless --keep, put the door's firmware choice back and delete the uploaded firmware and the door the run created or restored"
 )
 
 if $DRY_RUN; then
     echo "bench-test steps:"
     printf '  %s\n' "${STEPS[@]}"
-    echo "  cleanup: unless --keep, delete the door the run created or restored"
+    $OTA || echo "  --skip-ota: steps 8 to 10 do not run"
     echo "settings: server ${DOORCODE_SERVER:-(not set)}, port $DOORCODE_SERIAL_PORT," \
-        "door \"$DOORCODE_DOOR_NAME\", timeout ${DOORCODE_TIMEOUT_S} s, flash $FLASH, keep $KEEP"
+        "door \"$DOORCODE_DOOR_NAME\", timeout ${DOORCODE_TIMEOUT_S} s," \
+        "signing key ${DOORCODE_SIGNING_KEY:-(not set)}, flash $FLASH, ota $OTA, keep $KEEP"
     exit 0
 fi
 
-bench_env_require DOORCODE_SERVER DOORCODE_TOKEN
+if $OTA; then
+    bench_env_require DOORCODE_SERVER DOORCODE_TOKEN DOORCODE_SIGNING_KEY
+else
+    bench_env_require DOORCODE_SERVER DOORCODE_TOKEN
+fi
 for tool in curl jq uvx make docker; do
     command -v "$tool" >/dev/null || { echo "bench-test: $tool is required" >&2; exit 2; }
 done
@@ -85,6 +106,8 @@ done
 ROOT="$BENCH_ROOT"
 API="${DOORCODE_SERVER%/}/api/v1"
 TIMEOUT="$DOORCODE_TIMEOUT_S"
+# How long a firmware update may take, from the command to the verdict.
+OTA_TIMEOUT=$((3 * TIMEOUT))
 PORT="$DOORCODE_SERIAL_PORT"
 WORK="$(mktemp -d)"
 SERIAL_LOG="$ROOT/target/bench/serial-$(date +%Y%m%d-%H%M%S).log"
@@ -123,6 +146,10 @@ reason() {
 # api_ok METHOD PATH [JSON]: calls the API and succeeds on a 2xx answer.
 api_ok() { api "$@"; [[ "$STATUS" == 2* ]]; }
 
+# last_lines FILE: the last lines of a tool's log on one line, for a FAIL
+# line.
+last_lines() { tail -n 3 "$1" | tr '\n' ' '; }
+
 # within SECONDS COMMAND...: retries COMMAND every 2 s until it succeeds or
 # SECONDS pass.
 within() {
@@ -142,17 +169,21 @@ is() { local want="$1"; shift; [ "$("$@")" = "$want" ]; }
 
 # --- The board's serial log -----------------------------------------------
 
-SERIAL=(uvx --from esptool@5.6.0 python "$ROOT/scripts/bench-serial.py" --port "$PORT")
+# esptool's Python, which carries pyserial.
+ESPTOOL_PYTHON=(uvx --from esptool@5.6.0 python)
+SERIAL=("${ESPTOOL_PYTHON[@]}" "$ROOT/scripts/bench-serial.py" --port "$PORT")
+CRASH_TEXT='Guru Meditation Error|Backtrace:|abort\(\)|Task watchdog got triggered'
 # Lines that fail any step: crash text, and the Wi-Fi driver as an access
 # point.
-BAD_LINE='Guru Meditation Error|Backtrace:|abort\(\)|Task watchdog got triggered|wifi:mode :.*softAP'
+BAD_LINE="$CRASH_TEXT|wifi:mode :.*softAP"
+
 LOGGER_PID=""
 
 # start_logger: copies the board's log into $SERIAL_LOG for the rest of the
 # run. Watching does not reset the board; the pattern never matches.
 start_logger() {
     # The first uvx run fetches esptool's environment; do that before timing.
-    uvx --from esptool@5.6.0 python -c 'import serial' 2>"$WORK/logger-error" || return 1
+    "${ESPTOOL_PYTHON[@]}" -c 'import serial' 2>"$WORK/logger-error" || return 1
     "${SERIAL[@]}" watch --seconds 86400 --until '(?!)' >>"$SERIAL_LOG" 2>"$WORK/logger-error" &
     LOGGER_PID=$!
     # Give the helper time to open the port before anything resets the board.
@@ -194,15 +225,92 @@ DOOR_ID=""
 # Whether the run created or restored the door, and so deletes it.
 DOOR_OURS=false
 
+# What the firmware steps changed, for the cleanup to put back. Each restore
+# forgets what it put back, so the EXIT trap repeats only what is left.
+FIRMWARE_IDS=()
+DOOR_FIRMWARE_SET=false
+# The door's own firmware before the run: a firmware id, or null to follow
+# the default.
+DOOR_FIRMWARE_BEFORE=null
+# The door's overrides before step 9 changed them.
+OVERRIDES_BEFORE=""
+# The PUT /settings/device_url body that puts the setting back.
+DEVICE_URL_BEFORE=""
+PROVISIONING="$ROOT/firmware/provisioning.json"
+# Inside target/, which git ignores, so an interrupted run leaves the file
+# where it can be found.
+PROVISIONING_ASIDE="$ROOT/target/bench/provisioning.json.aside"
+PROVISIONING_MOVED=false
+
+provisioning_aside() {
+    [ -e "$PROVISIONING" ] || return 0
+    mv "$PROVISIONING" "$PROVISIONING_ASIDE" && PROVISIONING_MOVED=true
+}
+
+provisioning_back() {
+    $PROVISIONING_MOVED || return 0
+    mv "$PROVISIONING_ASIDE" "$PROVISIONING" && PROVISIONING_MOVED=false
+}
+
+restore_device_url() {
+    [ -n "$DEVICE_URL_BEFORE" ] || return 0
+    api_ok PUT /settings/device_url "$DEVICE_URL_BEFORE" && DEVICE_URL_BEFORE=""
+}
+
+restore_overrides() {
+    [ -n "$OVERRIDES_BEFORE" ] || return 0
+    set_overrides "$OVERRIDES_BEFORE" && OVERRIDES_BEFORE=""
+}
+
+restore_door_firmware() {
+    $DOOR_FIRMWARE_SET || return 0
+    api_ok PUT "/doors/$DOOR_ID/firmware" "{\"firmware_id\":$DOOR_FIRMWARE_BEFORE}" && DOOR_FIRMWARE_SET=false
+}
+
+delete_firmware() {
+    local id left=()
+    for id in "${FIRMWARE_IDS[@]}"; do
+        api_ok DELETE "/firmware/$id" || left+=("$id")
+    done
+    FIRMWARE_IDS=("${left[@]}")
+    [ ${#left[@]} -eq 0 ]
+}
+
+# delete_door: deletes the door when the run created or restored it.
+# Deleting a door also revokes its credentials, so the board waits to enroll
+# again, ready for the next run.
+delete_door() {
+    [ -n "$DOOR_ID" ] && $DOOR_OURS || return 0
+    api_ok DELETE "/doors/$DOOR_ID" && DOOR_ID=""
+}
+
+# tidy: puts back device_url, the overrides, and the door's firmware choice,
+# and unless --keep deletes the uploaded firmware and the door. What it
+# could not undo is in TIDY_PROBLEMS.
+TIDY_PROBLEMS=()
+tidy() {
+    TIDY_PROBLEMS=()
+    restore_device_url || TIDY_PROBLEMS+=("restoring device_url $(reason)")
+    restore_overrides || TIDY_PROBLEMS+=("restoring the overrides $(reason)")
+    $KEEP && return 0
+    restore_door_firmware || TIDY_PROBLEMS+=("restoring door $DOOR_ID's firmware choice $(reason)")
+    delete_firmware || TIDY_PROBLEMS+=("deleting firmware ${FIRMWARE_IDS[*]} $(reason)")
+    delete_door || TIDY_PROBLEMS+=("deleting door $DOOR_ID $(reason)")
+}
+
+# kept: what the run leaves on the server.
+kept() {
+    [ -z "$DOOR_ID" ] || echo "kept: door $DOOR_ID"
+    [ ${#FIRMWARE_IDS[@]} -eq 0 ] || echo "kept: firmware ${FIRMWARE_IDS[*]}"
+}
+
 cleanup() {
     stop_logger
-    if [ -n "$DOOR_ID" ] && $DOOR_OURS && ! $KEEP; then
-        # Deleting a door also revokes its credentials, so the board waits
-        # to enroll again, ready for the next run.
-        api_ok DELETE "/doors/$DOOR_ID" || echo "cleanup: deleting door $DOOR_ID $(reason)" >&2
-    elif [ -n "$DOOR_ID" ]; then
-        echo "kept: door $DOOR_ID"
-    fi
+    provisioning_back ||
+        echo "cleanup: moving $PROVISIONING_ASIDE back to firmware/provisioning.json failed" >&2
+    tidy
+    [ ${#TIDY_PROBLEMS[@]} -eq 0 ] || printf 'cleanup: %s\n' "${TIDY_PROBLEMS[@]}" >&2
+    kept
     echo "serial log: $SERIAL_LOG"
     rm -rf "$WORK"
 }
@@ -226,13 +334,13 @@ offline() { is false door_state .online; }
 
 flash() {
     api_ok GET /firmware/provisioning || abort boot "downloading the provisioning file $(reason)"
-    cp "$WORK/answer" "$ROOT/firmware/provisioning.json"
+    cp "$WORK/answer" "$PROVISIONING"
     make -C "$ROOT" firmware-build >"$WORK/build.log" 2>&1 ||
-        abort boot "make firmware-build failed: $(tail -n 3 "$WORK/build.log" | tr '\n' ' ')"
+        abort boot "make firmware-build failed: $(last_lines "$WORK/build.log")"
     make -C "$ROOT" firmware-flash FIRMWARE_PORT="$PORT" FLASH_MONITOR= >"$WORK/flash.log" 2>&1 ||
-        abort boot "make firmware-flash failed: $(tail -n 3 "$WORK/flash.log" | tr '\n' ' ')"
+        abort boot "make firmware-flash failed: $(last_lines "$WORK/flash.log")"
     make -C "$ROOT" firmware-provision FIRMWARE_PORT="$PORT" >"$WORK/provision.log" 2>&1 ||
-        abort boot "make firmware-provision failed: $(tail -n 3 "$WORK/provision.log" | tr '\n' ' ')"
+        abort boot "make firmware-provision failed: $(last_lines "$WORK/provision.log")"
 }
 
 step_boot() {
@@ -246,13 +354,14 @@ step_boot() {
     mark="$(log_mark)"
     "${SERIAL[@]}" reset >/dev/null 2>"$WORK/reset-error" ||
         abort boot "resetting the board: $(head -c 300 "$WORK/reset-error")"
-    for pattern in 'App version:' 'wifi:mode : sta' 'wifi:connected with' 'sta ip:'; do
+    line="$(log_wait "$mark" 'App version:')" || abort boot "waiting for \"App version:\": $line"
+    version="$(sed -E 's/.*App version: *//' <<<"$line")"
+    for pattern in 'wifi:mode : sta' 'wifi:connected with' 'sta ip:'; do
         line="$(log_wait "$mark" "$pattern")" || abort boot "waiting for \"$pattern\": $line"
     done
     line="$(log_wait "$mark" 'enrolling as [0-9a-fA-F]+')" ||
         abort boot "waiting for \"enrolling as\": $line (a board that is already a door does not enroll: delete its door, or run without --no-flash)"
     HARDWARE_ID="$(sed -E 's/.*enrolling as ([0-9a-fA-F]+).*/\1/' <<<"$line")"
-    version="$(log_wait "$mark" 'App version:' | sed -E 's/.*App version: *//')"
     pass boot "version $version, station mode, enrolling as $HARDWARE_ID"
 }
 
@@ -312,6 +421,9 @@ latest_sample() { api_ok GET "/doors/$DOOR_ID/telemetry" && answer '.samples[-1]
 # new_sample BEFORE: whether a sample later than BEFORE arrived.
 new_sample() { local at; at="$(latest_sample)" && [ "$at" != null ] && [ "$at" != "$1" ]; }
 
+# The free memory of the first sample, for the health step.
+FIRST_FREE=""
+
 SAMPLE_SHAPE='.samples[-1] | .signal != 0 and .uptime_s > 0 and .free_bytes > 0
     and .mesh_layer == 0 and .mesh_parent == "" and .mesh_children == 0'
 
@@ -321,6 +433,7 @@ step_telemetry() {
     elif [ "$(answer "$SAMPLE_SHAPE")" != true ]; then
         fail telemetry "the sample is $(answer '.samples[-1] | tostring')"
     else
+        FIRST_FREE="$(answer '.samples[-1].free_bytes')"
         pass telemetry "$(answer '.samples[-1] | "signal \(.signal) dBm, uptime \(.uptime_s) s, free \(.free_bytes) bytes, mesh layer 0"')"
     fi
 }
@@ -345,12 +458,17 @@ step_open() {
 
 config() { api_ok GET "/doors/$DOOR_ID/config" && answer "$1"; }
 
+# current_overrides, effective_config: the door's overrides and effective
+# configuration as compact JSON.
+current_overrides() { config '.overrides // {} | tostring'; }
+effective_config() { config '.effective | tostring'; }
+
 set_overrides() { api_ok PUT "/doors/$DOOR_ID/config" "{\"overrides\":$1}"; }
 
 step_override() {
     local overrides effective before
-    overrides="$(config '.overrides // {} | tostring')" || { fail override "reading the config $(reason)"; return; }
-    effective="$(config '.effective | tostring')"
+    overrides="$(current_overrides)" || { fail override "reading the config $(reason)"; return; }
+    effective="$(effective_config)"
     before="$(latest_sample)"
     if ! set_overrides "$(jq -c '. + {telemetry_interval_s: "10"}' <<<"$overrides")"; then
         fail override "setting telemetry_interval_s $(reason)"
@@ -367,8 +485,8 @@ step_override() {
     fi
     if ! set_overrides "$overrides"; then
         fail override-restore "restoring the overrides $overrides $(reason)"
-    elif ! is "$effective" config '.effective | tostring'; then
-        fail override-restore "the effective config is $(config '.effective | tostring'), was $effective"
+    elif ! is "$effective" effective_config; then
+        fail override-restore "the effective config is $(effective_config), was $effective"
     else
         pass override-restore "the overrides are $overrides again and the effective config is back"
     fi
@@ -449,6 +567,306 @@ step_revoke() {
     fi
 }
 
+# --- 8 signed update --------------------------------------------------------
+
+# The versions released for the signed and the unsigned update, and the
+# signed one's firmware id once uploaded.
+SIGNED_VERSION=""
+UNSIGNED_VERSION=""
+SIGNED_ID=""
+RELEASED=false
+
+door_firmware() { api_ok GET "/doors/$DOOR_ID/firmware" && answer "$1"; }
+
+# next_patches VERSION: the two patch versions after MAJOR.MINOR.PATCH.
+next_patches() {
+    [[ "$1" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+    local base="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" patch=$((10#${BASH_REMATCH[3]}))
+    echo "$base.$((patch + 1)) $base.$((patch + 2))"
+}
+
+image() { echo "$ROOT/dist/doorcode-firmware-$1.bin"; }
+
+# release VERSION: builds and signs the image of VERSION into dist/.
+release() {
+    make -C "$ROOT" --no-print-directory firmware-release VERSION="$1" KEY="$DOORCODE_SIGNING_KEY" \
+        >"$WORK/release.log" 2>&1
+}
+
+# release_both: releases both versions while firmware/provisioning.json is
+# moved aside, since a release image must not embed it; the EXIT trap moves
+# it back when the run is interrupted. Says why in WHY when it fails. It
+# runs in the script's own shell, so the trap sees PROVISIONING_MOVED.
+WHY=""
+release_both() {
+    local built=true
+    provisioning_aside || { WHY="moving firmware/provisioning.json aside failed"; return 1; }
+    if ! release "$SIGNED_VERSION" || ! release "$UNSIGNED_VERSION"; then
+        built=false
+    fi
+    provisioning_back || { WHY="moving $PROVISIONING_ASIDE back to firmware/provisioning.json failed"; return 1; }
+    $built || { WHY="make firmware-release failed: $(last_lines "$WORK/release.log")"; return 1; }
+}
+
+step_release() {
+    local running versions
+    if ! running="$(door_firmware .version)"; then
+        fail release "reading GET /doors/$DOOR_ID/firmware $(reason)"
+        return
+    fi
+    DOOR_FIRMWARE_BEFORE="$(answer '.override.id // null')"
+    if ! versions="$(next_patches "$running")"; then
+        fail release "the door runs \"$running\", not MAJOR.MINOR.PATCH"
+        return
+    fi
+    read -r SIGNED_VERSION UNSIGNED_VERSION <<<"$versions"
+    if ! release_both; then
+        fail release "$WHY"
+        return
+    fi
+    RELEASED=true
+    pass release "the door runs $running; released $SIGNED_VERSION and $UNSIGNED_VERSION"
+}
+
+# upload VERSION FILE: uploads FILE as VERSION and sets UPLOADED_ID.
+UPLOADED_ID=""
+upload() {
+    UPLOADED_ID=""
+    make -C "$ROOT" --no-print-directory firmware-upload SERVER="$DOORCODE_SERVER" \
+        TOKEN="$DOORCODE_TOKEN" FILE="$2" VERSION="$1" >"$WORK/upload.log" 2>&1 || return 1
+    UPLOADED_ID="$(grep -v '^HTTP ' "$WORK/upload.log" | jq -r '.id // empty' 2>/dev/null)"
+    [ -n "$UPLOADED_ID" ] || return 1
+    FIRMWARE_IDS+=("$UPLOADED_ID")
+}
+
+upload_problem() { echo "make firmware-upload failed: $(last_lines "$WORK/upload.log")"; }
+
+# choose ID: makes firmware ID the door's own.
+choose() {
+    api_ok PUT "/doors/$DOOR_ID/firmware" "{\"firmware_id\":$1}" && DOOR_FIRMWARE_SET=true
+}
+
+# When the update sent last was sent.
+SENT_AT=""
+
+# update_state JQ: the door's latest firmware update, or the part JQ
+# selects.
+update_state() { door_firmware ".last_update | $1"; }
+
+# update_over: whether the update sent at SENT_AT succeeded or failed.
+update_over() {
+    local state
+    state="$(update_state "select(.sent_at == \"$SENT_AT\") | .state")"
+    [ "$state" = succeeded ] || [ "$state" = failed ]
+}
+
+# ota STEP OUTCOME: sends the door its firmware now and waits for the
+# update to end, failing STEP unless it ended in OUTCOME.
+ota() {
+    if ! api_ok POST "/doors/$DOOR_ID/update"; then
+        fail "$1" "POST /doors/$DOOR_ID/update $(reason)"
+        return 1
+    fi
+    SENT_AT="$(answer .last_update.sent_at)"
+    if ! within "$OTA_TIMEOUT" update_over; then
+        fail "$1" "the update sent at $SENT_AT did not end within $OTA_TIMEOUT s: $(update_state tostring)"
+        return 1
+    fi
+    [ "$(update_state .state)" = "$2" ] && return 0
+    fail "$1" "the update did not end $2: $(update_state tostring)"
+    return 1
+}
+
+BOOT_LINE='boot: Loaded app from partition at offset 0x[0-9a-fA-F]+'
+
+# offset_of: the app offset in the boot lines on stdin, the last one's.
+offset_of() { grep -Eo "$BOOT_LINE" | tail -n 1 | sed 's/.* //'; }
+
+# booted_other_slot MARK BEFORE: whether the board booted an app at another
+# offset than BEFORE after MARK and kept the new firmware. Prints what it
+# saw, or why not.
+booted_other_slot() {
+    local line after
+    if ! line="$(log_wait "$1" "$BOOT_LINE" "$OTA_TIMEOUT")"; then
+        echo "the board log: $line"
+        return 1
+    fi
+    after="$(offset_of <<<"$line")"
+    if [ -z "$2" ] || [ "$after" = "$2" ]; then
+        echo "the board booted from offset $after, and before from ${2:-no offset in the log}"
+        return 1
+    fi
+    if ! line="$(log_wait "$1" 'the new firmware is kept' "$OTA_TIMEOUT")"; then
+        echo "the board log: $line"
+        return 1
+    fi
+    echo "booted from $after instead of $2 and kept the new firmware"
+}
+
+step_signed_ota() {
+    local mark before slot
+    $RELEASED || { skip ota-signed "no release to update to"; return; }
+    if ! upload "$SIGNED_VERSION" "$(image "$SIGNED_VERSION")"; then
+        fail ota-signed "$(upload_problem)"
+        return
+    fi
+    SIGNED_ID="$UPLOADED_ID"
+    if ! choose "$SIGNED_ID"; then
+        fail ota-signed "choosing firmware $SIGNED_ID for door $DOOR_ID $(reason)"
+        return
+    fi
+    before="$(offset_of <"$SERIAL_LOG")"
+    mark="$(log_mark)"
+    ota ota-signed succeeded || return
+    if slot="$(booted_other_slot "$mark" "$before")"; then
+        pass ota-signed "$SIGNED_VERSION (firmware $SIGNED_ID) succeeded; $slot"
+    else
+        fail ota-signed "$slot"
+    fi
+}
+
+# --- 9 unsigned update ------------------------------------------------------
+
+# The signature block at the end of a signed image (docs/firmware-signing.md).
+SIGNATURE_BYTES=68
+
+# unsigned_copy SIGNED OUT: writes SIGNED without its signature block to OUT.
+unsigned_copy() {
+    local size
+    size="$(wc -c <"$1")" || return 1
+    head -c "$((size - SIGNATURE_BYTES))" "$1" >"$2"
+}
+
+# accepts_unsigned: whether the door's effective config accepts unsigned
+# firmware.
+accepts_unsigned() { is true config '.effective.accept_unsigned_firmware | tostring'; }
+
+step_unsigned_accepted() {
+    local overrides
+    if ! overrides="$(current_overrides)"; then
+        fail ota-unsigned-accepted "reading the config $(reason)"
+        return
+    fi
+    OVERRIDES_BEFORE="$overrides"
+    if ! set_overrides "$(jq -c '. + {accept_unsigned_firmware: "true"}' <<<"$overrides")"; then
+        fail ota-unsigned-accepted "setting accept_unsigned_firmware $(reason)"
+    elif ! eventually accepts_unsigned; then
+        fail ota-unsigned-accepted "the effective config never accepted unsigned firmware: $(effective_config)"
+    elif ota ota-unsigned-accepted succeeded; then
+        pass ota-unsigned-accepted "with accept_unsigned_firmware \"true\" the door installed $UNSIGNED_VERSION"
+    fi
+    if ! restore_overrides; then
+        fail override-cleared "restoring the overrides $overrides $(reason)"
+    else
+        pass override-cleared "the overrides are $overrides again"
+    fi
+}
+
+step_unsigned_ota() {
+    local unsigned detail
+    $RELEASED || { skip ota-unsigned "no release to update to"; return; }
+    unsigned="$WORK/unsigned-$UNSIGNED_VERSION.bin"
+    unsigned_copy "$(image "$UNSIGNED_VERSION")" "$unsigned"
+    if ! upload "$UNSIGNED_VERSION" "$unsigned"; then
+        fail ota-unsigned "$(upload_problem)"
+        return
+    fi
+    if ! choose "$UPLOADED_ID"; then
+        fail ota-unsigned "choosing firmware $UPLOADED_ID for door $DOOR_ID $(reason)"
+        return
+    fi
+    if ota ota-unsigned failed; then
+        detail="$(update_state .detail)"
+        if [[ "$detail" == *"bad signature"* ]]; then
+            pass ota-unsigned "$UNSIGNED_VERSION without its signature block was refused: $detail"
+        else
+            fail ota-unsigned "the update failed with \"$detail\", not naming bad signature"
+        fi
+    fi
+    step_unsigned_accepted
+}
+
+# --- 10 bad download --------------------------------------------------------
+
+# An address the board refuses at once: its own loopback, where nothing
+# listens.
+UNREACHABLE_URL="http://127.0.0.1:9"
+
+step_bad_download() {
+    local value
+    [ -n "$SIGNED_ID" ] || { skip bad-download "no signed firmware uploaded"; return; }
+    if ! api_ok GET /settings/device_url; then
+        fail bad-download "reading device_url $(reason)"
+        return
+    fi
+    if [ "$(answer .read_only)" = true ]; then
+        skip bad-download "device_url comes from $(answer .env_var), so the run cannot change it"
+        return
+    fi
+    value="$(answer .value)"
+    if [ "$(answer .source)" = database ]; then
+        DEVICE_URL_BEFORE="$(jq -cn --arg value "$value" '{value: $value}')"
+    else
+        DEVICE_URL_BEFORE='{"clear":true}'
+    fi
+    if ! api_ok PUT /settings/device_url "{\"value\":\"$UNREACHABLE_URL\"}"; then
+        fail bad-download "setting device_url to $UNREACHABLE_URL $(reason)"
+    elif ! choose "$SIGNED_ID"; then
+        fail bad-download "choosing firmware $SIGNED_ID for door $DOOR_ID $(reason)"
+    elif ota bad-download failed; then
+        pass bad-download "the update to $SIGNED_VERSION from $UNREACHABLE_URL failed: $(update_state .detail)"
+    fi
+    if ! restore_device_url; then
+        fail device-url-restored "putting device_url back to \"$value\" $(reason)"
+    elif ! eventually online; then
+        fail device-url-restored "device_url is \"$value\" again, but the door is not online: $(door_state .)"
+    else
+        pass device-url-restored "device_url is \"$value\" again and the door is online"
+    fi
+}
+
+# --- 11 health --------------------------------------------------------------
+
+# latest_free: the free memory of the door's latest telemetry sample.
+latest_free() {
+    local free
+    api_ok GET "/doors/$DOOR_ID/telemetry" || return 1
+    free="$(answer '.samples[-1].free_bytes')"
+    [[ "$free" =~ ^[0-9]+$ ]] && echo "$free"
+}
+
+step_health() {
+    local line last
+    line="$(grep -E -m1 "$CRASH_TEXT" "$SERIAL_LOG")"
+    if [ -n "$line" ]; then
+        fail no-crash "the serial log holds: $line"
+    else
+        pass no-crash "no crash text in the $(log_mark) lines of $SERIAL_LOG"
+    fi
+    if [ -z "$FIRST_FREE" ]; then
+        skip free-memory "step telemetry recorded no first sample"
+    elif ! last="$(latest_free)"; then
+        fail free-memory "reading the last sample $(reason)"
+    elif [ $((last * 10)) -lt $((FIRST_FREE * 9)) ]; then
+        fail free-memory "free_bytes fell from $FIRST_FREE to $last, more than 10%"
+    else
+        pass free-memory "free_bytes $FIRST_FREE in the first sample, $last in the last"
+    fi
+}
+
+# --- 12 cleanup -------------------------------------------------------------
+
+step_cleanup() {
+    tidy
+    if [ ${#TIDY_PROBLEMS[@]} -gt 0 ]; then
+        fail cleanup "$(printf '%s; ' "${TIDY_PROBLEMS[@]}")"
+    elif $KEEP; then
+        skip cleanup "--keep: device_url and the overrides are back; the door and the uploaded firmware stay"
+    else
+        pass cleanup "device_url, the overrides, and the door's firmware choice are back; the uploaded firmware and the door the run made are deleted"
+    fi
+}
+
 step_boot
 step_enroll
 step_telemetry
@@ -457,5 +875,16 @@ step_override
 step_reboot
 step_rotate
 step_revoke
+if $OTA; then
+    step_release
+    step_signed_ota
+    step_unsigned_ota
+    step_bad_download
+else
+    skip ota "--skip-ota: steps 8 to 10 do not run"
+fi
+step_health
+step_cleanup
 
 exit "$FAILED"
+

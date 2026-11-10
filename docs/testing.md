@@ -259,24 +259,28 @@ uses it:
 and checks it through the server's API and the board's serial log. Like the
 integration test it creates a door and changes it: **run it only against a
 development server.** It needs `bash`, `curl`, `jq`, `uvx`, `make`, and
-`docker`, the settings `DOORCODE_SERVER` and `DOORCODE_TOKEN`, and the board
-on `DOORCODE_SERIAL_PORT`.
+`docker`, the settings `DOORCODE_SERVER` and `DOORCODE_TOKEN`, the board
+on `DOORCODE_SERIAL_PORT`, and for the firmware updates
+`DOORCODE_SIGNING_KEY`.
 
     scripts/bench-test.sh --dry-run     # the steps and settings; touches nothing
     scripts/bench-test.sh               # flash and run every step
     scripts/bench-test.sh --no-flash    # the board already runs the image
+    scripts/bench-test.sh --skip-ota    # steps 1 to 7, 11, and 12; no signing key
 
 | Flag | Meaning |
 | --- | --- |
 | `--no-flash` | Skip downloading the provisioning file, building, flashing, and provisioning. The board must already run the image and wait to enroll. |
-| `--keep` | Leave the door on the server, and print its id. |
+| `--skip-ota` | Skip the firmware updates, steps 8 to 10. `DOORCODE_SIGNING_KEY` is then not needed. |
+| `--keep` | Leave the door and the uploaded firmware on the server, and print their ids. |
 | `--dry-run` | Print the steps and the settings in use, and exit without touching the port, the server, or the container. |
-| `--server URL`, `--token TOKEN`, `--port PORT`, `--door-name NAME`, `--timeout SECONDS` | Override `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_SERIAL_PORT`, `DOORCODE_DOOR_NAME`, and `DOORCODE_TIMEOUT_S`. |
+| `--server URL`, `--token TOKEN`, `--signing-key PATH`, `--port PORT`, `--door-name NAME`, `--timeout SECONDS` | Override `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_SIGNING_KEY`, `DOORCODE_SERIAL_PORT`, `DOORCODE_DOOR_NAME`, and `DOORCODE_TIMEOUT_S`. |
 | `--help` | Print the usage. |
 
 Each step prints `PASS`, `FAIL`, or `SKIP` with its name and a reason, and
 the exit code is non-zero when any step fails. Every wait ends after
-`DOORCODE_TIMEOUT_S` seconds, polling the API every two seconds. When the
+`DOORCODE_TIMEOUT_S` seconds, and a firmware update's after three times
+that, polling the API every two seconds. When the
 boot or the enrollment fails, the script stops there. From the reset on,
 one copy of the serial helper copies the board's log into
 `target/bench/serial-<date>-<time>.log`, which the script names when it
@@ -310,10 +314,46 @@ point, fails the step that is waiting.
    online. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke`
    the door goes offline, the board enrolls again, is approved into the
    same door, and comes online.
+8. **release**: the door's version from `GET /api/v1/doors/{id}/firmware`
+   must be `MAJOR.MINOR.PATCH`; the next two patch versions are released
+   with `make firmware-release` and `DOORCODE_SIGNING_KEY`, the first for
+   the signed update and the second for the unsigned one (each image
+   carries its own version, which the door must report for its update to
+   succeed). `firmware/provisioning.json` is moved to
+   `target/bench/provisioning.json.aside` for the release and back after
+   it, also when the run fails or is interrupted. **ota-signed**: the first
+   image is uploaded with `make firmware-upload`, chosen as the door's own
+   firmware (`PUT /api/v1/doors/{id}/firmware`), and sent
+   (`POST /api/v1/doors/{id}/update`); the update's state reaches
+   `succeeded`, and the board's log shows
+   `boot: Loaded app from partition at offset` with another offset than
+   its previous boot and `the new firmware is kept`.
+9. **ota-unsigned**: the second image without its last 68 bytes, the
+   signature block (`firmware-signing.md`), is uploaded, chosen, and sent;
+   the update fails with a detail naming `bad signature`.
+   **ota-unsigned-accepted**: with the override `accept_unsigned_firmware`
+   `"true"`, once the door's effective configuration shows it, the same
+   update succeeds. **override-cleared**: the door's previous overrides
+   are put back.
+10. **bad-download**: the `device_url` setting is pointed at
+    `http://127.0.0.1:9`, which the board refuses at once, and the first
+    image is sent again; the update fails. **device-url-restored**:
+    `device_url` is put back as it was (cleared again when it had no stored
+    value), and the door is online.
+11. **no-crash**: the whole run's serial log holds no crash text.
+    **free-memory**: `free_bytes` in the door's latest telemetry sample is
+    at most 10% below the sample of step 3.
+12. **cleanup**: `device_url` and the overrides are put back if a step
+    left them changed. Unless `--keep`, the door's own firmware choice is
+    put back, the uploaded firmware versions are deleted, and the door is
+    deleted when the run created or restored it.
 
-On any exit, unless `--keep`, the script deletes the door when it created
-or restored it. Deleting a door revokes its credentials, so the board
-waits to enroll again, ready for the next run with `--no-flash`. A door
-that existed before the run is left in place. A board that is already a
-door does not print `enrolling as`: delete its door, or run without
-`--no-flash`, which provisions it afresh.
+The same cleanup runs on any exit, so a run that stops early still puts
+`device_url`, the overrides, and the provisioning file back. Deleting a
+door revokes its credentials, so the board waits to enroll again, ready
+for the next run with `--no-flash`. A door that existed before the run is
+left in place. A board that is already a door does not print
+`enrolling as`: delete its door, or run without `--no-flash`, which
+provisions it afresh. The board keeps the image of step 9, so a next run
+with `--no-flash` releases the patch versions above that one.
+
