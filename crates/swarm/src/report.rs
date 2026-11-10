@@ -1,6 +1,7 @@
 //! The numbers a load run reports: check round trip percentiles, bytes per
-//! door per hour, how the doors came back after a storm, and the summary
-//! as a table and as JSON.
+//! door per hour and in total, the openings of the traffic doors and the
+//! door events the server recorded for them, how the doors came back after
+//! a storm, and the summary as a table and as JSON.
 
 use std::time::{Duration, Instant};
 
@@ -58,30 +59,144 @@ impl Bytes {
             sent: then.sent.saturating_sub(self.sent),
         }
     }
+
+    /// These bytes and `other` together.
+    pub fn plus(self, other: Bytes) -> Bytes {
+        Bytes {
+            received: self.received + other.received,
+            sent: self.sent + other.sent,
+        }
+    }
 }
 
-/// Bytes per door per hour, each way.
+/// `count` times `scale` over `divisor`, rounded down; 0 when the divisor
+/// is 0.
+fn scaled(count: u64, scale: u128, divisor: u128) -> u64 {
+    let rate = (u128::from(count) * scale).checked_div(divisor);
+    u64::try_from(rate.unwrap_or(0)).unwrap_or(u64::MAX)
+}
+
+/// MQTT bytes each way, or bytes each way per second or per door per hour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct Rate {
+pub struct Flow {
     pub bytes_in: u64,
     pub bytes_out: u64,
 }
 
-impl Rate {
-    /// The rate at which `doors` doors moved `bytes` over `window`, rounded
-    /// down; 0 when there were no doors or no time.
-    pub fn per_door_hour(bytes: Bytes, doors: usize, window: Duration) -> Rate {
-        let door_ms = doors as u128 * window.as_millis();
-        let hourly = |count: u64| {
-            let rate = (u128::from(count) * 3_600_000).checked_div(door_ms);
-            u64::try_from(rate.unwrap_or(0)).unwrap_or(u64::MAX)
-        };
-        Rate {
-            bytes_in: hourly(bytes.received),
-            bytes_out: hourly(bytes.sent),
+impl Flow {
+    fn of(bytes: Bytes) -> Flow {
+        Flow {
+            bytes_in: bytes.received,
+            bytes_out: bytes.sent,
         }
     }
+
+    /// `bytes` times `scale` over `divisor` each way, rounded down; 0 when
+    /// the divisor is 0.
+    fn scaled(bytes: Bytes, scale: u128, divisor: u128) -> Flow {
+        Flow {
+            bytes_in: scaled(bytes.received, scale, divisor),
+            bytes_out: scaled(bytes.sent, scale, divisor),
+        }
+    }
+
+    /// `bytes` per second over `window`, rounded down; 0 over no time.
+    fn per_second(bytes: Bytes, window: Duration) -> Flow {
+        Flow::scaled(bytes, 1000, window.as_millis())
+    }
+
+    /// The rate at which `doors` doors made `moved`, per door per hour,
+    /// rounded down; 0 when there were no doors or no time.
+    pub fn per_door_hour(moved: Moved, doors: usize) -> Flow {
+        let door_ms = doors as u128 * moved.window.as_millis();
+        Flow::scaled(moved.bytes, 3_600_000, door_ms)
+    }
+
+    fn rows(self, names: [&'static str; 2]) -> [(&'static str, String); 2] {
+        [
+            (names[0], self.bytes_in.to_string()),
+            (names[1], self.bytes_out.to_string()),
+        ]
+    }
 }
+
+/// Every MQTT byte the doors moved over one stretch of the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct PhaseTotal {
+    /// The typing doors' bytes.
+    pub typing: Flow,
+    /// The traffic doors' bytes.
+    pub traffic: Flow,
+    /// Every door's bytes.
+    pub all: Flow,
+    /// Every door's bytes per second.
+    pub all_per_second: Flow,
+}
+
+impl PhaseTotal {
+    /// The total of the typing doors' `typing` and the traffic doors'
+    /// `traffic`, when there were any, over the typing doors' window.
+    fn of(typing: Moved, traffic: Option<Moved>) -> PhaseTotal {
+        let traffic = traffic.map_or(Bytes::default(), |moved| moved.bytes);
+        let all = typing.bytes.plus(traffic);
+        PhaseTotal {
+            typing: Flow::of(typing.bytes),
+            traffic: Flow::of(traffic),
+            all: Flow::of(all),
+            all_per_second: Flow::per_second(all, typing.window),
+        }
+    }
+
+    /// The rows of this total, named by `names`.
+    fn rows(self, names: &[[&'static str; 2]; 4]) -> Vec<(&'static str, String)> {
+        let flows = [self.typing, self.traffic, self.all, self.all_per_second];
+        let rows = flows
+            .iter()
+            .zip(names)
+            .map(|(flow, names)| flow.rows(*names));
+        rows.flatten().collect()
+    }
+}
+
+/// The names of the idle total's rows.
+const IDLE_TOTAL: [[&str; 2]; 4] = [
+    [
+        "total bytes in, idle, typing doors",
+        "total bytes out, idle, typing doors",
+    ],
+    [
+        "total bytes in, idle, traffic doors",
+        "total bytes out, idle, traffic doors",
+    ],
+    [
+        "total bytes in, idle, all doors",
+        "total bytes out, idle, all doors",
+    ],
+    [
+        "bytes in per second, idle, all doors",
+        "bytes out per second, idle, all doors",
+    ],
+];
+
+/// The names of the loaded total's rows.
+const LOADED_TOTAL: [[&str; 2]; 4] = [
+    [
+        "total bytes in, loaded, typing doors",
+        "total bytes out, loaded, typing doors",
+    ],
+    [
+        "total bytes in, loaded, traffic doors",
+        "total bytes out, loaded, traffic doors",
+    ],
+    [
+        "total bytes in, loaded, all doors",
+        "total bytes out, loaded, all doors",
+    ],
+    [
+        "bytes in per second, loaded, all doors",
+        "bytes out per second, loaded, all doors",
+    ],
+];
 
 /// How the doors came back after every connection was dropped at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -129,6 +244,42 @@ pub struct Moved {
     pub window: Duration,
 }
 
+/// The door events the server recorded, summed over the doors asked about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+pub struct DoorEvents {
+    /// The door closing after it was open.
+    pub closed: u64,
+    /// Opened while it should have been locked, without an unlock.
+    pub forced_open: u64,
+    /// Open longer than the server allows while it should have been locked.
+    pub held_open: u64,
+}
+
+impl DoorEvents {
+    /// These events and `other` together.
+    pub fn and(self, other: DoorEvents) -> DoorEvents {
+        DoorEvents {
+            closed: self.closed + other.closed,
+            forced_open: self.forced_open + other.forced_open,
+            held_open: self.held_open + other.held_open,
+        }
+    }
+}
+
+/// What the swarm measured of the traffic doors, which open and close
+/// instead of typing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opened {
+    /// Openings driven at every traffic door together.
+    pub openings_sent: u64,
+    /// What the server recorded for the run's doors.
+    pub recorded: DoorEvents,
+    /// The traffic doors' bytes while the doors sat idle.
+    pub idle: Moved,
+    /// The traffic doors' bytes while typing and opening.
+    pub loaded: Moved,
+}
+
 /// What the swarm measured itself, besides the doors' records.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measured {
@@ -136,12 +287,14 @@ pub struct Measured {
     pub duration: Duration,
     /// Entries typed at every door together.
     pub entries_sent: u64,
-    /// While the doors sat idle.
+    /// The typing doors' bytes while the doors sat idle.
     pub idle: Moved,
-    /// While typing.
+    /// The typing doors' bytes while typing.
     pub loaded: Moved,
     /// When every connection was dropped, in a storm.
     pub cut: Option<Instant>,
+    /// Present when the run had traffic doors.
+    pub traffic: Option<Opened>,
 }
 
 /// Every door's record added up.
@@ -176,9 +329,57 @@ pub fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// What the traffic doors did and what the server made of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Traffic {
+    pub doors: usize,
+    pub openings_sent: u64,
+    /// What the server recorded for the run's doors.
+    pub recorded: DoorEvents,
+    /// Per traffic door, before typing started.
+    pub idle: Flow,
+    /// Per traffic door, while typing and opening.
+    pub loaded: Flow,
+}
+
+impl Traffic {
+    fn of(opened: &Opened, doors: usize) -> Traffic {
+        Traffic {
+            doors,
+            openings_sent: opened.openings_sent,
+            recorded: opened.recorded,
+            idle: Flow::per_door_hour(opened.idle, doors),
+            loaded: Flow::per_door_hour(opened.loaded, doors),
+        }
+    }
+
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut rows = vec![
+            ("traffic doors", self.doors.to_string()),
+            ("door openings sent", self.openings_sent.to_string()),
+            ("door closings recorded", self.recorded.closed.to_string()),
+            (
+                "forced opens recorded",
+                self.recorded.forced_open.to_string(),
+            ),
+            ("held opens recorded", self.recorded.held_open.to_string()),
+        ];
+        rows.extend(self.idle.rows([
+            "bytes in per traffic door per hour, idle",
+            "bytes out per traffic door per hour, idle",
+        ]));
+        rows.extend(self.loaded.rows([
+            "bytes in per traffic door per hour, loaded",
+            "bytes out per traffic door per hour, loaded",
+        ]));
+        rows
+    }
+}
+
 /// Everything a load run measured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Summary {
+    /// The doors that type.
     pub doors: usize,
     pub duration_s: u64,
     /// Entries typed: the code and the submit key.
@@ -193,23 +394,32 @@ pub struct Summary {
     /// `None` when no check was answered.
     pub round_trip_ms: Option<RoundTrips>,
     /// Before typing started.
-    pub idle: Rate,
+    pub idle: Flow,
     /// While typing.
-    pub loaded: Rate,
+    pub loaded: Flow,
+    /// Every byte before typing started.
+    pub idle_total: PhaseTotal,
+    /// Every byte while typing.
+    pub loaded_total: PhaseTotal,
     /// Connections as a door after each door's first.
     pub reconnects: u64,
     /// Present when the run dropped every connection at once.
     pub storm: Option<Storm>,
+    /// Present when the run had traffic doors.
+    pub traffic: Option<Traffic>,
 }
 
 impl Summary {
-    /// The summary of a run that `measured` describes, in which each door
-    /// kept one of `records`. Entries the doors did not send as checks
-    /// were typed offline; checks without a reply timed out; every time a
-    /// door came online after its first is a reconnect.
-    pub fn of(measured: &Measured, records: &[DoorRecord]) -> Summary {
-        let totals = Totals::of(records);
-        let doors = records.len();
+    /// The summary of a run that `measured` describes, in which each
+    /// typing door kept one of `typing` and each traffic door one of
+    /// `traffic`. Entries the doors did not send as checks were typed
+    /// offline; checks without a reply timed out; every time a door of
+    /// either kind came online after its first is a reconnect.
+    pub fn of(measured: &Measured, typing: &[DoorRecord], traffic: &[DoorRecord]) -> Summary {
+        let records = [typing, traffic].concat();
+        let opened = measured.traffic.as_ref();
+        let totals = Totals::of(&records);
+        let doors = typing.len();
         Summary {
             doors,
             duration_s: measured.duration.as_secs(),
@@ -219,10 +429,13 @@ impl Summary {
             replies_denied: totals.denied,
             replies_timed_out: totals.checks - totals.allowed - totals.denied,
             round_trip_ms: RoundTrips::of(&totals.round_trips_ms),
-            idle: Rate::per_door_hour(measured.idle.bytes, doors, measured.idle.window),
-            loaded: Rate::per_door_hour(measured.loaded.bytes, doors, measured.loaded.window),
+            idle: Flow::per_door_hour(measured.idle, doors),
+            loaded: Flow::per_door_hour(measured.loaded, doors),
+            idle_total: PhaseTotal::of(measured.idle, opened.map(|opened| opened.idle)),
+            loaded_total: PhaseTotal::of(measured.loaded, opened.map(|opened| opened.loaded)),
             reconnects: totals.reconnects,
             storm: measured.cut.map(|cut| Storm::after(cut, &totals.online_at)),
+            traffic: opened.map(|opened| Traffic::of(opened, traffic.len())),
         }
     }
 
@@ -231,11 +444,19 @@ impl Summary {
     pub fn table(&self) -> String {
         let mut rows = self.counts();
         rows.extend(round_trip_rows(self.round_trip_ms));
-        rows.extend(self.traffic());
+        rows.extend(self.bytes());
+        rows.extend(self.idle_total.rows(&IDLE_TOTAL));
+        rows.extend(self.loaded_total.rows(&LOADED_TOTAL));
+        rows.push(("reconnects", self.reconnects.to_string()));
+        rows.extend(
+            self.traffic
+                .map(|traffic| traffic.rows())
+                .unwrap_or_default(),
+        );
         rows.extend(self.storm.map(storm_rows).unwrap_or_default());
         let lines: Vec<String> = rows
             .iter()
-            .map(|(name, value)| format!("{name:<36}{value:>12}"))
+            .map(|(name, value)| format!("{name:<44}{value:>12}"))
             .collect();
         format!("{}\n{BYTES_NOTE}\n", lines.join("\n"))
     }
@@ -259,26 +480,16 @@ impl Summary {
         ]
     }
 
-    fn traffic(&self) -> Vec<(&'static str, String)> {
-        vec![
-            (
-                "bytes in per door per hour, idle",
-                self.idle.bytes_in.to_string(),
-            ),
-            (
-                "bytes out per door per hour, idle",
-                self.idle.bytes_out.to_string(),
-            ),
-            (
-                "bytes in per door per hour, loaded",
-                self.loaded.bytes_in.to_string(),
-            ),
-            (
-                "bytes out per door per hour, loaded",
-                self.loaded.bytes_out.to_string(),
-            ),
-            ("reconnects", self.reconnects.to_string()),
-        ]
+    fn bytes(&self) -> Vec<(&'static str, String)> {
+        let idle = self.idle.rows([
+            "bytes in per door per hour, idle",
+            "bytes out per door per hour, idle",
+        ]);
+        let loaded = self.loaded.rows([
+            "bytes in per door per hour, loaded",
+            "bytes out per door per hour, loaded",
+        ]);
+        [idle, loaded].concat()
     }
 }
 

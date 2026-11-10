@@ -12,11 +12,11 @@ use swarm::report::Summary;
 use swarm::Options;
 
 const USAGE: &str = "usage: doorcode-swarm --server URL --token TOKEN --doors N --rate R \
---duration SECONDS [--idle SECONDS] [--provisioning PATH] [--broker-host HOST] [--storm] \
-[--json PATH] [--keep]";
+--duration SECONDS [--idle SECONDS] [--traffic-doors N --traffic-rate R] [--open-seconds S] \
+[--forced] [--provisioning PATH] [--broker-host HOST] [--storm] [--json PATH] [--keep]";
 
 /// Flags that take no value.
-const SWITCHES: [&str; 2] = ["--storm", "--keep"];
+const SWITCHES: [&str; 3] = ["--storm", "--keep", "--forced"];
 
 fn main() -> ExitCode {
     let parsed = parse(std::env::args().skip(1).collect());
@@ -56,11 +56,16 @@ fn options(flags: &mut Flags) -> Result<Options, String> {
     let server = flags.required("--server")?;
     let token = flags.required("--token")?;
     let (doors, rate, duration, idle) = numbers(flags)?;
+    let (traffic_doors, traffic_rate, open_seconds) = traffic(flags)?;
     Ok(Options {
         server,
         token,
         doors,
         rate,
+        traffic_doors,
+        traffic_rate,
+        open_for: Duration::from_secs(open_seconds),
+        forced: flags.0.remove("--forced").is_some(),
         duration: Duration::from_secs(duration),
         idle: Duration::from_secs(idle),
         provisioning: flags.0.remove("--provisioning").map(PathBuf::from),
@@ -77,6 +82,17 @@ fn numbers(flags: &mut Flags) -> Result<(usize, u32, u64, u64), String> {
         flags.count("--rate", None)?,
         flags.count("--duration", None)?,
         flags.count("--idle", Some(30))?,
+    ))
+}
+
+/// The traffic doors, their openings per minute, and how long each opening
+/// stays open. The rate is needed only with traffic doors.
+fn traffic(flags: &mut Flags) -> Result<(usize, u32, u64), String> {
+    let doors = flags.whole("--traffic-doors")?;
+    Ok((
+        doors,
+        flags.count("--traffic-rate", (doors == 0).then_some(1))?,
+        flags.count("--open-seconds", Some(3))?,
     ))
 }
 
@@ -117,6 +133,15 @@ impl Flags {
         count
             .filter(|count| *count > T::default())
             .ok_or_else(|| format!("{name} needs a whole number above zero"))
+    }
+
+    /// A whole number, or 0 when the flag is absent.
+    fn whole(&mut self, name: &str) -> Result<usize, String> {
+        let Some(text) = self.0.remove(name) else {
+            return Ok(0);
+        };
+        text.parse()
+            .map_err(|_| format!("{name} needs a whole number"))
     }
 
     /// Fails on a flag nothing took.

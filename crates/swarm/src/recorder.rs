@@ -63,6 +63,11 @@ impl Record {
         online(&self.last)
     }
 
+    /// Whether the door's timeline puts it in open mode now.
+    pub(crate) fn open_mode(&self) -> bool {
+        self.last.mode == Mode::Open
+    }
+
     fn observe(&mut self, now: &StatusReport, at: Instant) {
         let before = std::mem::replace(&mut self.last, now.clone());
         if now.last_check != before.last_check {

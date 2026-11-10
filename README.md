@@ -51,11 +51,12 @@ against a development server, such as the server's own compose stack:
 
     cargo build -p swarm
     target/debug/doorcode-swarm --server http://localhost:8080 --token "$TOKEN" \
-      --doors 5 --rate 20 --duration 60 --storm
+      --doors 5 --rate 20 --duration 60 --traffic-doors 20 --traffic-rate 6 --storm
 
 The integration test prints one `PASS`, `FAIL`, or `SKIP` line per step of
 the controller contract; the load tool prints check latency percentiles,
-traffic per door, and recovery after a dropped connection. See
+traffic per door and in total, the door events the server recorded for
+the doors it opens, and recovery after a dropped connection. See
 [`docs/testing.md`](docs/testing.md).
 
 ## Build and flash the firmware

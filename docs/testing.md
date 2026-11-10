@@ -122,7 +122,11 @@ A real door downloads only over HTTPS, verified against its broker's CA
 reports how the server keeps up. Each door is the real controller
 application on its own thread with its own desktop connectors (the same
 ones `doorcode-host` uses), its own data directory, and a random hardware
-id. Like the integration test, it creates entities on the server and
+id. Typing doors have a code typed at them; traffic doors, from
+`--traffic-doors`, never type and are opened and closed instead, so a run
+can be many doors with lots of opening and closing and some codes entered
+at the other doors. Like the integration test, it creates entities on the
+server and
 deletes them again, and it drives real traffic through the server's
 broker and database. **Run it only against a development server**, never
 against a server that runs real doors.
@@ -132,26 +136,37 @@ against a server that runs real doors.
 1. Takes the provisioning file from `--provisioning`, or downloads it from
    `GET /api/v1/firmware/provisioning`, with the broker host replaced when
    `--broker-host` is given.
-2. Starts the doors, waits until every one asks to enroll, creates a door
-   named `swarm-<hardware id>` for each through the API, approves it as
-   that door, and waits until every door is online.
-3. Creates a zone of all its doors, a group, an access rule for the group
-   over the zone on the built-in Always schedule, and one user in the
-   group with a new eight-digit code.
-4. Leaves the doors idle for `--idle` seconds and counts their traffic.
-5. Types the code and the submit key at every door, `--rate` times per
-   minute on average for `--duration` seconds. Each door starts at a
-   random point in its first interval and waits half to one and a half
-   intervals between entries, so the doors do not type in lockstep.
-6. With `--storm`, halfway through the typing, drops every door's broker
-   connection at once without an MQTT DISCONNECT, as a network outage
-   would; the broker publishes every door's last will, and the doors
-   reconnect on their own backoff.
-7. Waits five seconds for late replies (and after a storm up to two
-   minutes for every door to come back), stops the doors, and, unless
-   `--keep`, deletes the doors, the user, the zone, the group, and the
-   rule. Cleanup also runs when a step fails or the run is interrupted
-   with Ctrl-C.
+2. Starts the typing and the traffic doors, waits until every one asks to
+   enroll, creates a door named `swarm-<hardware id>` for each through the
+   API, approves it as that door, and waits until every door is online.
+3. Creates a zone of the typing doors, a group, an access rule for the
+   group over the zone on the built-in Always schedule, and one user in
+   the group with a new eight-digit code.
+4. Unless `--forced`, puts the traffic doors in a zone of their own that
+   is in open mode on the built-in Always schedule, and waits until every
+   traffic door is in open mode, so its openings are ordinary opened and
+   closed door events. With `--forced` the traffic doors are in no zone and
+   stay locked, so every opening is a forced-open alert.
+5. Leaves the doors idle for `--idle` seconds and counts their traffic.
+6. Types the code and the submit key at every typing door, `--rate` times
+   per minute on average for `--duration` seconds, and at the same time
+   opens every traffic door `--traffic-rate` times per minute on average,
+   each opening for `--open-seconds`. An opening is what the sensor sees
+   and reports, as `doorcode-host`'s `POST /door` does. Each door starts at
+   a random point in its first interval and waits half to one and a half
+   intervals between entries or openings, so the doors do not act in
+   lockstep.
+7. With `--storm`, halfway through, drops every door's broker connection
+   at once without an MQTT DISCONNECT, as a network outage would; the
+   broker publishes every door's last will, and the doors reconnect on
+   their own backoff.
+8. Waits five seconds for late replies (and after a storm up to two
+   minutes for every door to come back). With traffic doors, counts the
+   door events the server recorded for the run's doors through
+   `GET /api/v1/events`. Then it stops the doors and, unless `--keep`,
+   deletes the doors, the user, the zones, the group, and the rule.
+   Cleanup also runs when a step fails or the run is interrupted with
+   Ctrl-C.
 
 A run of 60 seconds therefore takes about two minutes: enrollment, 30
 seconds idle, the typing, and the grace period.
@@ -160,15 +175,19 @@ seconds idle, the typing, and the grace period.
 
     cargo build -p swarm
     target/debug/doorcode-swarm --server http://localhost:8080 --token "$TOKEN" \
-      --doors 5 --rate 20 --duration 60 --storm
+      --doors 5 --rate 20 --duration 60 --traffic-doors 20 --traffic-rate 6 --storm
 
 | Flag | Meaning |
 | --- | --- |
 | `--server URL` | The server's address. |
 | `--token TOKEN` | A personal API token of an administrator (see "A token" above). |
-| `--doors N` | How many doors to run. |
-| `--rate R` | Entries per door per minute. |
-| `--duration D` | How many seconds to type for. |
+| `--doors N` | How many typing doors to run. |
+| `--rate R` | Entries per typing door per minute. |
+| `--duration D` | How many seconds to type and open for. |
+| `--traffic-doors N` | How many traffic doors to run besides; 0 by default. |
+| `--traffic-rate R` | Openings per traffic door per minute; needed with traffic doors. |
+| `--open-seconds S` | How long each opening stays open; 3 by default. |
+| `--forced` | Leave the traffic doors locked, so every opening is a forced-open alert. |
 | `--idle SECONDS` | How long the doors sit idle before typing starts; 30 by default. |
 | `--provisioning PATH` | The provisioning file; downloaded from the server when absent. |
 | `--broker-host HOST` | Connect to this broker host instead of the one the provisioning file names. |
@@ -186,15 +205,25 @@ output.
 
 | Row | Meaning |
 | --- | --- |
-| doors, duration | As given. |
+| doors, duration | As given; doors are the typing doors. |
 | entries sent | Entries typed: the code and the submit key. |
 | entries typed offline | Entries typed while the door was not connected; the door denies those without asking the server. |
 | replies allowed, denied | Replies that answered a check. With one valid code every reply should allow. |
 | replies timed out | Checks that no reply answered by the end of the run. |
-| check round trip p50, p95, p99, max | From the moment the door published a check until it took the matching reply, in milliseconds, as the door's status reports show them; nearest-rank percentiles over every answered check. |
-| bytes in / out per door per hour, idle | MQTT bytes from and to the broker during the idle time, per door, scaled to an hour. |
+| check round trip p50, p95, p99, max | Of the typing doors' checks: from the moment the door published a check until it took the matching reply, in milliseconds, as the door's status reports show them; nearest-rank percentiles over every answered check. |
+| bytes in / out per door per hour, idle | MQTT bytes from and to the broker during the idle time, per typing door, scaled to an hour. |
 | bytes in / out per door per hour, loaded | The same while typing, including a storm's reconnections. |
-| reconnects | Connections as a door after each door's first, over the whole run. |
+| total bytes in / out, idle or loaded, typing doors | Every MQTT byte the typing doors moved from and to the broker in that phase. |
+| total bytes in / out, idle or loaded, traffic doors | The same for the traffic doors; 0 without them. |
+| total bytes in / out, idle or loaded, all doors | The two together. |
+| bytes in / out per second, idle or loaded, all doors | Every door's bytes in that phase per second of it. |
+| reconnects | Connections as a door after each door's first, typing and traffic doors alike, over the whole run. |
+| traffic doors | As given; this row and the ones below it to the storm's appear only with traffic doors. |
+| door openings sent | Openings driven at every traffic door together. |
+| door closings recorded | Door events the server recorded for the run's doors of a door closing. Each opening ends in one. |
+| forced opens recorded | Forced-open alarms the server recorded for the run's doors; with `--forced` one per opening, else none. |
+| held opens recorded | Held-open alarms the server recorded for the run's doors, for an opening longer than the server allows. |
+| bytes in / out per traffic door per hour, idle or loaded | As the typing doors' rows, per traffic door. |
 | storm: last door back online after | From the drop until the last door that came back was online again. |
 | storm: doors never back | Doors not online again two minutes after the drop. |
 

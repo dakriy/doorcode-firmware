@@ -126,6 +126,13 @@ impl Door {
         self.push(&events);
     }
 
+    /// Opens or closes the door: the sensor sees it, and reports the
+    /// change, as the host's control API does.
+    pub(crate) fn set_open(&self, open: bool) {
+        self.board.door.control().set_open(open);
+        self.push(&[Event::Door { open }]);
+    }
+
     /// Drops the door's broker connection as a lost network would.
     pub(crate) fn cut(&self) {
         if let Some(handles) = self.handles().as_ref() {
