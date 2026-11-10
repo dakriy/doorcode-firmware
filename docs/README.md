@@ -22,7 +22,8 @@ live outside the repository.
 - `mesh.md`: how doors far from an access point hop through other doors,
   and the telemetry that shows it.
 - `testing.md`: the integration test that runs a desktop door against a
-  development server, and the load tool that runs many.
+  development server, the load tool that runs many, and the bench files
+  that drive a real board.
 
 The firmware workspace's own README, `../firmware/README.md`, covers
 building and flashing in the container, provisioning, the partition table,

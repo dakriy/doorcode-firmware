@@ -1,0 +1,14 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+[0;32mI (31) boot: ESP-IDF v5.3.2 2nd stage bootloader[0m
+[0;32mI (178) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (412) app_init: App version:      2.0.0[0m
+[0;32mI (902) wifi:mode : sta (02:00:00:00:00:01)[0m
+[0;32mI (3120) wifi:connected with bench-ap, aid = 1, channel 6, BW20, bssid = 02:00:00:00:00:02[0m
+[0;32mI (4210) esp_netif_handlers: sta ip: 192.0.2.40, mask: 255.255.255.0, gw: 192.0.2.1[0m
+[0;32mI (4890) doorcode: enrolling as 0200000000aa[0m
+[0;33mW (9000) doorcode: broker connection refused, retrying[0m
+[0;31mE (12010) task_wdt: Task watchdog got triggered. The following tasks did not reset the watchdog in time:[0m
+Guru Meditation Error: Core  0 panic'ed (LoadProhibited). Exception was unhandled.
+Backtrace: 0x400d1234:0x3ffb1f20 0x400d5678:0x3ffb1f40

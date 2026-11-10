@@ -16,3 +16,6 @@
 /firmware/provisioning.json
 # Release images, signed outside the repository.
 /dist/
+/test.env
+# Bytecode from checking the bench helper with py_compile.
+__pycache__/

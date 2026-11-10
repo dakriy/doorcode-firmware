@@ -198,3 +198,56 @@ output.
 
 Byte counts are MQTT packet bytes, not TCP or TLS framing; the summary
 says so. The broker's TCP and TLS overhead comes on top.
+
+# Bench
+
+The bench files drive a real board on a USB serial port against a
+development server. They read their settings from one file and talk to the
+board through one helper.
+
+| File | What it is |
+| --- | --- |
+| `test.env.example` | Every bench setting, with a comment each. Copy it to `test.env` at the repository root, which is never committed, and fill it in. |
+| `scripts/bench-env.sh` | Sourced by the bench scripts. Loads `test.env` when present, applies the defaults, and `bench_env_require` names every missing or unusable setting and exits 2. |
+| `scripts/bench-serial.py` | Resets the board and watches its serial log. |
+| `scripts/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/fixtures/bench-boot.txt`. |
+
+## Settings
+
+| Key | Meaning | Default |
+| --- | --- | --- |
+| `DOORCODE_SERVER` | The server's base address. | required |
+| `DOORCODE_TOKEN` | A personal API token of an administrator allowed to manage firmware (see "A token" above). | required |
+| `DOORCODE_SIGNING_KEY` | The private signing key's PEM file, kept outside the repository (`firmware-signing.md`). | required for signed releases |
+| `DOORCODE_SERIAL_PORT` | The board's serial port. | `/dev/ttyUSB0` |
+| `DOORCODE_DOOR_NAME` | The name of the door created for the board. | `Bench board` |
+| `DOORCODE_TIMEOUT_S` | Seconds each step waits; firmware updates wait three times as long. | `60` |
+
+A bench script's command-line flags override the file.
+
+## The serial helper
+
+The helper needs pyserial, which esptool's environment carries:
+
+    uvx --from esptool@5.6.0 python scripts/bench-serial.py --port /dev/ttyUSB0 reset
+    uvx --from esptool@5.6.0 python scripts/bench-serial.py --port /dev/ttyUSB0 \
+      watch --seconds 60 --until 'sta ip:' --fail-on-crash --log bench.log
+
+`reset` releases DTR, holds RTS for 100 ms, and releases it, which resets
+the board. Opening the port for `watch` leaves both lines released, so
+watching does not reset the board.
+
+`watch` prints the board's log at 115200 baud with its colour codes
+removed, as it arrives, and with `--log FILE` appends the same lines to
+`FILE`. It stops at the first line that matches the regular expression
+`--until`, prints it last, and exits 0. It exits 1 when `--seconds` pass
+first. With `--fail-on-crash` it exits 2 at the first line holding
+`Guru Meditation Error`, `Backtrace:`, `abort()`, or
+`Task watchdog got triggered`. A bad command line exits 3.
+
+`--from-file FILE` in place of `--port` reads a recorded log instead of the
+board; the end of the file counts as the time running out. The self-test
+uses it:
+
+    scripts/bench-serial-selftest.sh
+    BENCH_PYTHON='uvx --from esptool@5.6.0 python' scripts/bench-serial-selftest.sh
