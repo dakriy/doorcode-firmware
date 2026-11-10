@@ -214,6 +214,7 @@ board through one helper.
 | `scripts/tests/bench-serial.py` | Resets the board and watches its serial log. |
 | `scripts/tests/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/tests/fixtures/bench-boot.txt`. |
 | `scripts/tests/bench-test.sh` | Runs the board against the server and checks it end to end (below). |
+| `scripts/tests/hardware-walkthrough.sh` | Walks a person at an installed door through its hardware (below). |
 
 ## Settings
 
@@ -359,3 +360,51 @@ left in place. A board that is already a door does not print
 provisions it afresh. The board keeps the image of step 9, so a next run
 with `--no-flash` releases the patch versions above that one.
 
+## The hardware walkthrough
+
+`scripts/tests/hardware-walkthrough.sh` checks a door's strike, sensor, and
+keypad with a person standing at it. The door must already be enrolled and
+online: the script flashes nothing and uses no serial port, so it runs
+against a door in service and the server it belongs to. It prompts on the
+terminal, and checks what the server can see through the API; where only
+the person can tell, such as whether the strike released, it asks. Enter
+(or `y`) answers yes, `n` fails the step, and `s` skips it.
+
+    scripts/tests/hardware-walkthrough.sh --door "Front door"
+
+The door comes from `--door` (an id, or a name ignoring case) or
+`DOORCODE_DOOR_NAME`. `--skip-reboot` leaves out the reboot, `--keep`
+leaves the temporary users and access in place, and `--yes` skips the
+confirmation that names the door before anything is changed.
+
+1. **door**: the door is enrolled and online; its version, door state,
+   signal, uptime, and free memory are shown.
+2. **setup**: the door's `telemetry_interval_s` override is set to `"5"`,
+   so the server sees the sensor change while the strike is released,
+   when the door sends no `opened` event. A user with a random code gets
+   an access rule, at all times, over a new zone holding only this door,
+   and a second user with another code is a door commander.
+3. **sensor**: the server sees the door closed, opened by hand, and closed
+   again. A forced-open alarm the opening raised is shown, not judged.
+4. **open**: `POST /api/v1/doors/{id}/open` answers with an allowed event,
+   and the person sees the strike release and lock again.
+5. **code**: the user's code and `#` give an allowed check for that user;
+   the strike releases, the server sees the door open and close, and the
+   strike locks. **wrong-code**: another code is denied and the strike
+   stays locked.
+6. **locked-command**: the commander's `<code>*0021#` makes a one-minute
+   locked override; the user's code is then denied and the strike stays
+   locked; `<code>*000#` ends the override. **open-command**:
+   `<code>*0011#` makes a one-minute open override, in which any key
+   releases the strike; ending it through the API locks the door again.
+   A keypad command typed in open mode never reaches the server.
+7. **free-memory**: `free_bytes` at the end is at most 10% below the start.
+8. **reboot**: after `POST /api/v1/doors/{id}/reboot` the door is online
+   again on a new connection within twice `DOORCODE_TIMEOUT_S`, and the
+   strike stayed locked through it.
+
+On any exit the script ends every override it made, leaving any that was
+in force before the run, puts the door's configuration overrides back, and
+unless `--keep` deletes the users, groups, zone, and rule. The server keeps
+a deleted user, refused everywhere, so the events still name them: each run
+leaves two among the deleted users, named `walkthrough-<random>`.

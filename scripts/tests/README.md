@@ -17,6 +17,7 @@ they find the repository from their own path.
 | --- | --- |
 | `integration-test.sh` | One desktop `doorcode-host` door against a server. |
 | `bench-test.sh` | The bench board, flashed over USB, against a server. |
+| `hardware-walkthrough.sh` | Walks a person at an installed door through its strike, sensor, and keypad. |
 | `bench-serial-selftest.sh` | Checks the serial helper and the settings without a board or a server. |
 | `bench-serial.py` | The serial helper: resets the board and watches its log. |
 | `bench-env.sh` | Sourced by the bench scripts: loads `test.env` and checks the settings. |
@@ -104,6 +105,46 @@ chooses them for the door, and changes the door's overrides and the
 back, and unless `--keep` puts the door's firmware choice back, deletes
 the uploaded firmware, and deletes the door when the run created or
 restored it. A door that existed before the run stays.
+
+## hardware-walkthrough.sh
+
+Walks a person at a door through its hardware, prompting on the terminal
+and checking each outcome through the server's API: the door sensor, the
+open command and the strike, a temporary user's code allowed and a wrong
+code denied, the keypad commands for a locked and an open override, the
+free memory, and a reboot. The door must already be enrolled, installed,
+and online; nothing is flashed and no serial port is needed, so it works on
+a door in service, against the server that door belongs to.
+
+Needs: an administrator's API token, someone at the door, a terminal, and
+`bash`, `curl`, and `jq`. The server, token, door, and timeout come from
+`test.env`; flags override them.
+
+    scripts/tests/hardware-walkthrough.sh --door "Front door"
+    scripts/tests/hardware-walkthrough.sh --door 12 --skip-reboot
+
+| Flag | Meaning |
+| --- | --- |
+| `--door NAME\|ID` | The door, by id or by name ignoring case, instead of `DOORCODE_DOOR_NAME`. |
+| `--skip-reboot` | Do not reboot the door. |
+| `--keep` | Leave the temporary users, groups, zone, and rule, and print their ids and codes. |
+| `--yes` | Start without asking to confirm the door. |
+| `--server URL`, `--token TOKEN`, `--timeout SECONDS` | `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_TIMEOUT_S`. |
+
+At each prompt Enter (or `y`) means done or seen, `n` means not seen,
+which fails the step, and `s` skips it. Results are the `PASS`/`FAIL`/`SKIP`
+lines on standard output; the instructions and questions go to the
+terminal.
+
+On the server it sets the door's `telemetry_interval_s` override to `"5"`,
+and creates a user with a code in a group with an access rule over a new
+zone holding only this door, and a door commander in a second group. The
+keypad commands make a locked and an open override of one minute each. On
+any exit it ends the overrides it made (never one in force before the run),
+puts the door's configuration overrides back, and unless `--keep` deletes
+the users, groups, zone, and rule. The server keeps deleted users, refused
+everywhere, so their events keep a name: each run leaves two among the
+deleted users, named `walkthrough-<random>`.
 
 ## bench-serial-selftest.sh
 
