@@ -211,6 +211,7 @@ board through one helper.
 | `scripts/bench-env.sh` | Sourced by the bench scripts. Loads `test.env` when present, applies the defaults, and `bench_env_require` names every missing or unusable setting and exits 2. |
 | `scripts/bench-serial.py` | Resets the board and watches its serial log. |
 | `scripts/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/fixtures/bench-boot.txt`. |
+| `scripts/bench-test.sh` | Runs the board against the server and checks it end to end (below). |
 
 ## Settings
 
@@ -251,3 +252,68 @@ uses it:
 
     scripts/bench-serial-selftest.sh
     BENCH_PYTHON='uvx --from esptool@5.6.0 python' scripts/bench-serial-selftest.sh
+
+## The bench run
+
+`scripts/bench-test.sh` flashes the board, makes it a door on the server,
+and checks it through the server's API and the board's serial log. Like the
+integration test it creates a door and changes it: **run it only against a
+development server.** It needs `bash`, `curl`, `jq`, `uvx`, `make`, and
+`docker`, the settings `DOORCODE_SERVER` and `DOORCODE_TOKEN`, and the board
+on `DOORCODE_SERIAL_PORT`.
+
+    scripts/bench-test.sh --dry-run     # the steps and settings; touches nothing
+    scripts/bench-test.sh               # flash and run every step
+    scripts/bench-test.sh --no-flash    # the board already runs the image
+
+| Flag | Meaning |
+| --- | --- |
+| `--no-flash` | Skip downloading the provisioning file, building, flashing, and provisioning. The board must already run the image and wait to enroll. |
+| `--keep` | Leave the door on the server, and print its id. |
+| `--dry-run` | Print the steps and the settings in use, and exit without touching the port, the server, or the container. |
+| `--server URL`, `--token TOKEN`, `--port PORT`, `--door-name NAME`, `--timeout SECONDS` | Override `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_SERIAL_PORT`, `DOORCODE_DOOR_NAME`, and `DOORCODE_TIMEOUT_S`. |
+| `--help` | Print the usage. |
+
+Each step prints `PASS`, `FAIL`, or `SKIP` with its name and a reason, and
+the exit code is non-zero when any step fails. Every wait ends after
+`DOORCODE_TIMEOUT_S` seconds, polling the API every two seconds. When the
+boot or the enrollment fails, the script stops there. From the reset on,
+one copy of the serial helper copies the board's log into
+`target/bench/serial-<date>-<time>.log`, which the script names when it
+ends; a line holding crash text, or the Wi-Fi driver starting as an access
+point, fails the step that is waiting.
+
+1. **boot**: the provisioning file from `GET /api/v1/firmware/provisioning`
+   is written to `firmware/provisioning.json` (replacing the one there),
+   then `make firmware-build`, `make firmware-flash FLASH_MONITOR=` (no
+   monitor, which needs a terminal), and `make firmware-provision`. The
+   board is reset, and its log shows `App version:`, `wifi:mode : sta`,
+   `wifi:connected with`, `sta ip:`, and `enrolling as <hardware id>`. The
+   hardware id comes from that last line.
+2. **enroll**: the hardware id appears in `GET /api/v1/enrollments`. The
+   door named `DOORCODE_DOOR_NAME` is used when it exists, restored when it
+   is deleted, and created otherwise; the board is approved as it and the
+   door comes online.
+3. **telemetry**: a new sample has a signal, an uptime, free memory, and
+   mesh layer 0 with no parent and no children.
+4. **open**: `POST /api/v1/doors/{id}/open` answers with an allowed event,
+   and the board logs `command open`.
+5. **override**: with the override `telemetry_interval_s` `"10"` (override
+   values are strings), the sample after the next one, already scheduled
+   on the old interval, comes within 15 s. **override-restore**: putting
+   the door's previous overrides back restores its effective configuration.
+6. **reboot**: after `POST /api/v1/doors/{id}/reboot` the board logs `rst:`
+   and `sta ip:`, and the door is online again on a new connection. The
+   line gives the seconds it took.
+7. **rotate**: after `POST /api/v1/doors/{id}/credentials/rotate` the board
+   connects with new credentials, the old ones are revoked, and the door is
+   online. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke`
+   the door goes offline, the board enrolls again, is approved into the
+   same door, and comes online.
+
+On any exit, unless `--keep`, the script deletes the door when it created
+or restored it. Deleting a door revokes its credentials, so the board
+waits to enroll again, ready for the next run with `--no-flash`. A door
+that existed before the run is left in place. A board that is already a
+door does not print `enrolling as`: delete its door, or run without
+`--no-flash`, which provisions it afresh.

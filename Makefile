@@ -74,12 +74,14 @@ firmware-check:
 		migrate_cargo clippy -- -D warnings && cargo fmt --check'
 
 # The built bootloader, not espflash's own, so app rollback is on; otadata
-# is erased so the board boots the image just written to ota_0.
+# is erased so the board boots the image just written to ota_0. The monitor
+# needs a terminal; FLASH_MONITOR= flashes without it.
+FLASH_MONITOR ?= --monitor
 firmware-flash:
 	$(FIRMWARE) --device $(FIRMWARE_PORT) '. /repo/scripts/firmware-env.sh && \
 		espflash flash --chip esp32 --port $(FIRMWARE_PORT) \
 		--bootloader "$$firmware_bootloader" --partition-table "$$firmware_partitions" \
-		--erase-parts otadata --monitor "$$firmware_elf"'
+		--erase-parts otadata $(FLASH_MONITOR) "$$firmware_elf"'
 
 ## firmware-provision: writes firmware/provisioning.json into the NVS partition on FIRMWARE_PORT.
 firmware-provision:
