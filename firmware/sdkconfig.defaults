@@ -1,4 +1,7 @@
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
+# The application's event loop runs on the main task and moves the door's
+# whole state, configuration and timeline included, through several call
+# frames per event, about 10 KB in one frame; 8 KB overflowed into the heap.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32000
 CONFIG_FREERTOS_HZ=1000
 
 # Flash and partitions: 4 MB, two OTA slots (partitions.csv).

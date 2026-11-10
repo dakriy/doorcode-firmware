@@ -61,11 +61,20 @@ struct Station {
 
 impl Station {
     fn run(mut self) {
-        if let Err(error) = self.wifi.start() {
+        if let Err(error) = self.start() {
             log::error!("starting Wi-Fi: {error}");
             return;
         }
         threads::repeat(|| self.check())
+    }
+
+    /// Starts the driver as a station and nothing else. Without a client
+    /// configuration first, the driver comes up as an access point with a
+    /// DHCP server, and a station scan fails.
+    fn start(&mut self) -> Result<(), EspError> {
+        self.wifi
+            .set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
+        self.wifi.start()
     }
 
     /// Looks at the link once, and returns how long to wait before the next
