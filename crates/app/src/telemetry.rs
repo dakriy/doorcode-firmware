@@ -1,6 +1,6 @@
 //! What the door tells the server about itself while connected: telemetry
 //! at the configured interval, once that it started, and each time it opens
-//! or closes outside an open span. Nothing is kept to send later.
+//! or closes. Nothing is kept to send later.
 
 use connectors::{Level, StartReason};
 use protocol::{DoorEvent, Telemetry};

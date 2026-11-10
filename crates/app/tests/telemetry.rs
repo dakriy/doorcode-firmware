@@ -1,6 +1,6 @@
 //! Entrypoint suite for what the door tells the server about itself while
 //! connected: telemetry at the configured interval, that it started, and
-//! the door opening and closing outside open spans.
+//! the door opening and closing.
 
 use app::Counters;
 use connectors::{Event, Level, Mesh, StartReason};
@@ -18,6 +18,14 @@ const IN_OPEN_SPAN: i64 = 1_793_010_000;
 /// A door that comes online at once, sees `events`, and stops at `stop_ms`.
 fn online_until(stop_ms: u64, events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
     StubConnectors::enrolled(script_online_until(stop_ms, events))
+}
+
+/// Like `online_until`, with the clock at a time inside `open_span`.
+fn online_at_open_span_until(
+    stop_ms: u64,
+    events: impl IntoIterator<Item = (u64, Event)>,
+) -> StubConnectors {
+    StubConnectors::enrolled(script_online_until(stop_ms, events).at_unix(IN_OPEN_SPAN))
 }
 
 fn script_online_until(stop_ms: u64, events: impl IntoIterator<Item = (u64, Event)>) -> StubEvents {
@@ -451,8 +459,7 @@ fn a_start_for_any_other_reason_is_said_as_unknown() {
 #[test]
 fn the_start_is_said_inside_an_open_span_too() {
     let events = [(0, timeline_for(7, &open_span()))];
-    let connectors =
-        StubConnectors::enrolled(script_online_until(10, events).at_unix(IN_OPEN_SPAN));
+    let connectors = online_at_open_span_until(10, events);
 
     app::run(&connectors).unwrap();
 
@@ -580,30 +587,48 @@ fn a_door_open_when_the_controller_started_closes_without_saying_how_long() {
 }
 
 #[test]
-fn a_door_opened_in_an_open_span_and_closed_after_it_closes_without_saying_how_long() {
+fn a_door_opened_in_an_open_span_and_closed_after_it_says_how_long_it_was_open() {
     let events = [
         (0, timeline_for(7, &open_span())),
         (200, Event::Door { open: true }),
         (300, timeline_for(7, &Timeline::default())),
-        (400, Event::Door { open: false }),
+        (450, Event::Door { open: false }),
     ];
-    let connectors =
-        StubConnectors::enrolled(script_online_until(401, events).at_unix(IN_OPEN_SPAN));
+    let connectors = online_at_open_span_until(451, events);
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![started(), closed(None)]);
+    assert_eq!(
+        door_events(&connectors),
+        vec![started(), opened(true), closed(Some(250))]
+    );
 }
 
 #[test]
-fn inside_an_open_span_the_door_says_nothing_of_opening_and_it_is_counted() {
+fn a_door_opened_before_an_open_span_and_closed_in_it_says_how_long_it_was_open() {
+    let events = [
+        (200, Event::Door { open: true }),
+        (300, timeline_for(7, &open_span())),
+        (650, Event::Door { open: false }),
+    ];
+    let connectors = online_at_open_span_until(651, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        door_events(&connectors),
+        vec![started(), opened(false), closed(Some(450))]
+    );
+}
+
+#[test]
+fn inside_an_open_span_the_door_says_it_opened_unlocked_and_closed_and_it_is_counted() {
     let events = [
         (0, timeline_for(7, &open_span())),
         (200, Event::Door { open: true }),
         (300, Event::Door { open: false }),
     ];
-    let connectors =
-        StubConnectors::enrolled(script_online_until(1001, events).at_unix(IN_OPEN_SPAN));
+    let connectors = online_at_open_span_until(1001, events);
 
     app::run(&connectors).unwrap();
 
@@ -612,6 +637,8 @@ fn inside_an_open_span_the_door_says_nothing_of_opening_and_it_is_counted() {
         vec![
             door_online_status(),
             door_started(),
+            door_event_sent(opened(true)),
+            door_event_sent(closed(Some(100))),
             telemetry_sent(Telemetry {
                 opens: 1,
                 ..quiet_report(1)

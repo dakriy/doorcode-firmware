@@ -117,8 +117,9 @@ Every field is always sent. Nothing is kept to send later.
 ## Door events
 
 The door publishes `opened` and `closed` on `doorcode/doors/<id>/event`,
-not retained, when the door sensor changes outside an open span and the
-door is connected. Nothing is kept to send later.
+not retained, when the door sensor changes and the door is connected, in
+an open span too, so the server shows the door's state at once in open
+mode. Nothing is kept to send later.
 
 It publishes `started` on the same topic once after it starts: the first
 time it comes online as a door, right after its online status, in an open
@@ -130,8 +131,8 @@ restarts and why they happened.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `event` | text | `started`, `opened`, or `closed`. |
-| `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Left out of `closed` and `started`. |
-| `open_ms` | uint | On `closed` only: how long the door was open, in milliseconds on the door's own monotonic clock, from the sensor seeing it open to seeing it closed. Sent only when the door saw the opening itself, since it started and outside an open span, whether or not it was connected then. Left out when the door was already open when it started, or opened during an open span and closed after it ended. Never on `opened` or `started`. |
+| `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Always true during an open span, when the door is meant to be opened. Left out of `closed` and `started`. |
+| `open_ms` | uint | On `closed` only: how long the door was open, in milliseconds on the door's own monotonic clock, from the sensor seeing it open to seeing it closed. Sent whenever the door saw the opening itself since it started, whether or not it was connected then, and whether it opened or closed in an open span or outside one. Left out when the door was already open when it started. Never on `opened` or `started`. |
 | `reason` | text | On `started` only, always: why the door started. `power_on` (power was applied), `software` (a restart the firmware asked for: a reboot command, an update, or a revert), `panic` (the firmware crashed), `watchdog` (any of the watchdogs reset it), `brownout` (the supply voltage dropped too low), `external` (the reset pin), or `unknown` for anything else. A door run on a desktop always says `power_on`. Left out of `opened` and `closed`. |
 
 The door reports the fact only; whether an opening while locked is an

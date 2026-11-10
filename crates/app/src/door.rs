@@ -43,9 +43,8 @@ pub(crate) struct Door {
     failures: u32,
     gate: Gate,
     tally: Tally,
-    /// When the door opened outside an open span, as the sensor saw it;
-    /// `None` while it is closed, and while it is open since before the
-    /// door started or since an open span.
+    /// When the door opened, as the sensor saw it; `None` while it is
+    /// closed, and while it is open since before the door started.
     opened_at_ms: Option<u64>,
     /// The restart a reboot command asked for, waiting for its ack to be
     /// acknowledged.
@@ -333,31 +332,26 @@ impl Door {
     }
 
     /// Locks the strike when the door opens, counts the opening, and says
-    /// so to the server while online and outside an open span, with
-    /// whether the door was unlocked as it moved, taken before the lock.
+    /// so to the server while online, with whether the door was unlocked
+    /// as it moved, taken before the lock. In an open span the door is
+    /// meant to be opened, so an opening there is always unlocked.
     fn door_moved(&mut self, device: &Device<'_>, open: bool) {
-        let unlocked = self.gate.is_unlocked(device);
+        let in_open_span = self.mode(device) == Mode::Open;
+        let unlocked = in_open_span || self.gate.is_unlocked(device);
         self.gate.door_moved(device, open);
         self.tally.door_moved(open);
-        let in_open_span = self.mode(device) == Mode::Open;
-        let message = self.door_event(device.now_ms(), open, unlocked, in_open_span);
-        if self.is_online() && !in_open_span {
+        let message = self.door_event(device.now_ms(), open, unlocked);
+        if self.is_online() {
             telemetry::send_door_event(device, self.credentials.door_id, &message);
         }
     }
 
-    /// The door event for the door moving at `now_ms`. An opening outside
-    /// an open span starts the timing, online or not; the closing says how
-    /// long the door was open when its opening was timed.
-    fn door_event(
-        &mut self,
-        now_ms: u64,
-        open: bool,
-        unlocked: bool,
-        in_open_span: bool,
-    ) -> DoorEvent {
+    /// The door event for the door moving at `now_ms`. An opening starts
+    /// the timing, online or not; the closing says how long the door was
+    /// open when its opening was timed.
+    fn door_event(&mut self, now_ms: u64, open: bool, unlocked: bool) -> DoorEvent {
         if open {
-            self.opened_at_ms = (!in_open_span).then_some(now_ms);
+            self.opened_at_ms = Some(now_ms);
             return telemetry::opened(unlocked);
         }
         let open_ms = self.opened_at_ms.take().map(|at_ms| now_ms - at_ms);
