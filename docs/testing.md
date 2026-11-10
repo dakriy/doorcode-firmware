@@ -283,7 +283,8 @@ on `DOORCODE_SERIAL_PORT`, and for the firmware updates
 Each step prints `PASS`, `FAIL`, or `SKIP` with its name and a reason, and
 the exit code is non-zero when any step fails. Every wait ends after
 `DOORCODE_TIMEOUT_S` seconds, and a firmware update's after three times
-that, polling the API every two seconds. When the
+that, polling the API every two seconds; a start that does not come in
+that time fails its step, naming the event it looked after. When the
 boot or the enrollment fails, the script stops there. From the reset on,
 one copy of the serial helper copies the board's log into
 `target/bench/serial-<date>-<time>.log`, which the script names when it
@@ -300,7 +301,11 @@ point, fails the step that is waiting.
 2. **enroll**: the hardware id appears in `GET /api/v1/enrollments`. The
    door named `DOORCODE_DOOR_NAME` is used when it exists, restored when it
    is deleted, and created otherwise; the board is approved as it and the
-   door comes online.
+   door comes online. **boot-started**: `GET /api/v1/events` records a
+   start of the door (type `door`, reason `started`) newer than the
+   door's newest event before the approval. Its reason is shown, not
+   judged: the reset of step 1 goes through the reset pin, which the ESP32
+   may report as a power on.
 3. **telemetry**: a new sample has a signal, an uptime, free memory, and
    mesh layer 0 with no parent and no children.
 4. **open**: `POST /api/v1/doors/{id}/open` answers with an allowed event,
@@ -311,7 +316,10 @@ point, fails the step that is waiting.
    the door's previous overrides back restores its effective configuration.
 6. **reboot**: after `POST /api/v1/doors/{id}/reboot` the board logs `rst:`
    and `sta ip:`, and the door is online again on a new connection. The
-   line gives the seconds it took.
+   line gives the seconds it took. **reboot-started**: the events record a
+   start newer than the door's newest event before the command, whose
+   detail says a restart the firmware asked for
+   (`A restart its firmware asked for.`).
 7. **rotate**: after `POST /api/v1/doors/{id}/credentials/rotate` the board
    connects with new credentials, the old ones are revoked, and the door is
    online. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke`
@@ -331,12 +339,17 @@ point, fails the step that is waiting.
    `succeeded`, and the board's log shows
    `boot: Loaded app from partition at offset` with another offset than
    its previous boot and `the new firmware is kept`.
+   **ota-signed-started**: the events record a start newer than the
+   door's newest event before the update, a restart the firmware asked
+   for.
 9. **ota-unsigned**: the second image without its last 68 bytes, the
    signature block (`firmware-signing.md`), is uploaded, chosen, and sent;
    the update fails with a detail naming `bad signature`.
    **ota-unsigned-accepted**: with the override `accept_unsigned_firmware`
    `"true"`, once the door's effective configuration shows it, the same
-   update succeeds. **override-cleared**: the door's previous overrides
+   update succeeds. **ota-unsigned-accepted-started**: the events record a
+   start newer than the door's newest event before the override was set,
+   a restart the firmware asked for. **override-cleared**: the door's previous overrides
    are put back.
 10. **bad-download**: the `device_url` setting is pointed at
     `http://127.0.0.1:9`, which the board refuses at once, and the first
@@ -370,27 +383,44 @@ terminal, and checks what the server can see through the API; where only
 the person can tell, such as whether the strike released, it asks. Enter
 (or `y`) answers yes, `n` fails the step, and `s` skips it.
 
+    scripts/tests/hardware-walkthrough.sh --dry-run   # the steps and settings; touches nothing
     scripts/tests/hardware-walkthrough.sh --door "Front door"
 
 The door comes from `--door` (an id, or a name ignoring case) or
 `DOORCODE_DOOR_NAME`. `--skip-reboot` leaves out the reboot, `--keep`
-leaves the temporary users and access in place, and `--yes` skips the
-confirmation that names the door before anything is changed.
+leaves the temporary users and access in place, `--yes` skips the
+confirmation that names the door before anything is changed, and
+`--dry-run` prints the steps and settings without touching the server or
+the terminal.
+
+The checks of the event log (`GET /api/v1/events`) look only at events
+newer than the door's newest event when the step began, since the server
+keeps those of earlier runs, and each waits up to `DOORCODE_TIMEOUT_S`
+before it fails, naming the event it looked after.
 
 1. **door**: the door is enrolled and online; its version, door state,
    signal, uptime, and free memory are shown.
 2. **setup**: the door's `telemetry_interval_s` override is set to `"5"`,
-   so the server sees the sensor change while the strike is released,
-   when the door sends no `opened` event. A user with a random code gets
+   so a door event the server missed is soon corrected by a report and the
+   free memory stays current; the door says `opened` and `closed` at once,
+   whether or not the strike is released. A user with a random code gets
    an access rule, at all times, over a new zone holding only this door,
    and a second user with another code is a door commander.
 3. **sensor**: the server sees the door closed, opened by hand, and closed
-   again. A forced-open alarm the opening raised is shown, not judged.
+   again. **sensor-closed**: the events record a closing (type `door`,
+   reason `closed`) whose `open_ms` is more than 0 and no longer than the
+   step watched, plus two seconds. **sensor-forced**: they record a
+   forced open alarm (type `alarm`, reason `forced open`), since the door
+   opened while it should have been locked; a door in open mode before the
+   run raises none, and fails here.
 4. **open**: `POST /api/v1/doors/{id}/open` answers with an allowed event,
    and the person sees the strike release and lock again.
 5. **code**: the user's code and `#` give an allowed check for that user;
    the strike releases, the server sees the door open and close, and the
-   strike locks. **wrong-code**: another code is denied and the strike
+   strike locks. **code-closed**: the events record a closing with a
+   plausible `open_ms`, as in step 3. **code-unforced**: once that closing
+   is recorded, no forced open alarm is, since the door opened while the
+   strike was released. **wrong-code**: another code is denied and the strike
    stays locked.
 6. **locked-command**: the commander's `<code>*0021#` makes a one-minute
    locked override; the user's code is then denied and the strike stays
@@ -401,7 +431,9 @@ confirmation that names the door before anything is changed.
 7. **free-memory**: `free_bytes` at the end is at most 10% below the start.
 8. **reboot**: after `POST /api/v1/doors/{id}/reboot` the door is online
    again on a new connection within twice `DOORCODE_TIMEOUT_S`, and the
-   strike stayed locked through it.
+   strike stayed locked through it. **reboot-started**: the events record
+   a start newer than the door's newest event before the command, whose
+   detail says a restart the firmware asked for.
 
 On any exit the script ends every override it made, leaving any that was
 in force before the run, puts the door's configuration overrides back, and

@@ -63,6 +63,15 @@ board's serial log: flashing and booting, enrollment, telemetry, the open
 and reboot commands, a configuration override, credential rotation and
 revocation, a signed firmware update, an unsigned one refused and then
 accepted, a failed download, and no crash and no lost memory over the run.
+After each restart it causes it finds the board's start in
+`GET /api/v1/events` (type `door`, reason `started`), newer than the newest
+event of the door when the restart began, since the server keeps the starts
+of earlier runs: `boot-started` after the approval, with its reason shown
+but not judged (the reset of the boot goes through the reset pin, which the
+ESP32 may report as a power on), and `reboot-started`, `ota-signed-started`,
+and `ota-unsigned-accepted-started`, each of which must say a restart the
+firmware asked for. Each waits up to the timeout and fails naming the event
+it looked after.
 
 Needs: a server, an administrator's API token allowed to manage firmware,
 the board on its USB serial port, and for the firmware updates the private
@@ -104,7 +113,8 @@ chooses them for the door, and changes the door's overrides and the
 `device_url` setting. On any exit it puts `device_url` and the overrides
 back, and unless `--keep` puts the door's firmware choice back, deletes
 the uploaded firmware, and deletes the door when the run created or
-restored it. A door that existed before the run stays.
+restored it. A door that existed before the run stays. The start checks
+only read the event log.
 
 ## hardware-walkthrough.sh
 
@@ -112,14 +122,24 @@ Walks a person at a door through its hardware, prompting on the terminal
 and checking each outcome through the server's API: the door sensor, the
 open command and the strike, a temporary user's code allowed and a wrong
 code denied, the keypad commands for a locked and an open override, the
-free memory, and a reboot. The door must already be enrolled, installed,
-and online; nothing is flashed and no serial port is needed, so it works on
-a door in service, against the server that door belongs to.
+free memory, and a reboot. From `GET /api/v1/events`, looking only at
+events newer than the newest one of the door when the step began, it also
+checks what the server recorded: `sensor-closed` and `code-closed`, a
+closing (type `door`, reason `closed`) whose `open_ms` is more than 0 and
+no longer than the step watched; `sensor-forced`, the forced open alarm of
+the door opened by hand without a code; `code-unforced`, no forced open
+alarm for the door opened while the strike was released; and
+`reboot-started`, a start that says a restart the firmware asked for. Each
+waits up to the timeout and fails naming the event it looked after. The
+door must already be enrolled, installed, and online; nothing is flashed
+and no serial port is needed, so it works on a door in service, against the
+server that door belongs to.
 
 Needs: an administrator's API token, someone at the door, a terminal, and
 `bash`, `curl`, and `jq`. The server, token, door, and timeout come from
 `test.env`; flags override them.
 
+    scripts/tests/hardware-walkthrough.sh --dry-run     # the 8 steps and the settings; touches nothing
     scripts/tests/hardware-walkthrough.sh --door "Front door"
     scripts/tests/hardware-walkthrough.sh --door 12 --skip-reboot
 
@@ -129,6 +149,7 @@ Needs: an administrator's API token, someone at the door, a terminal, and
 | `--skip-reboot` | Do not reboot the door. |
 | `--keep` | Leave the temporary users, groups, zone, and rule, and print their ids and codes. |
 | `--yes` | Start without asking to confirm the door. |
+| `--dry-run` | Print the steps and settings and exit without touching the server or the terminal. |
 | `--server URL`, `--token TOKEN`, `--timeout SECONDS` | `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_TIMEOUT_S`. |
 
 At each prompt Enter (or `y`) means done or seen, `n` means not seen,
@@ -144,7 +165,9 @@ any exit it ends the overrides it made (never one in force before the run),
 puts the door's configuration overrides back, and unless `--keep` deletes
 the users, groups, zone, and rule. The server keeps deleted users, refused
 everywhere, so their events keep a name: each run leaves two among the
-deleted users, named `walkthrough-<random>`.
+deleted users, named `walkthrough-<random>`. The checks of the event log
+only read it; the opening by hand leaves a forced open alarm in the log,
+and the openings, closings, and restart their own events, as at any door.
 
 ## bench-serial-selftest.sh
 

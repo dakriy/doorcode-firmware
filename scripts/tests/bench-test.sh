@@ -71,14 +71,14 @@ done
 
 STEPS=(
     "1 boot: download the provisioning file to firmware/provisioning.json, build, flash, provision, reset, and watch the boot for App version, wifi:mode : sta, wifi:connected with, sta ip:, and enrolling as <hardware id>; softAP or crash text fails"
-    "2 enroll: the hardware id appears in GET /enrollments; the door DOORCODE_DOOR_NAME is created (or restored) and the board approved as it; the door comes online"
+    "2 enroll, boot-started: the hardware id appears in GET /enrollments; the door DOORCODE_DOOR_NAME is created (or restored) and the board approved as it; the door comes online; GET /events records a start of the door newer than the run's approval, its reason shown"
     "3 telemetry: a new sample with signal, uptime_s, and free_bytes, and mesh fields of 0"
     "4 open: POST open logs an allowed event and the board logs command open"
     "5 override, override-restore: with telemetry_interval_s \"10\" a sample follows the next one within 15 s; restoring the overrides restores the effective configuration"
-    "6 reboot: POST reboot; the board logs rst: and sta ip:, and the door is online again, with the time it took"
+    "6 reboot, reboot-started: POST reboot; the board logs rst: and sta ip:, and the door is online again, with the time it took; GET /events records a newer start, a restart its firmware asked for"
     "7 rotate, revoke: rotate, then revoke; the door goes offline, enrolls again, is approved into the same door, and comes online"
-    "8 release, ota-signed: release the next two patch versions above the one the door runs with DOORCODE_SIGNING_KEY (firmware/provisioning.json moved aside and back); upload the first, choose it for the door, update; the update succeeds and the board boots the other slot and logs the new firmware is kept"
-    "9 ota-unsigned, ota-unsigned-accepted, override-cleared: upload the second image without its 68-byte signature block, update; it fails with bad signature; with the override accept_unsigned_firmware \"true\" it succeeds; the overrides are put back"
+    "8 release, ota-signed, ota-signed-started: release the next two patch versions above the one the door runs with DOORCODE_SIGNING_KEY (firmware/provisioning.json moved aside and back); upload the first, choose it for the door, update; the update succeeds and the board boots the other slot and logs the new firmware is kept; GET /events records a newer start, a restart its firmware asked for"
+    "9 ota-unsigned, ota-unsigned-accepted, ota-unsigned-accepted-started, override-cleared: upload the second image without its 68-byte signature block, update; it fails with bad signature; with the override accept_unsigned_firmware \"true\" it succeeds and GET /events records a newer start, a restart its firmware asked for; the overrides are put back"
     "10 bad-download, device-url-restored: with the device_url setting at an address that refuses, update to the first image; it fails; device_url is put back and the door is online"
     "11 no-crash, free-memory: the run's serial log holds no crash text; free_bytes in the last telemetry sample is at most 10% below the first"
     "12 cleanup: put device_url and the overrides back; unless --keep, put the door's firmware choice back and delete the uploaded firmware and the door the run created or restored"
@@ -330,6 +330,49 @@ door_state() { api_ok GET "/doors/$DOOR_ID/state" && answer "$1"; }
 online() { is true door_state .online; }
 offline() { is false door_state .online; }
 
+# --- Starts -----------------------------------------------------------------
+
+# The newest event of the door before a restart; a start is looked for only
+# after it, since the server keeps the starts of earlier runs. Empty when it
+# could not be read.
+EVENT_MARK=""
+
+mark_events() {
+    EVENT_MARK=""
+    api_ok GET "/events?door=$DOOR_ID&per_page=1" || return 1
+    EVENT_MARK="$(answer '.events[0].id // 0')"
+}
+
+# new_start: whether the server recorded a start of the door after
+# EVENT_MARK; leaves the oldest such event in $WORK/event.
+new_start() {
+    [ -n "$EVENT_MARK" ] || return 1
+    api_ok GET "/events?door=$DOOR_ID&type=door&reason=started&per_page=20" || return 1
+    jq -e --argjson mark "$EVENT_MARK" \
+        '[.events[] | select(.id > $mark)] | last // empty' "$WORK/answer" >"$WORK/event" 2>/dev/null
+}
+
+# What the server's start event says of a restart the firmware asked for.
+SOFTWARE_START="A restart its firmware asked for."
+
+# found_start STEP [DETAIL]: waits for the start new_start finds, and fails
+# STEP unless the event's detail is DETAIL when given.
+found_start() {
+    local detail
+    if [ -z "$EVENT_MARK" ]; then
+        fail "$1" "the door's events could not be read before the restart, so no start can be told from older ones"
+    elif ! eventually new_start; then
+        fail "$1" "no started event of door $DOOR_ID after event $EVENT_MARK within $TIMEOUT s"
+    else
+        detail="$(jq -r '.detail // ""' "$WORK/event")"
+        if [ $# -ge 2 ] && [ "$detail" != "$2" ]; then
+            fail "$1" "event $(jq -r .id "$WORK/event") says \"$detail\", not \"$2\""
+        else
+            pass "$1" "event $(jq -r .id "$WORK/event") at $(jq -r .at "$WORK/event"): ${detail:-no reason given}"
+        fi
+    fi
+}
+
 # --- 1 boot -----------------------------------------------------------------
 
 flash() {
@@ -408,9 +451,13 @@ step_enroll() {
     eventually enrolling || abort enroll "$HARDWARE_ID never appeared in GET /enrollments: $(reason)"
     find_door
     SAMPLE_BEFORE="$(latest_sample)"
+    mark_events
     approve || abort enroll "approving $HARDWARE_ID as door $DOOR_ID $(reason)"
     eventually online || abort enroll "door $DOOR_ID never came online: $(door_state .)"
     pass enroll "$HARDWARE_ID approved as door $DOOR_ID \"$DOORCODE_DOOR_NAME\", online"
+    # The reset of step 1 goes through the reset pin, which the ESP32 may
+    # report as a power on, so the reason is shown, not judged.
+    found_start boot-started
 }
 
 # --- 3 telemetry ------------------------------------------------------------
@@ -506,6 +553,7 @@ step_reboot() {
     local mark line seen started
     mark="$(log_mark)"
     seen="$(last_seen)"
+    mark_events
     started="$SECONDS"
     if ! api_ok POST "/doors/$DOOR_ID/reboot"; then
         fail reboot "POST /doors/$DOOR_ID/reboot $(reason)"
@@ -517,6 +565,7 @@ step_reboot() {
         fail reboot "the door is not online again: $(door_state .)"
     else
         pass reboot "restarted and online again after $((SECONDS - started)) s"
+        found_start reboot-started "$SOFTWARE_START"
     fi
 }
 
@@ -717,9 +766,11 @@ step_signed_ota() {
     fi
     before="$(offset_of <"$SERIAL_LOG")"
     mark="$(log_mark)"
+    mark_events
     ota ota-signed succeeded || return
     if slot="$(booted_other_slot "$mark" "$before")"; then
         pass ota-signed "$SIGNED_VERSION (firmware $SIGNED_ID) succeeded; $slot"
+        found_start ota-signed-started "$SOFTWARE_START"
     else
         fail ota-signed "$slot"
     fi
@@ -748,12 +799,14 @@ step_unsigned_accepted() {
         return
     fi
     OVERRIDES_BEFORE="$overrides"
+    mark_events
     if ! set_overrides "$(jq -c '. + {accept_unsigned_firmware: "true"}' <<<"$overrides")"; then
         fail ota-unsigned-accepted "setting accept_unsigned_firmware $(reason)"
     elif ! eventually accepts_unsigned; then
         fail ota-unsigned-accepted "the effective config never accepted unsigned firmware: $(effective_config)"
     elif ota ota-unsigned-accepted succeeded; then
         pass ota-unsigned-accepted "with accept_unsigned_firmware \"true\" the door installed $UNSIGNED_VERSION"
+        found_start ota-unsigned-accepted-started "$SOFTWARE_START"
     fi
     if ! restore_overrides; then
         fail override-cleared "restoring the overrides $overrides $(reason)"
