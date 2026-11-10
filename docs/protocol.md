@@ -124,10 +124,11 @@ door is connected. Nothing is kept to send later.
 | --- | --- | --- |
 | `event` | text | `opened` or `closed`. |
 | `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Left out of `closed`. |
+| `open_ms` | uint | On `closed` only: how long the door was open, in milliseconds on the door's own monotonic clock, from the sensor seeing it open to seeing it closed. Sent only when the door saw the opening itself, since it started and outside an open span, whether or not it was connected then. Left out when the door was already open when it started, or opened during an open span and closed after it ended. Never on `opened`. |
 
 The door reports the fact only; whether an opening while locked is an
 alarm is the server's decision. A server that does not know `unlocked`
-ignores it.
+or `open_ms` ignores them.
 
 The door also publishes its online status, retained, on
 `doorcode/doors/<id>/online` when it connects, with a last will saying it

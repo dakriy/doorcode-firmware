@@ -83,14 +83,11 @@ fn telemetry_sent(telemetry: Telemetry) -> Sent {
     }
 }
 
-fn door_event_sent(event: &str, unlocked: Option<bool>) -> Sent {
+fn door_event_sent(event: DoorEvent) -> Sent {
     Sent {
         topic: "doorcode/doors/7/event".to_owned(),
         retain: false,
-        message: Message::DoorEvent(DoorEvent {
-            event: event.to_owned(),
-            unlocked,
-        }),
+        message: Message::DoorEvent(event),
     }
 }
 
@@ -109,6 +106,15 @@ fn opened(unlocked: bool) -> DoorEvent {
     DoorEvent {
         event: "opened".to_owned(),
         unlocked: Some(unlocked),
+        open_ms: None,
+    }
+}
+
+fn closed(open_ms: Option<u64>) -> DoorEvent {
+    DoorEvent {
+        event: "closed".to_owned(),
+        unlocked: None,
+        open_ms,
     }
 }
 
@@ -321,8 +327,8 @@ fn the_door_opening_and_closing_is_said_on_the_event_topic_not_retained() {
         publications(&connectors),
         vec![
             door_online_status(),
-            door_event_sent("opened", Some(false)),
-            door_event_sent("closed", None)
+            door_event_sent(opened(false)),
+            door_event_sent(closed(Some(100)))
         ]
     );
 }
@@ -379,6 +385,67 @@ fn a_door_opening_longer_than_half_a_second_after_the_strike_locked_again_says_i
     app::run(&connectors).unwrap();
 
     assert_eq!(door_events(&connectors), vec![opened(false)]);
+}
+
+#[test]
+fn the_door_closing_is_encoded_as_the_contract_example() {
+    let events = [
+        (200, Event::Door { open: true }),
+        (4400, Event::Door { open: false }),
+    ];
+    let connectors = online_until(4401, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.broker.published_payloads().last(),
+        Some(&hex(
+            "a3617601656576656e7466636c6f736564676f70656e5f6d73191068"
+        ))
+    );
+}
+
+#[test]
+fn a_door_opened_while_disconnected_and_closed_once_connected_says_how_long_it_was_open() {
+    let events = [
+        (100, Event::Disconnected),
+        (200, Event::Door { open: true }),
+        (1100, Event::Connected),
+        (1500, Event::Door { open: false }),
+    ];
+    let connectors = online_until(1501, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![closed(Some(1300))]);
+}
+
+#[test]
+fn a_door_open_when_the_controller_started_closes_without_saying_how_long() {
+    let connectors = StubConnectors {
+        door_sensor: StubDoorSensor { open: true },
+        ..online_until(201, [(200, Event::Door { open: false })])
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![closed(None)]);
+}
+
+#[test]
+fn a_door_opened_in_an_open_span_and_closed_after_it_closes_without_saying_how_long() {
+    let events = [
+        (0, timeline_for(7, &open_span())),
+        (200, Event::Door { open: true }),
+        (300, timeline_for(7, &Timeline::default())),
+        (400, Event::Door { open: false }),
+    ];
+    let connectors =
+        StubConnectors::enrolled(script_online_until(401, events).at_unix(IN_OPEN_SPAN));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![closed(None)]);
 }
 
 #[test]

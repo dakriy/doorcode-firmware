@@ -76,18 +76,26 @@ impl Tally {
     }
 }
 
-/// Says that the door opened, and whether it was `unlocked` then, or that
-/// it closed.
-pub(crate) fn send_door_event(device: &Device<'_>, door_id: u64, open: bool, unlocked: bool) {
-    let (event, unlocked) = if open {
-        (protocol::EVENT_OPENED, Some(unlocked))
-    } else {
-        (protocol::EVENT_CLOSED, None)
-    };
-    let message = DoorEvent {
-        event: event.to_owned(),
-        unlocked,
-    };
+/// The door saying it opened, and whether it was `unlocked` then.
+pub(crate) fn opened(unlocked: bool) -> DoorEvent {
+    DoorEvent {
+        event: protocol::EVENT_OPENED.to_owned(),
+        unlocked: Some(unlocked),
+        open_ms: None,
+    }
+}
+
+/// The door saying it closed, and how long it was open when that is known.
+pub(crate) fn closed(open_ms: Option<u64>) -> DoorEvent {
+    DoorEvent {
+        event: protocol::EVENT_CLOSED.to_owned(),
+        unlocked: None,
+        open_ms,
+    }
+}
+
+/// Says that the door opened or closed.
+pub(crate) fn send_door_event(device: &Device<'_>, door_id: u64, message: &DoorEvent) {
     if let Err(error) = device.publish(door_id, protocol::LEAF_EVENT, message.encode()) {
         device.log(
             Level::Warn,

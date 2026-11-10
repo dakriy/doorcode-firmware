@@ -8,7 +8,7 @@ use connectors::{
     BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication, StatusReport,
     Transfer,
 };
-use protocol::{Config, Credentials, DecodeError, Online, Timeline};
+use protocol::{Config, Credentials, DecodeError, DoorEvent, Online, Timeline};
 
 use crate::access::{Gate, Situation};
 use crate::command::{self, Order, PendingRestart};
@@ -43,6 +43,10 @@ pub(crate) struct Door {
     failures: u32,
     gate: Gate,
     tally: Tally,
+    /// When the door opened outside an open span, as the sensor saw it;
+    /// `None` while it is closed, and while it is open since before the
+    /// door started or since an open span.
+    opened_at_ms: Option<u64>,
     /// The restart a reboot command asked for, waiting for its ack to be
     /// acknowledged.
     restart: Option<PendingRestart>,
@@ -117,6 +121,7 @@ pub(crate) fn start(
         failures: 0,
         gate: Gate::default(),
         tally: Tally::after(connections),
+        opened_at_ms: None,
         restart: None,
         install: None,
         boot,
@@ -334,9 +339,29 @@ impl Door {
         let unlocked = self.gate.is_unlocked(device);
         self.gate.door_moved(device, open);
         self.tally.door_moved(open);
-        if self.is_online() && self.mode(device) != Mode::Open {
-            telemetry::send_door_event(device, self.credentials.door_id, open, unlocked);
+        let in_open_span = self.mode(device) == Mode::Open;
+        let message = self.door_event(device.now_ms(), open, unlocked, in_open_span);
+        if self.is_online() && !in_open_span {
+            telemetry::send_door_event(device, self.credentials.door_id, &message);
         }
+    }
+
+    /// The door event for the door moving at `now_ms`. An opening outside
+    /// an open span starts the timing, online or not; the closing says how
+    /// long the door was open when its opening was timed.
+    fn door_event(
+        &mut self,
+        now_ms: u64,
+        open: bool,
+        unlocked: bool,
+        in_open_span: bool,
+    ) -> DoorEvent {
+        if open {
+            self.opened_at_ms = (!in_open_span).then_some(now_ms);
+            return telemetry::opened(unlocked);
+        }
+        let open_ms = self.opened_at_ms.take().map(|at_ms| now_ms - at_ms);
+        telemetry::closed(open_ms)
     }
 
     fn mode(&self, device: &Device<'_>) -> Mode {

@@ -341,12 +341,15 @@ pub struct DoorEvent {
     pub event: String,
     /// On `opened`: whether the door was unlocked as it opened.
     pub unlocked: Option<bool>,
+    /// On `closed`: how long the door was open, when the door saw it open.
+    pub open_ms: Option<u64>,
 }
 
 message! {
     DoorEvent {
         event: always,
         unlocked: unless_none,
+        open_ms: unless_none,
     }
 }
 
