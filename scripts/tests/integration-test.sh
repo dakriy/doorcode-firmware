@@ -3,7 +3,9 @@
 # controller contract end to end through the server's API and the host's
 # control API. It creates a door, a user with a code, a zone, a group, an
 # access rule, and a firmware version, and deletes them again: run it only
-# against a development server. docs/testing.md describes it.
+# against a development server. The server and token come from test.env
+# (scripts/tests/bench-env.sh) unless flags give them. docs/testing.md
+# describes it.
 
 # The checks are called through eventually and the EXIT trap, which the
 # linter does not follow.
@@ -13,24 +15,29 @@ set -uo pipefail
 
 usage() {
     cat >&2 <<'EOF'
-usage: scripts/tests/integration-test.sh --server URL --token TOKEN
+usage: scripts/tests/integration-test.sh [--server URL] [--token TOKEN]
            [--broker-host HOST] [--keep] [--timeout SECONDS]
 
   --server URL        the server's address, such as http://localhost:8080
+                      (default DOORCODE_SERVER from test.env)
   --token TOKEN       a personal API token of an administrator
+                      (default DOORCODE_TOKEN from test.env)
   --broker-host HOST  the broker host to connect to instead of the one the
                       provisioning file names
   --keep              leave the created entities on the server
-  --timeout SECONDS   how long to wait for each outcome (default 30)
+  --timeout SECONDS   how long to wait for each outcome
+                      (default DOORCODE_TIMEOUT_S from test.env, 60)
 EOF
     exit 2
 }
 
-SERVER=""
-TOKEN=""
+# shellcheck source=SCRIPTDIR/bench-env.sh
+source "$(dirname "$0")/bench-env.sh"
+SERVER="$DOORCODE_SERVER"
+TOKEN="$DOORCODE_TOKEN"
 BROKER_HOST=""
 KEEP=false
-TIMEOUT=30
+TIMEOUT="$DOORCODE_TIMEOUT_S"
 while [ $# -gt 0 ]; do
     case "$1" in
     --server) SERVER="${2:-}"; shift 2 || usage ;;
@@ -41,7 +48,10 @@ while [ $# -gt 0 ]; do
     *) usage ;;
     esac
 done
-[ -n "$SERVER" ] && [ -n "$TOKEN" ] || usage
+[ -n "$SERVER" ] && [ -n "$TOKEN" ] || {
+    echo "integration-test: --server and --token are required when test.env does not set DOORCODE_SERVER and DOORCODE_TOKEN" >&2
+    usage
+}
 [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || usage
 SERVER="${SERVER%/}"
 API="$SERVER/api/v1"

@@ -32,17 +32,18 @@ revocation, and an unsigned firmware update refused and then accepted.
 
 Needs: a server whose provisioning file names a broker this computer
 reaches, a personal API token of an administrator, and `bash`, `curl`,
-`jq`, and `cargo`. No board and no signing key.
+`jq`, and `cargo`. No board and no signing key. The server and token come
+from `test.env` (`DOORCODE_SERVER`, `DOORCODE_TOKEN`); flags override it.
 
-    scripts/tests/integration-test.sh --server http://localhost:8080 --token "$TOKEN"
+    scripts/tests/integration-test.sh
 
 | Flag | Meaning |
 | --- | --- |
-| `--server URL` | The server's address. Required. |
-| `--token TOKEN` | An administrator's API token. Required. |
+| `--server URL` | The server's address instead of `DOORCODE_SERVER`. |
+| `--token TOKEN` | An administrator's API token instead of `DOORCODE_TOKEN`. |
 | `--broker-host HOST` | Connect to this broker host instead of the provisioning file's. |
 | `--keep` | Leave the created entities on the server and print their ids. |
-| `--timeout SECONDS` | How long each outcome may take; 30 by default. |
+| `--timeout SECONDS` | How long each outcome may take instead of `DOORCODE_TIMEOUT_S` (60). |
 
 Results are the `PASS`/`FAIL`/`SKIP` lines on standard output. The host
 runs from `target/debug/doorcode-host`, built with `cargo build -p host`;

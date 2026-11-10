@@ -45,7 +45,7 @@ first administrator's password, which the server logs on its first start
 
 ## Running it
 
-    scripts/tests/integration-test.sh --server http://localhost:8080 --token "$TOKEN"
+    scripts/tests/integration-test.sh   # server and token from test.env, or --server and --token
 
 | Flag | Meaning |
 | --- | --- |
@@ -53,7 +53,7 @@ first administrator's password, which the server logs on its first start
 | `--token TOKEN` | A personal API token of an administrator. |
 | `--broker-host HOST` | Connect to this broker host instead of the one the provisioning file names. |
 | `--keep` | Leave the created entities on the server, and print their ids. |
-| `--timeout SECONDS` | How long to wait for each outcome; 30 by default. |
+| `--timeout SECONDS` | How long to wait for each outcome instead of `DOORCODE_TIMEOUT_S` (60). |
 
 Each step prints one line, `PASS`, `FAIL`, or `SKIP`, with its name and a
 reason. The exit code is non-zero when any step fails. When a step the

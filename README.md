@@ -47,7 +47,7 @@ with `curl`. See [`docs/host.md`](docs/host.md).
 Both create entities on the server and delete them again, so run them only
 against a development server, such as the server's own compose stack:
 
-    scripts/tests/integration-test.sh --server http://localhost:8080 --token "$TOKEN"
+    scripts/tests/integration-test.sh   # server and token from test.env, or --server and --token
 
     cargo build -p swarm
     target/debug/doorcode-swarm --server http://localhost:8080 --token "$TOKEN" \
