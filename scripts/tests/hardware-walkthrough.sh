@@ -75,9 +75,9 @@ done
 STEPS=(
     "1 door: the door is enrolled and online; its version, door state, signal, uptime, and free memory are shown"
     "2 setup: the door's telemetry_interval_s override \"5\"; a user with a code under an access rule over a new zone of this door only, and a door commander"
-    "3 sensor, sensor-closed, sensor-forced: the server sees the door closed, opened by hand, and closed again; GET /events records, newer than the step's start, a closing whose open_ms is more than 0 and no longer than the step watched, and a forced open alarm"
+    "3 sensor, sensor-closed, sensor-forced: the server sees the door closed, opened by hand, and closed again; GET /events records, newer than the step's start, a closing whose open_ms is more than 0 and no longer than the step watched, and a forced open alarm; sensor-closed and sensor-forced SKIP when the door's timeline holds it open (open mode or an open override) as it opens"
     "4 open: POST open logs an allowed event, and the person sees the strike release and lock again"
-    "5 code, code-closed, code-unforced, wrong-code: the user's code is allowed, the strike releases, the server sees the door open and close, and the strike locks; GET /events records a newer closing with a plausible open_ms and no forced open alarm; a wrong code is denied and the strike stays locked"
+    "5 code, code-closed, code-unforced, wrong-code: the user's code is allowed, the strike releases, the server sees the door open and close, and the strike locks; GET /events records a newer closing with a plausible open_ms and no forced open alarm; a wrong code is denied and the strike stays locked; code, code-closed, code-unforced, and wrong-code SKIP when the door's timeline holds it open (open mode or an open override) at the step"
     "6 locked-command, open-command: *0021 makes a locked override that denies the user's code, *000 ends it; *0011 makes an open override in which a key releases the strike, and ending it locks the door"
     "7 free-memory: free_bytes at the end is at most 10% below the start"
     "8 reboot, reboot-started: POST reboot; the door is online again within twice the timeout and the strike stayed locked; GET /events records a newer start, a restart its firmware asked for"
@@ -236,13 +236,18 @@ new_event() {
         "$WORK/answer" >"$WORK/event" 2>/dev/null
 }
 
+# marked STEP WHAT: whether EVENT_MARK was read; fails STEP otherwise, since
+# a new WHAT cannot then be told from older ones.
+marked() {
+    [ -n "$EVENT_MARK" ] && return 0
+    fail "$1" "the door's events could not be read when the step began, so a new $2 cannot be told from older ones"
+    return 1
+}
+
 # recorded STEP TYPE REASON [HINT]: waits for an event of TYPE with REASON
 # after EVENT_MARK, and fails STEP, with HINT if given, when none comes.
 recorded() {
-    if [ -z "$EVENT_MARK" ]; then
-        fail "$1" "the door's events could not be read when the step began, so a new $3 event cannot be told from older ones"
-        return 1
-    fi
+    marked "$1" "$3 event" || return 1
     eventually new_event "$2" "$3" && return 0
     fail "$1" "no $2 event \"$3\" of door $DOOR_ID after event $EVENT_MARK within $TIMEOUT s${4:+: $4}"
     return 1
@@ -263,6 +268,48 @@ closing() {
     else
         pass "$1" "$(described): the door was open $open_ms ms"
     fi
+}
+
+# The open span held_open_by_timeline found, as "START to END".
+OPEN_SPAN=""
+
+# held_open_by_timeline: whether the door's timeline has it in an open span
+# now (open mode or an open override), with the span in OPEN_SPAN. Returns 2
+# when the timeline cannot be read or its times cannot be parsed.
+held_open_by_timeline() {
+    local now start end from to
+    OPEN_SPAN=""
+    api_ok GET "/doors/$DOOR_ID/timeline" || return 2
+    now="$(date +%s)"
+    while read -r start end; do
+        from="$(date -d "$start" +%s 2>/dev/null)" || return 2
+        to="$(date -d "$end" +%s 2>/dev/null)" || return 2
+        if [ "$from" -le "$now" ] && [ "$now" -lt "$to" ]; then
+            OPEN_SPAN="$start to $end"
+            return 0
+        fi
+    done < <(answer '.spans[] | select(.state == "open") | "\(.start) \(.end)"')
+    return 1
+}
+
+# held_open STEP...: whether the door's timeline has it in an open span now,
+# with the span in OPEN_SPAN. When the timeline cannot be read or parsed it
+# answers no, and notes that the STEPs assume no open span.
+held_open() {
+    held_open_by_timeline && return 0
+    [ $? -eq 2 ] &&
+        echo "note: door $DOOR_ID's timeline could not be read or parsed ($(reason)), so these steps assume no open span: $*" >&2
+    return 1
+}
+
+# skip_held_open WHY STEP...: a SKIP line for each STEP, naming the open
+# span held_open found and WHY the step cannot be judged in it.
+skip_held_open() {
+    local why="$1" step
+    shift
+    for step in "$@"; do
+        skip "$step" "the door's timeline holds it open ($OPEN_SPAN), so $why"
+    done
 }
 
 # event JQ: the part of the event new_event found that JQ selects.
@@ -401,7 +448,7 @@ step_setup() {
     api_ok GET "/doors/$DOOR_ID/overrides" || abort setup "reading the overrides $(reason)"
     OVERRIDES_IN_FORCE="$(answer -c '[.overrides[] | select(.active) | .id]')"
     [ "$OVERRIDES_IN_FORCE" = "[]" ] ||
-        echo "note: door $DOOR_ID already has overrides $OVERRIDES_IN_FORCE in force, which the run leaves alone; the keypad steps may not behave as described" >&2
+        echo "note: door $DOOR_ID already has overrides $OVERRIDES_IN_FORCE in force, which the run leaves alone; while one holds the door open, the sensor, code, and wrong-code steps skip their checks, and the keypad commands may not behave as described" >&2
     # Telemetry every 5 s soon corrects the server's view of the door sensor
     # should a door event be lost, and keeps the free memory current.
     OVERRIDES_BEFORE="$overrides"
@@ -444,11 +491,18 @@ step_sensor() {
         return
     fi
     say "Seen open. Close it now."
+    # An opening in an open span is neither forced nor timed by the server.
+    local held=false
+    held_open sensor-closed sensor-forced && held=true
     if ! eventually door_is closed; then
         fail sensor "the server never saw the door close again: $(door_state .)"
         return
     fi
     pass sensor "the server saw the door closed, open, and closed again"
+    if $held; then
+        skip_held_open "the server records neither a closing nor a forced open alarm" sensor-closed sensor-forced
+        return
+    fi
     closing sensor-closed "$since"
     recorded sensor-forced alarm "forced open" "a door opened without a code while it should be locked is forced open" &&
         pass sensor-forced "$(described)"
@@ -477,8 +531,9 @@ step_open() {
 # typed STEP OUTCOME: waits for the check of what the person typed, and
 # fails STEP unless it ended in OUTCOME. Prints the event.
 typed() {
+    marked "$1" check || return 1
     if ! eventually new_event check; then
-        fail "$1" "no check reached the server: check the keypad wiring, or the door's connection"
+        fail "$1" "no check of door $DOOR_ID after event $EVENT_MARK reached the server within $TIMEOUT s: check the keypad wiring, or the door's connection"
         return 1
     fi
     if [ "$(event .outcome)" != "$2" ]; then
@@ -488,6 +543,12 @@ typed() {
 }
 
 step_code() {
+    # In an open span a key releases the strike without asking the server.
+    if held_open code code-closed code-unforced; then
+        skip_held_open "a key opens the door without asking the server, and no closing is recorded" \
+            code code-closed code-unforced
+        return
+    fi
     say "Keypad, the right code. Type:   $CODE #" \
         "The strike should release; open the door while it is released, then close it."
     mark_events
@@ -518,6 +579,10 @@ step_code() {
 }
 
 step_wrong_code() {
+    if held_open wrong-code; then
+        skip_held_open "a key opens the door without asking the server, which cannot deny a wrong code" wrong-code
+        return
+    fi
     say "Keypad, a wrong code. Type:   $WRONG_CODE #"
     mark_events
     ready wrong-code "Typed it?" || return

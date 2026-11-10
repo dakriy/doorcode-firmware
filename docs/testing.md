@@ -411,8 +411,10 @@ before it fails, naming the event it looked after.
    reason `closed`) whose `open_ms` is more than 0 and no longer than the
    step watched, plus two seconds. **sensor-forced**: they record a
    forced open alarm (type `alarm`, reason `forced open`), since the door
-   opened while it should have been locked; a door in open mode before the
-   run raises none, and fails here.
+   opened while it should have been locked. When the door's timeline
+   (`GET /api/v1/doors/{id}/timeline`) holds it open as it opens, in open
+   mode or under an open override, the server records neither, and both
+   print `SKIP` with the span instead.
 4. **open**: `POST /api/v1/doors/{id}/open` answers with an allowed event,
    and the person sees the strike release and lock again.
 5. **code**: the user's code and `#` give an allowed check for that user;
@@ -421,7 +423,10 @@ before it fails, naming the event it looked after.
    plausible `open_ms`, as in step 3. **code-unforced**: once that closing
    is recorded, no forced open alarm is, since the door opened while the
    strike was released. **wrong-code**: another code is denied and the strike
-   stays locked.
+   stays locked. When the door's timeline holds it open at the step, in
+   open mode or under an open override, a key opens the door without
+   asking the server and no closing is recorded, so `code`, `code-closed`,
+   `code-unforced`, and `wrong-code` print `SKIP` with the span instead.
 6. **locked-command**: the commander's `<code>*0021#` makes a one-minute
    locked override; the user's code is then denied and the strike stays
    locked; `<code>*000#` ends the override. **open-command**:
