@@ -3,7 +3,7 @@
 //! the door opening and closing outside open spans.
 
 use app::Counters;
-use connectors::{Event, Level, Mesh};
+use connectors::{Event, Level, Mesh, StartReason};
 use pretty_assertions::assert_eq;
 use protocol::{Command, Config, DoorEvent, Reply, Span, Telemetry, Timeline};
 use testkit::{
@@ -104,10 +104,15 @@ fn door_events(connectors: &StubConnectors) -> Vec<DoorEvent> {
 }
 
 fn started() -> DoorEvent {
+    started_because("power_on")
+}
+
+fn started_because(reason: &str) -> DoorEvent {
     DoorEvent {
         event: "started".to_owned(),
         unlocked: None,
         open_ms: None,
+        reason: Some(reason.to_owned()),
     }
 }
 
@@ -116,6 +121,7 @@ fn opened(unlocked: bool) -> DoorEvent {
         event: "opened".to_owned(),
         unlocked: Some(unlocked),
         open_ms: None,
+        reason: None,
     }
 }
 
@@ -124,6 +130,7 @@ fn closed(open_ms: Option<u64>) -> DoorEvent {
         event: "closed".to_owned(),
         unlocked: None,
         open_ms,
+        reason: None,
     }
 }
 
@@ -367,7 +374,77 @@ fn the_start_is_encoded_as_the_contract_example() {
 
     assert_eq!(
         connectors.broker.published_payloads().last(),
-        Some(&hex("a2617601656576656e746773746172746564"))
+        Some(&hex(
+            "a3617601656576656e74677374617274656466726561736f6e68706f7765725f6f6e"
+        ))
+    );
+}
+
+/// What door 7 said when it came online after starting for `reason`.
+fn door_events_after_start_by(reason: StartReason) -> Vec<DoorEvent> {
+    let connectors = StubConnectors {
+        firmware: StubFirmware::default().started_by(reason),
+        ..online_until(10, [])
+    };
+
+    app::run(&connectors).unwrap();
+
+    door_events(&connectors)
+}
+
+#[test]
+fn a_start_on_power_up_is_said_as_power_on() {
+    assert_eq!(
+        door_events_after_start_by(StartReason::PowerOn),
+        vec![started_because("power_on")]
+    );
+}
+
+#[test]
+fn a_restart_the_firmware_asked_for_is_said_as_software() {
+    assert_eq!(
+        door_events_after_start_by(StartReason::Software),
+        vec![started_because("software")]
+    );
+}
+
+#[test]
+fn a_restart_after_a_panic_is_said_as_panic() {
+    assert_eq!(
+        door_events_after_start_by(StartReason::Panic),
+        vec![started_because("panic")]
+    );
+}
+
+#[test]
+fn a_restart_by_a_watchdog_is_said_as_watchdog() {
+    assert_eq!(
+        door_events_after_start_by(StartReason::Watchdog),
+        vec![started_because("watchdog")]
+    );
+}
+
+#[test]
+fn a_restart_after_a_brownout_is_said_as_brownout() {
+    assert_eq!(
+        door_events_after_start_by(StartReason::Brownout),
+        vec![started_because("brownout")]
+    );
+}
+
+#[test]
+fn a_restart_by_the_reset_pin_is_said_as_external() {
+    assert_eq!(
+        door_events_after_start_by(StartReason::External),
+        vec![started_because("external")]
+    );
+}
+
+#[test]
+fn a_start_for_any_other_reason_is_said_as_unknown() {
+    assert_eq!(
+        door_events_after_start_by(StartReason::Unknown),
+        vec![started_because("unknown")]
     );
 }
 

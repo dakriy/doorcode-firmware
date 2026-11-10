@@ -345,6 +345,8 @@ pub struct DoorEvent {
     pub unlocked: Option<bool>,
     /// On `closed`: how long the door was open, when the door saw it open.
     pub open_ms: Option<u64>,
+    /// On `started`: why the door started.
+    pub reason: Option<String>,
 }
 
 message! {
@@ -352,6 +354,7 @@ message! {
         event: always,
         unlocked: unless_none,
         open_ms: unless_none,
+        reason: unless_none,
     }
 }
 

@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::Path;
 
-use connectors::Firmware;
+use connectors::{Firmware, StartReason};
 use connectors_host::{HostFirmware, BOOT_FILE, INSTALLED_FILE};
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -36,6 +36,13 @@ fn install(firmware: &dyn Firmware, chunks: &[&[u8]]) {
 fn the_running_version_is_reported() {
     with_each_firmware(|firmware| {
         assert_eq!(firmware.running_version(), "2.0.0");
+    });
+}
+
+#[test]
+fn the_device_started_on_power_up() {
+    with_each_firmware(|firmware| {
+        assert_eq!(firmware.start_reason(), StartReason::PowerOn);
     });
 }
 

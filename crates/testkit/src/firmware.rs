@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use connectors::{Download, DownloadError, Firmware, FirmwareError};
+use connectors::{Download, DownloadError, Firmware, FirmwareError, StartReason};
 use p256::ecdsa::signature::hazmat::PrehashSigner;
 use p256::ecdsa::{Signature, SigningKey};
 use sha2::{Digest, Sha256};
@@ -62,6 +62,7 @@ pub struct StubFirmware {
     version: String,
     /// Whether this boot is the first on a newly installed image.
     new_image: bool,
+    start_reason: StartReason,
     signing_key: Vec<u8>,
     /// A request that fails every time, with the detail it fails with.
     failure: Option<(FirmwareCall, String)>,
@@ -77,6 +78,7 @@ impl Default for StubFirmware {
         Self {
             version: "2.0.0".to_owned(),
             new_image: false,
+            start_reason: StartReason::PowerOn,
             signing_key: point.as_bytes()[1..].to_vec(),
             failure: None,
             calls: RefCell::default(),
@@ -99,6 +101,14 @@ impl StubFirmware {
         Self {
             new_image: true,
             ..Self::default()
+        }
+    }
+
+    /// This firmware, on a device that started for `reason`.
+    pub fn started_by(self, reason: StartReason) -> Self {
+        Self {
+            start_reason: reason,
+            ..self
         }
     }
 
@@ -148,6 +158,10 @@ impl StubFirmware {
 impl Firmware for StubFirmware {
     fn running_version(&self) -> String {
         self.version.clone()
+    }
+
+    fn start_reason(&self) -> StartReason {
+        self.start_reason
     }
 
     fn signing_key(&self) -> Vec<u8> {

@@ -2,7 +2,7 @@
 //! at the configured interval, once that it started, and each time it opens
 //! or closes outside an open span. Nothing is kept to send later.
 
-use connectors::Level;
+use connectors::{Level, StartReason};
 use protocol::{DoorEvent, Telemetry};
 
 use crate::device::Device;
@@ -53,7 +53,8 @@ impl Tally {
             return;
         }
         self.since_start.started_said = true;
-        send_door_event(device, door_id, &started());
+        let reason = device.connectors.firmware().start_reason();
+        send_door_event(device, door_id, &started(reason));
     }
 
     pub(crate) fn door_moved(&mut self, open: bool) {
@@ -94,12 +95,26 @@ impl Tally {
     }
 }
 
-/// The door saying it started.
-fn started() -> DoorEvent {
+/// The door saying it started, and why.
+fn started(reason: StartReason) -> DoorEvent {
     DoorEvent {
         event: protocol::EVENT_STARTED.to_owned(),
         unlocked: None,
         open_ms: None,
+        reason: Some(start_reason_text(reason).to_owned()),
+    }
+}
+
+/// How the door event names why the door started.
+fn start_reason_text(reason: StartReason) -> &'static str {
+    match reason {
+        StartReason::PowerOn => "power_on",
+        StartReason::Software => "software",
+        StartReason::Panic => "panic",
+        StartReason::Watchdog => "watchdog",
+        StartReason::Brownout => "brownout",
+        StartReason::External => "external",
+        StartReason::Unknown => "unknown",
     }
 }
 
@@ -109,6 +124,7 @@ pub(crate) fn opened(unlocked: bool) -> DoorEvent {
         event: protocol::EVENT_OPENED.to_owned(),
         unlocked: Some(unlocked),
         open_ms: None,
+        reason: None,
     }
 }
 
@@ -118,6 +134,7 @@ pub(crate) fn closed(open_ms: Option<u64>) -> DoorEvent {
         event: protocol::EVENT_CLOSED.to_owned(),
         unlocked: None,
         open_ms,
+        reason: None,
     }
 }
 

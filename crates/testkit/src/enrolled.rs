@@ -51,13 +51,14 @@ pub fn door_online_status() -> Sent {
     door_online_status_as(DOOR_USERNAME)
 }
 
-/// Door 7 saying that it started, not retained.
+/// Door 7 saying that it started on power-up, not retained.
 pub fn door_started() -> Sent {
     Sent {
         topic: "doorcode/doors/7/event".to_owned(),
         retain: false,
         message: Message::DoorEvent(DoorEvent {
             event: "started".to_owned(),
+            reason: Some("power_on".to_owned()),
             ..DoorEvent::default()
         }),
     }

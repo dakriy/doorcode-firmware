@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::ptr;
 
-use connectors::{Firmware, FirmwareError};
+use connectors::{Firmware, FirmwareError, StartReason};
 use esp_idf_svc::sys::{self, esp_ota_handle_t, esp_partition_t, EspError};
 
 /// The version this image was built as.
@@ -58,6 +58,35 @@ const fn text<const N: usize>(value: &str) -> [core::ffi::c_char; N] {
 /// The public key firmware images are signed with.
 const SIGNING_KEY: &[u8] = include_bytes!("../signing_public_key.bin");
 
+/// The start reason for each reset reason ESP-IDF reports; any other is
+/// `StartReason::Unknown`.
+const START_REASONS: [(sys::esp_reset_reason_t, StartReason); 9] = [
+    (
+        sys::esp_reset_reason_t_ESP_RST_POWERON,
+        StartReason::PowerOn,
+    ),
+    (sys::esp_reset_reason_t_ESP_RST_SW, StartReason::Software),
+    (sys::esp_reset_reason_t_ESP_RST_PANIC, StartReason::Panic),
+    (
+        sys::esp_reset_reason_t_ESP_RST_INT_WDT,
+        StartReason::Watchdog,
+    ),
+    (
+        sys::esp_reset_reason_t_ESP_RST_TASK_WDT,
+        StartReason::Watchdog,
+    ),
+    (sys::esp_reset_reason_t_ESP_RST_WDT, StartReason::Watchdog),
+    (
+        sys::esp_reset_reason_t_ESP_RST_BROWNOUT,
+        StartReason::Brownout,
+    ),
+    (sys::esp_reset_reason_t_ESP_RST_EXT, StartReason::External),
+    (
+        sys::esp_reset_reason_t_ESP_RST_UNKNOWN,
+        StartReason::Unknown,
+    ),
+];
+
 /// What `write`, `finish`, and `set_boot` report with no install begun.
 const NOT_BEGUN: &str = "no install begun";
 
@@ -91,6 +120,15 @@ fn not_begun() -> FirmwareError {
 impl Firmware for EspFirmware {
     fn running_version(&self) -> String {
         VERSION.to_owned()
+    }
+
+    fn start_reason(&self) -> StartReason {
+        // SAFETY: takes no arguments.
+        let reset = unsafe { sys::esp_reset_reason() };
+        START_REASONS
+            .iter()
+            .find(|(code, _)| *code == reset)
+            .map_or(StartReason::Unknown, |(_, reason)| *reason)
     }
 
     fn signing_key(&self) -> Vec<u8> {

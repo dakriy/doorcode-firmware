@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use connectors::{Firmware, FirmwareError};
+use connectors::{Firmware, FirmwareError, StartReason};
 
 /// The public key firmware images are signed with, `x || y`.
 const SIGNING_KEY: &[u8] = include_bytes!("../../../firmware/signing_public_key.bin");
@@ -80,6 +80,11 @@ fn failure(error: std::io::Error) -> FirmwareError {
 impl Firmware for HostFirmware {
     fn running_version(&self) -> String {
         self.version.clone()
+    }
+
+    /// A desktop run starts as a device powering up would.
+    fn start_reason(&self) -> StartReason {
+        StartReason::PowerOn
     }
 
     fn signing_key(&self) -> Vec<u8> {

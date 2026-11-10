@@ -207,10 +207,31 @@ impl fmt::Display for DownloadError {
 
 impl std::error::Error for DownloadError {}
 
+/// Why the device started this time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartReason {
+    /// Power was applied.
+    PowerOn,
+    /// The firmware asked for the restart.
+    Software,
+    /// The firmware panicked.
+    Panic,
+    /// A watchdog reset the device.
+    Watchdog,
+    /// The supply voltage dropped too low.
+    Brownout,
+    /// The reset pin was pulled.
+    External,
+    /// Something else, or the system cannot tell.
+    Unknown,
+}
+
 /// The firmware images the device boots, and the device as a whole.
 pub trait Firmware {
     /// The version of the running image.
     fn running_version(&self) -> String;
+    /// Why the device started this time.
+    fn start_reason(&self) -> StartReason;
     /// The raw P-256 public key, `x || y`, that images must be signed with.
     fn signing_key(&self) -> Vec<u8>;
     /// Whether this boot is the first on a newly installed image, which the
