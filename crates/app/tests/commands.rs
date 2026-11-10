@@ -429,12 +429,12 @@ fn both_credentials_refused_in_a_row_is_revocation_and_the_door_enrolls_again() 
     assert_eq!(
         (
             report.door,
-            connectors.storage.keys().len(),
+            connectors.storage.keys(),
             (status.phase, status.door_id, status.connection)
         ),
         (
             None,
-            StubStorage::provisioned().keys().len(),
+            StubStorage::provisioned().keys(),
             (Phase::Enrolling, None, ConnectionState::Connecting)
         )
     );
