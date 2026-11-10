@@ -339,11 +339,14 @@ pub const EVENT_CLOSED: &str = "closed";
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DoorEvent {
     pub event: String,
+    /// On `opened`: whether the door was unlocked as it opened.
+    pub unlocked: Option<bool>,
 }
 
 message! {
     DoorEvent {
         event: always,
+        unlocked: unless_none,
     }
 }
 

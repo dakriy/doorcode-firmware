@@ -328,12 +328,14 @@ impl Door {
     }
 
     /// Locks the strike when the door opens, counts the opening, and says
-    /// so to the server while online and outside an open span.
+    /// so to the server while online and outside an open span, with
+    /// whether the door was unlocked as it moved, taken before the lock.
     fn door_moved(&mut self, device: &Device<'_>, open: bool) {
+        let unlocked = self.gate.is_unlocked(device);
         self.gate.door_moved(device, open);
         self.tally.door_moved(open);
         if self.is_online() && self.mode(device) != Mode::Open {
-            telemetry::send_door_event(device, self.credentials.door_id, open);
+            telemetry::send_door_event(device, self.credentials.door_id, open, unlocked);
         }
     }
 

@@ -114,10 +114,24 @@ Every field is always sent. Nothing is kept to send later.
 | `mesh_parent` | text | The hardware id of the door this one hops through, 12 lowercase hex digits; empty when joined to the access point directly. |
 | `mesh_children` | uint | Doors joined to this door's soft-AP; 0 without the mesh. |
 
-The door also publishes `opened` and `closed` on
-`doorcode/doors/<id>/event` when the door sensor changes outside an open
-span, and its online status, retained, on `doorcode/doors/<id>/online`
-when it connects, with a last will saying it went offline.
+## Door events
+
+The door publishes `opened` and `closed` on `doorcode/doors/<id>/event`,
+not retained, when the door sensor changes outside an open span and the
+door is connected. Nothing is kept to send later.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `event` | text | `opened` or `closed`. |
+| `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Left out of `closed`. |
+
+The door reports the fact only; whether an opening while locked is an
+alarm is the server's decision. A server that does not know `unlocked`
+ignores it.
+
+The door also publishes its online status, retained, on
+`doorcode/doors/<id>/online` when it connects, with a last will saying it
+went offline.
 
 ## Other messages
 

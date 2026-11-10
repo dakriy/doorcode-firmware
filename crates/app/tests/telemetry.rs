@@ -5,10 +5,10 @@
 use app::Counters;
 use connectors::{Event, Level, Mesh};
 use pretty_assertions::assert_eq;
-use protocol::{Config, DoorEvent, Reply, Span, Telemetry, Timeline};
+use protocol::{Command, Config, DoorEvent, Reply, Span, Telemetry, Timeline};
 use testkit::{
-    config_for, door_online_status, hex, reply_for, timeline_for, typed, BrokerCall, Message, Sent,
-    StubBroker, StubConnectors, StubDoorSensor, StubEvents, StubFirmware, StubRadio,
+    command_for, config_for, door_online_status, hex, reply_for, timeline_for, typed, BrokerCall,
+    Message, Sent, StubBroker, StubConnectors, StubDoorSensor, StubEvents, StubFirmware, StubRadio,
 };
 
 /// A time inside the open span of `open_span`.
@@ -83,14 +83,44 @@ fn telemetry_sent(telemetry: Telemetry) -> Sent {
     }
 }
 
-fn door_event_sent(event: &str) -> Sent {
+fn door_event_sent(event: &str, unlocked: Option<bool>) -> Sent {
     Sent {
         topic: "doorcode/doors/7/event".to_owned(),
         retain: false,
         message: Message::DoorEvent(DoorEvent {
             event: event.to_owned(),
+            unlocked,
         }),
     }
+}
+
+/// The door events the door published, in order.
+fn door_events(connectors: &StubConnectors) -> Vec<DoorEvent> {
+    publications(connectors)
+        .into_iter()
+        .filter_map(|sent| match sent.message {
+            Message::DoorEvent(event) => Some(event),
+            _ => None,
+        })
+        .collect()
+}
+
+fn opened(unlocked: bool) -> DoorEvent {
+    DoorEvent {
+        event: "opened".to_owned(),
+        unlocked: Some(unlocked),
+    }
+}
+
+/// The server releasing the strike for `strike_ms`.
+fn open_for(strike_ms: u64) -> Event {
+    let command = Command {
+        id: "c1".to_owned(),
+        command: "open".to_owned(),
+        strike_ms,
+        ..Command::default()
+    };
+    command_for(7, &command)
 }
 
 fn reporting_every(telemetry_interval_s: u64) -> Event {
@@ -291,8 +321,8 @@ fn the_door_opening_and_closing_is_said_on_the_event_topic_not_retained() {
         publications(&connectors),
         vec![
             door_online_status(),
-            door_event_sent("opened"),
-            door_event_sent("closed")
+            door_event_sent("opened", Some(false)),
+            door_event_sent("closed", None)
         ]
     );
 }
@@ -305,8 +335,50 @@ fn the_door_opening_is_encoded_as_the_contract_example() {
 
     assert_eq!(
         connectors.broker.published_payloads().last(),
-        Some(&hex("a2617601656576656e74666f70656e6564"))
+        Some(&hex(
+            "a3617601656576656e74666f70656e656468756e6c6f636b6564f4"
+        ))
     );
+}
+
+#[test]
+fn a_door_opening_with_the_strike_released_says_it_was_unlocked() {
+    let events = [(100, open_for(3000)), (200, Event::Door { open: true })];
+    let connectors = online_until(201, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![opened(true)]);
+}
+
+#[test]
+fn a_door_opening_with_the_strike_never_released_says_it_was_locked() {
+    let connectors = online_until(201, [(200, Event::Door { open: true })]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![opened(false)]);
+}
+
+#[test]
+fn a_door_opening_half_a_second_after_the_strike_locked_again_says_it_was_unlocked() {
+    // Released at 100 for a second, the strike locks again at 1100.
+    let events = [(100, open_for(1000)), (1600, Event::Door { open: true })];
+    let connectors = online_until(1601, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![opened(true)]);
+}
+
+#[test]
+fn a_door_opening_longer_than_half_a_second_after_the_strike_locked_again_says_it_was_locked() {
+    let events = [(100, open_for(1000)), (1601, Event::Door { open: true })];
+    let connectors = online_until(1602, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![opened(false)]);
 }
 
 #[test]

@@ -133,6 +133,11 @@ impl Gate {
         self.latency_ms
     }
 
+    /// Whether the door is unlocked now; see `Latch::is_unlocked`.
+    pub(crate) fn is_unlocked(&self, device: &Device<'_>) -> bool {
+        self.latch.is_unlocked(device)
+    }
+
     pub(crate) fn strike_released(&self) -> bool {
         self.latch.is_released()
     }
