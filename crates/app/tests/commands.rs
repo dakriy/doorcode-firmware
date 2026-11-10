@@ -8,8 +8,8 @@ use pretty_assertions::assert_eq;
 use protocol::{Ack, Command, Config, Credentials};
 use testkit::{
     command_for, config_for, credentials_for, door_coming_online, door_coming_online_as,
-    door_connection_as, door_message, door_online_status, hex, BrokerCall, Message, Sent,
-    StubBroker, StubConnectors, StubStorage, DOOR_TOKEN, DOOR_USERNAME,
+    door_connection_as, door_message, door_online_status, door_started, hex, BrokerCall, Message,
+    Sent, StubBroker, StubConnectors, StubStorage, DOOR_TOKEN, DOOR_USERNAME,
 };
 
 const ID: &str = "0123456789abcdef";
@@ -182,7 +182,7 @@ fn a_command_that_does_not_decode_is_logged_and_ignored() {
                 "ignored a command: Malformed(\"unexpected type string at position 0: expected map\")"
                     .to_owned()
             ],
-            Some(BrokerCall::Publish(door_online_status()))
+            Some(BrokerCall::Publish(door_started()))
         )
     );
 }
@@ -208,16 +208,19 @@ fn an_ack_the_broker_does_not_take_is_logged_and_the_command_still_carried_out()
 #[test]
 fn a_reboot_is_acked_done_and_restarts_without_closing_the_connection_once_the_ack_is_acknowledged()
 {
-    // The online status is publication 1 and the ack publication 2.
+    // The online status is publication 1, the start 2, and the ack 3.
     let connectors =
-        StubConnectors::online([(10, reboot()), (20, Event::Delivered { message_id: 2 })]);
+        StubConnectors::online([(10, reboot()), (20, Event::Delivered { message_id: 3 })]);
 
     app::run(&connectors).unwrap();
 
     let calls = [
         vec![connection_as(OLD_USERNAME, OLD_TOKEN)],
         door_coming_online(),
-        vec![BrokerCall::Publish(ack_sent("done", ""))],
+        vec![
+            BrokerCall::Publish(door_started()),
+            BrokerCall::Publish(ack_sent("done", "")),
+        ],
     ]
     .concat();
     assert_eq!(
@@ -261,8 +264,8 @@ fn without_an_acknowledgement_a_reboot_restarts_five_seconds_after_its_ack() {
 fn an_acknowledgement_after_the_restart_restarts_nothing_more() {
     let connectors = StubConnectors::online([
         (10, reboot()),
-        (20, Event::Delivered { message_id: 2 }),
-        (30, Event::Delivered { message_id: 2 }),
+        (20, Event::Delivered { message_id: 3 }),
+        (30, Event::Delivered { message_id: 3 }),
         (6000, Event::Stop),
     ]);
 
@@ -291,7 +294,7 @@ fn new_credentials_are_stored_beside_the_old_and_the_door_reconnects_with_them()
 
     let calls = connectors.broker.calls();
     assert_eq!(
-        (calls[6..].to_vec(), stored_pairs(&connectors)),
+        (calls[7..].to_vec(), stored_pairs(&connectors)),
         (
             vec![
                 BrokerCall::Disconnect,
@@ -310,7 +313,7 @@ fn online_with_the_new_credentials_the_door_says_so_with_the_new_username_and_fo
 
     let calls = connectors.broker.calls();
     assert_eq!(
-        (calls[8..].to_vec(), stored_pairs(&connectors), report.door),
+        (calls[9..].to_vec(), stored_pairs(&connectors), report.door),
         (
             door_coming_online_as(NEW_USERNAME),
             [
@@ -499,8 +502,9 @@ fn a_door_restarted_during_a_hand_over_connects_with_the_new_credentials() {
     );
 }
 
-#[test]
-fn reconnects_count_on_after_the_door_is_revoked_and_enrolls_again() {
+/// Connected twice as the door, then revoked, enrolled as door 7 again,
+/// and connected.
+fn revoked_and_enrolled_again() -> StubConnectors {
     let approval = credentials_for(
         "a1b2c3d4e5f6",
         &Credentials {
@@ -509,8 +513,7 @@ fn reconnects_count_on_after_the_door_is_revoked_and_enrolls_again() {
             token: OLD_TOKEN.to_owned(),
         },
     );
-    // Connected twice as the door, then revoked, enrolled, and connected.
-    let connectors = StubConnectors::online([
+    StubConnectors::online([
         (10, Event::Disconnected),
         (1100, Event::Connected),
         (1200, Event::Disconnected),
@@ -518,7 +521,37 @@ fn reconnects_count_on_after_the_door_is_revoked_and_enrolls_again() {
         (2400, Event::Connected),
         (2500, approval),
         (2600, Event::Connected),
-    ]);
+    ])
+}
+
+/// How often the door said that it started.
+fn starts_said(connectors: &StubConnectors) -> usize {
+    let started = BrokerCall::Publish(door_started());
+    let calls = connectors.broker.calls();
+    calls.iter().filter(|call| **call == started).count()
+}
+
+#[test]
+fn a_door_handed_over_to_new_credentials_said_it_started_only_once() {
+    let connectors = StubConnectors::online([(10, new_credentials()), (20, Event::Connected)]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(starts_said(&connectors), 1);
+}
+
+#[test]
+fn a_door_revoked_and_enrolled_again_said_it_started_only_once() {
+    let connectors = revoked_and_enrolled_again();
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(starts_said(&connectors), 1);
+}
+
+#[test]
+fn reconnects_count_on_after_the_door_is_revoked_and_enrolls_again() {
+    let connectors = revoked_and_enrolled_again();
 
     let report = app::run(&connectors).unwrap();
 

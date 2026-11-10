@@ -7,9 +7,9 @@ use connectors::{BrokerAddress, Event, Level, Phase};
 use pretty_assertions::assert_eq;
 use protocol::{Config, Span, Timeline};
 use testkit::{
-    config_for, door_coming_online, door_connection_to, door_message, door_online_status, hex,
-    timeline_for, BrokerCall, Connection, StubBroker, StubConnectors, StubEvents, StubRandom,
-    StubStorage,
+    config_for, door_coming_online, door_connection_to, door_message, door_online_status,
+    door_started, hex, timeline_for, BrokerCall, Connection, StubBroker, StubConnectors,
+    StubEvents, StubRandom, StubStorage,
 };
 
 /// The door, started again after a run in which it received `event`, with
@@ -113,7 +113,8 @@ fn once_connected_it_subscribes_to_its_four_topics_and_then_publishes_its_status
             subscription("timeline"),
             subscription("reply"),
             subscription("command"),
-            online_status()
+            online_status(),
+            BrokerCall::Publish(door_started())
         ]
     );
 }
@@ -125,10 +126,10 @@ fn the_online_status_is_encoded_with_the_contract_field_names() {
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        connectors.broker.published_payloads(),
-        vec![hex(
+        connectors.broker.published_payloads().first(),
+        Some(&hex(
             "a5617601666f6e6c696e65f5667369676e616c383c68757365726e616d6573646f6f722d372d303132333435363738396162706669726d776172655f76657273696f6e65322e302e30"
-        )]
+        ))
     );
 }
 
@@ -844,7 +845,7 @@ fn after_a_wait_it_connects_again() {
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        connectors.broker.calls()[6..].to_vec(),
+        connectors.broker.calls()[7..].to_vec(),
         [vec![door_connection()], door_coming_online()].concat()
     );
 }

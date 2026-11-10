@@ -14,7 +14,7 @@ use crate::access::{Gate, Situation};
 use crate::command::{self, Order, PendingRestart};
 use crate::device::Device;
 use crate::rotation::Rotation;
-use crate::telemetry::{self, Tally};
+use crate::telemetry::{self, SinceStart, Tally};
 use crate::update::{self, Boot, Install};
 use crate::{enrollment, stored, timeline, ConnectionState, Mode, Phase, RunError, RunReport};
 
@@ -94,13 +94,13 @@ impl Link {
 
 /// Starts serving as the door with the configuration and timeline stored
 /// from the last time, and connects: with the new credentials when a
-/// hand-over was under way. `connections` counts the door connections the
-/// controller made before, as the door it was until revoked.
+/// hand-over was under way. `since_start` is what the controller did as a
+/// door before, as the door it was until revoked.
 pub(crate) fn start(
     device: &Device<'_>,
     credentials: Credentials,
     broker: BrokerAddress,
-    connections: u64,
+    since_start: SinceStart,
 ) -> Result<Door, RunError> {
     let storage = device.connectors.storage();
     let next = stored::next_credentials(storage, credentials.door_id)?;
@@ -120,7 +120,7 @@ pub(crate) fn start(
         link: Link::Connecting,
         failures: 0,
         gate: Gate::default(),
-        tally: Tally::after(connections),
+        tally: Tally::after(since_start),
         opened_at_ms: None,
         restart: None,
         install: None,
@@ -413,13 +413,15 @@ impl Door {
     }
 
     /// Subscribes first, so the retained configuration and timeline arrive
-    /// whatever happens to the online status.
-    /// The first telemetry report follows the online status shortly.
+    /// whatever happens to the online status. The first time since the
+    /// controller started, says so after the online status, in an open span
+    /// too. The first telemetry report follows the online status shortly.
     fn come_online(mut self, device: &Device<'_>) -> Result<Door, RunError> {
         self.tally.connected();
         if let Err(error) = self.subscribe_and_publish_online(device) {
             return Ok(self.pause(device, &error.to_string()));
         }
+        self.tally.say_started(device, self.credentials.door_id);
         std::mem::replace(&mut self.boot, Boot::Settled)
             .online(device, self.credentials.door_id)?;
         let door = Door {
@@ -551,11 +553,11 @@ impl Door {
                 self.credentials.door_id
             ),
         );
-        let connections = self.tally.connections();
+        let since_start = self.tally.since_start();
         Ok(Phase::Enrolling(enrollment::start(
             device,
             self.broker,
-            connections,
+            since_start,
         )))
     }
 

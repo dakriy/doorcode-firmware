@@ -2,7 +2,7 @@
 //! the broker with the default stubs.
 
 use connectors::BrokerAddress;
-use protocol::Online;
+use protocol::{DoorEvent, Online};
 
 use crate::{BrokerCall, Connection, Message, Sent};
 
@@ -49,6 +49,18 @@ pub fn door_connection_as(username: &str, token: &str) -> Connection {
 /// Door 7's retained online status.
 pub fn door_online_status() -> Sent {
     door_online_status_as(DOOR_USERNAME)
+}
+
+/// Door 7 saying that it started, not retained.
+pub fn door_started() -> Sent {
+    Sent {
+        topic: "doorcode/doors/7/event".to_owned(),
+        retain: false,
+        message: Message::DoorEvent(DoorEvent {
+            event: "started".to_owned(),
+            ..DoorEvent::default()
+        }),
+    }
 }
 
 /// What door 7 asks of the broker once a connection is accepted: its four

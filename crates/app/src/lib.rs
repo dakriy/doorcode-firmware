@@ -28,6 +28,7 @@ use protocol::{Check, Config, Credentials, Timeline};
 use device::Device;
 use door::Door;
 use enrollment::Enrolling;
+use telemetry::SinceStart;
 
 /// What the controller ends a run with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,11 +152,13 @@ impl Phase {
     /// A door when its credentials are stored, otherwise enrolling.
     fn start(device: &Device<'_>) -> Result<Phase, RunError> {
         let broker = device.provisioning.broker.clone();
+        let since_start = SinceStart::default();
         let phase = match stored::door_credentials(device.connectors.storage())? {
             Some(credentials) => {
-                Phase::Door(Box::new(door::start(device, credentials, broker, 0)?))
+                let door = door::start(device, credentials, broker, since_start)?;
+                Phase::Door(Box::new(door))
             }
-            None => Phase::Enrolling(enrollment::start(device, broker, 0)),
+            None => Phase::Enrolling(enrollment::start(device, broker, since_start)),
         };
         Ok(phase)
     }

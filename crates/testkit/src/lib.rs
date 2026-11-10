@@ -21,7 +21,7 @@ pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
 pub use door::{StrikeCall, StubDoorSensor, StubStrike};
 pub use enrolled::{
     door_coming_online, door_coming_online_as, door_connection_as, door_connection_to,
-    door_online_status, DOOR_TOKEN, DOOR_USERNAME,
+    door_online_status, door_started, DOOR_TOKEN, DOOR_USERNAME,
 };
 pub use events::{
     command_for, config_for, credentials_for, door_message, downloaded, reply_for, timeline_for,

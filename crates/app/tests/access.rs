@@ -7,9 +7,9 @@ use connectors::{Event, Level, Phase, ReceivedReply, SentCheck, StatusReport};
 use pretty_assertions::assert_eq;
 use protocol::{Check, Config, Reply, Span, Timeline};
 use testkit::{
-    config_for, door_coming_online, door_connection_to, door_message, hex, reply_for, timeline_for,
-    typed, BrokerCall, Message, Sent, StrikeCall, StubBroker, StubConnectors, StubDoorSensor,
-    StubEvents, StubRandom, StubStorage,
+    config_for, door_coming_online, door_connection_to, door_message, door_started, hex, reply_for,
+    timeline_for, typed, BrokerCall, Message, Sent, StrikeCall, StubBroker, StubConnectors,
+    StubDoorSensor, StubEvents, StubRandom, StubStorage,
 };
 
 /// The request id the contract's examples use.
@@ -107,10 +107,12 @@ fn mode_at(timeline: &Timeline, unix_seconds: i64) -> Mode {
     app::run(&StubConnectors::enrolled(events)).unwrap().mode
 }
 
-/// What door 7 asks of the broker to connect and come online.
+/// What door 7 asks of the broker to connect and come online the first
+/// time, saying that it started.
 fn door_connecting_and_coming_online() -> Vec<BrokerCall> {
     let connection = BrokerCall::Connect(door_connection_to("broker.example.org"));
-    [vec![connection], door_coming_online()].concat()
+    let started = BrokerCall::Publish(door_started());
+    [vec![connection], door_coming_online(), vec![started]].concat()
 }
 
 #[test]

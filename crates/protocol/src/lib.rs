@@ -330,12 +330,14 @@ message! {
     }
 }
 
+/// The door saying it started.
+pub const EVENT_STARTED: &str = "started";
 /// The door saying it opened.
 pub const EVENT_OPENED: &str = "opened";
 /// The door saying it closed.
 pub const EVENT_CLOSED: &str = "closed";
 
-/// Something that happened to a door: `opened` or `closed`.
+/// Something that happened to a door: `started`, `opened`, or `closed`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DoorEvent {
     pub event: String,

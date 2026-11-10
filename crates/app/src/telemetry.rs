@@ -1,6 +1,6 @@
 //! What the door tells the server about itself while connected: telemetry
-//! at the configured interval, and each time it opens or closes outside an
-//! open span. Nothing is kept to send later.
+//! at the configured interval, once that it started, and each time it opens
+//! or closes outside an open span. Nothing is kept to send later.
 
 use connectors::Level;
 use protocol::{DoorEvent, Telemetry};
@@ -11,31 +11,49 @@ use crate::Counters;
 /// How long after the online status the first report goes out.
 pub(crate) const FIRST_REPORT_AFTER_MS: u64 = 1000;
 
-pub(crate) struct Tally {
-    /// Connections since the door started; each after the first is a
-    /// reconnect.
+/// What the controller has done as a door since it started, kept while it
+/// enrolls again after being revoked.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SinceStart {
+    /// Connections as a door; each after the first is a reconnect.
     connections: u64,
+    /// Whether the door has said that it started.
+    started_said: bool,
+}
+
+pub(crate) struct Tally {
+    since_start: SinceStart,
     /// Times the door opened since the last report.
     opens: u64,
 }
 
 impl Tally {
-    /// Counting on from `connections` the door made before, as another
-    /// door it was until revoked.
-    pub(crate) fn after(connections: u64) -> Tally {
+    /// Counting on from what the controller did before, as another door it
+    /// was until revoked.
+    pub(crate) fn after(since_start: SinceStart) -> Tally {
         Tally {
-            connections,
+            since_start,
             opens: 0,
         }
     }
 
-    /// Connections since the controller started.
-    pub(crate) fn connections(&self) -> u64 {
-        self.connections
+    /// What the controller did as a door since it started.
+    pub(crate) fn since_start(&self) -> SinceStart {
+        self.since_start
     }
 
     pub(crate) fn connected(&mut self) {
-        self.connections += 1;
+        self.since_start.connections += 1;
+    }
+
+    /// Says that the door started, the first time it is online since the
+    /// controller started.
+    pub(crate) fn say_started(&mut self, device: &Device<'_>, door_id: u64) {
+        if self.since_start.started_said {
+            return;
+        }
+        self.since_start.started_said = true;
+        send_door_event(device, door_id, &started());
     }
 
     pub(crate) fn door_moved(&mut self, open: bool) {
@@ -47,7 +65,7 @@ impl Tally {
     pub(crate) fn counters(&self, latency_ms: u64) -> Counters {
         Counters {
             opens: self.opens,
-            reconnects: self.connections.saturating_sub(1),
+            reconnects: self.since_start.connections.saturating_sub(1),
             latency_ms,
         }
     }
@@ -76,6 +94,15 @@ impl Tally {
     }
 }
 
+/// The door saying it started.
+fn started() -> DoorEvent {
+    DoorEvent {
+        event: protocol::EVENT_STARTED.to_owned(),
+        unlocked: None,
+        open_ms: None,
+    }
+}
+
 /// The door saying it opened, and whether it was `unlocked` then.
 pub(crate) fn opened(unlocked: bool) -> DoorEvent {
     DoorEvent {
@@ -94,7 +121,7 @@ pub(crate) fn closed(open_ms: Option<u64>) -> DoorEvent {
     }
 }
 
-/// Says that the door opened or closed.
+/// Says that the door started, opened, or closed.
 pub(crate) fn send_door_event(device: &Device<'_>, door_id: u64, message: &DoorEvent) {
     if let Err(error) = device.publish(door_id, protocol::LEAF_EVENT, message.encode()) {
         device.log(

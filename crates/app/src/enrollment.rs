@@ -8,6 +8,7 @@ use connectors::{
 use protocol::{Config, Credentials, Enrollment, Timeline};
 
 use crate::device::Device;
+use crate::telemetry::SinceStart;
 use crate::{door, stored, Access, ConnectionState, Counters, Phase, RunError, RunReport};
 
 /// The broker drops the connection after one and a half of these without a packet.
@@ -23,9 +24,9 @@ pub(crate) struct Enrolling {
     /// The broker to enroll at.
     broker: BrokerAddress,
     step: Step,
-    /// Connections as a door since the controller started, counted on
-    /// once it is a door again.
-    door_connections: u64,
+    /// What the controller did as a door since it started, carried on once
+    /// it is a door again.
+    since_start: SinceStart,
 }
 
 enum Step {
@@ -40,14 +41,14 @@ enum Step {
 pub(crate) fn start(
     device: &Device<'_>,
     broker: BrokerAddress,
-    door_connections: u64,
+    since_start: SinceStart,
 ) -> Enrolling {
     device.log(Level::Info, &format!("enrolling as {}", device.hardware_id));
     let step = connect(device, &broker);
     Enrolling {
         broker,
         step,
-        door_connections,
+        since_start,
     }
 }
 
@@ -146,7 +147,7 @@ impl Enrolling {
             Level::Info,
             &format!("enrolled as door {}", credentials.door_id),
         );
-        let door = door::start(device, credentials, self.broker, self.door_connections)?;
+        let door = door::start(device, credentials, self.broker, self.since_start)?;
         Ok(Phase::Door(Box::new(door)))
     }
 }

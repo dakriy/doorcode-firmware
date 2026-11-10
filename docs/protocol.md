@@ -120,11 +120,17 @@ The door publishes `opened` and `closed` on `doorcode/doors/<id>/event`,
 not retained, when the door sensor changes outside an open span and the
 door is connected. Nothing is kept to send later.
 
+It publishes `started` on the same topic once after it starts: the first
+time it comes online as a door, right after its online status, in an open
+span too. It does not say it again until it starts again, however often it
+reconnects, hands over to new credentials, or is revoked and enrolled
+again. `started` carries only `event`, so the server can log restarts.
+
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `event` | text | `opened` or `closed`. |
-| `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Left out of `closed`. |
-| `open_ms` | uint | On `closed` only: how long the door was open, in milliseconds on the door's own monotonic clock, from the sensor seeing it open to seeing it closed. Sent only when the door saw the opening itself, since it started and outside an open span, whether or not it was connected then. Left out when the door was already open when it started, or opened during an open span and closed after it ended. Never on `opened`. |
+| `event` | text | `started`, `opened`, or `closed`. |
+| `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Left out of `closed` and `started`. |
+| `open_ms` | uint | On `closed` only: how long the door was open, in milliseconds on the door's own monotonic clock, from the sensor seeing it open to seeing it closed. Sent only when the door saw the opening itself, since it started and outside an open span, whether or not it was connected then. Left out when the door was already open when it started, or opened during an open span and closed after it ended. Never on `opened` or `started`. |
 
 The door reports the fact only; whether an opening while locked is an
 alarm is the server's decision. A server that does not know `unlocked`

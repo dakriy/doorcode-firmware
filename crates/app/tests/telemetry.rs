@@ -1,14 +1,15 @@
 //! Entrypoint suite for what the door tells the server about itself while
-//! connected: telemetry at the configured interval, and the door opening
-//! and closing outside open spans.
+//! connected: telemetry at the configured interval, that it started, and
+//! the door opening and closing outside open spans.
 
 use app::Counters;
 use connectors::{Event, Level, Mesh};
 use pretty_assertions::assert_eq;
 use protocol::{Command, Config, DoorEvent, Reply, Span, Telemetry, Timeline};
 use testkit::{
-    command_for, config_for, door_online_status, hex, reply_for, timeline_for, typed, BrokerCall,
-    Message, Sent, StubBroker, StubConnectors, StubDoorSensor, StubEvents, StubFirmware, StubRadio,
+    command_for, config_for, door_online_status, door_started, hex, reply_for, timeline_for, typed,
+    BrokerCall, Message, Sent, StubBroker, StubConnectors, StubDoorSensor, StubEvents,
+    StubFirmware, StubRadio,
 };
 
 /// A time inside the open span of `open_span`.
@@ -102,6 +103,14 @@ fn door_events(connectors: &StubConnectors) -> Vec<DoorEvent> {
         .collect()
 }
 
+fn started() -> DoorEvent {
+    DoorEvent {
+        event: "started".to_owned(),
+        unlocked: None,
+        open_ms: None,
+    }
+}
+
 fn opened(unlocked: bool) -> DoorEvent {
     DoorEvent {
         event: "opened".to_owned(),
@@ -161,7 +170,11 @@ fn the_first_report_follows_the_online_status_a_second_later_with_every_field() 
 
     assert_eq!(
         publications(&connectors),
-        vec![door_online_status(), telemetry_sent(quiet_report(3))]
+        vec![
+            door_online_status(),
+            door_started(),
+            telemetry_sent(quiet_report(3))
+        ]
     );
 }
 
@@ -327,9 +340,63 @@ fn the_door_opening_and_closing_is_said_on_the_event_topic_not_retained() {
         publications(&connectors),
         vec![
             door_online_status(),
+            door_started(),
             door_event_sent(opened(false)),
             door_event_sent(closed(Some(100)))
         ]
+    );
+}
+
+#[test]
+fn the_start_is_said_once_on_the_event_topic_after_the_first_online_status() {
+    let connectors = online_until(10, []);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        publications(&connectors),
+        vec![door_online_status(), door_started()]
+    );
+}
+
+#[test]
+fn the_start_is_encoded_as_the_contract_example() {
+    let connectors = online_until(10, []);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.broker.published_payloads().last(),
+        Some(&hex("a2617601656576656e746773746172746564"))
+    );
+}
+
+#[test]
+fn the_start_is_said_inside_an_open_span_too() {
+    let events = [(0, timeline_for(7, &open_span()))];
+    let connectors =
+        StubConnectors::enrolled(script_online_until(10, events).at_unix(IN_OPEN_SPAN));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(door_events(&connectors), vec![started()]);
+}
+
+#[test]
+fn a_door_that_reconnects_says_it_started_only_the_first_time() {
+    let events = [
+        (100, Event::Disconnected),
+        (1200, Event::Connected),
+        (1300, Event::Disconnected),
+        (3400, Event::Connected),
+    ];
+    let connectors = online_until(3500, events);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (door_events(&connectors), report.counters.reconnects),
+        (vec![started()], 2)
     );
 }
 
@@ -354,7 +421,7 @@ fn a_door_opening_with_the_strike_released_says_it_was_unlocked() {
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![opened(true)]);
+    assert_eq!(door_events(&connectors), vec![started(), opened(true)]);
 }
 
 #[test]
@@ -363,7 +430,7 @@ fn a_door_opening_with_the_strike_never_released_says_it_was_locked() {
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![opened(false)]);
+    assert_eq!(door_events(&connectors), vec![started(), opened(false)]);
 }
 
 #[test]
@@ -374,7 +441,7 @@ fn a_door_opening_half_a_second_after_the_strike_locked_again_says_it_was_unlock
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![opened(true)]);
+    assert_eq!(door_events(&connectors), vec![started(), opened(true)]);
 }
 
 #[test]
@@ -384,7 +451,7 @@ fn a_door_opening_longer_than_half_a_second_after_the_strike_locked_again_says_i
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![opened(false)]);
+    assert_eq!(door_events(&connectors), vec![started(), opened(false)]);
 }
 
 #[test]
@@ -417,7 +484,10 @@ fn a_door_opened_while_disconnected_and_closed_once_connected_says_how_long_it_w
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![closed(Some(1300))]);
+    assert_eq!(
+        door_events(&connectors),
+        vec![started(), closed(Some(1300))]
+    );
 }
 
 #[test]
@@ -429,7 +499,7 @@ fn a_door_open_when_the_controller_started_closes_without_saying_how_long() {
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![closed(None)]);
+    assert_eq!(door_events(&connectors), vec![started(), closed(None)]);
 }
 
 #[test]
@@ -445,7 +515,7 @@ fn a_door_opened_in_an_open_span_and_closed_after_it_closes_without_saying_how_l
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(door_events(&connectors), vec![closed(None)]);
+    assert_eq!(door_events(&connectors), vec![started(), closed(None)]);
 }
 
 #[test]
@@ -464,6 +534,7 @@ fn inside_an_open_span_the_door_says_nothing_of_opening_and_it_is_counted() {
         publications(&connectors),
         vec![
             door_online_status(),
+            door_started(),
             telemetry_sent(Telemetry {
                 opens: 1,
                 ..quiet_report(1)
@@ -491,6 +562,7 @@ fn nothing_from_while_disconnected_is_sent_later_and_the_reconnect_is_counted() 
         (
             vec![
                 door_online_status(),
+                door_started(),
                 door_online_status(),
                 telemetry_sent(Telemetry {
                     reconnects: 1,
@@ -536,6 +608,6 @@ fn a_door_event_the_broker_does_not_take_is_logged() {
 
     assert_eq!(
         connectors.log.lines_at(Level::Warn),
-        vec!["the door event was not sent: broker: queue full".to_owned()]
+        vec!["the door event was not sent: broker: queue full".to_owned(); 2]
     );
 }
