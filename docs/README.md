@@ -23,7 +23,8 @@ live outside the repository.
   and the telemetry that shows it.
 - `testing.md`: the integration test that runs a desktop door against a
   development server, the load tool that runs many, and the bench files
-  that drive a real board.
+  that drive a real board. `../scripts/tests/README.md` summarizes each
+  test script: what it needs, how to run it, and what it leaves behind.
 
 The firmware workspace's own README, `../firmware/README.md`, covers
 building and flashing in the container, provisioning, the partition table,

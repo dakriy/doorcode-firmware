@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Checks scripts/bench-serial.py and scripts/bench-env.sh without a board:
-# the helper reads the recorded boot log in scripts/fixtures/bench-boot.txt
-# instead of a serial port, and the settings are loaded from a scratch copy
-# of the repository root. Runs with python3; BENCH_PYTHON picks another
-# interpreter command, such as BENCH_PYTHON='uvx --from esptool@5.6.0 python'.
+# Checks scripts/tests/bench-serial.py and scripts/tests/bench-env.sh without
+# a board: the helper reads the recorded boot log in
+# scripts/tests/fixtures/bench-boot.txt instead of a serial port, and the
+# settings are loaded from a scratch copy of the repository root. Runs with
+# python3; BENCH_PYTHON picks another interpreter command, such as
+# BENCH_PYTHON='uvx --from esptool@5.6.0 python'.
 # docs/testing.md describes the bench files.
 
 set -uo pipefail
 
 usage() {
     cat <<'USAGE'
-usage: scripts/bench-serial-selftest.sh [--help]
+usage: scripts/tests/bench-serial-selftest.sh [--help]
 
-Runs bench-serial.py against scripts/fixtures/bench-boot.txt and checks a
-match, a timeout, crash detection, the log file, and reset, then checks that
+Runs bench-serial.py against scripts/tests/fixtures/bench-boot.txt and checks
+a match, a timeout, crash detection, the log file, and reset, then checks that
 bench-env.sh loads test.env, applies defaults, and names missing keys.
 Prints one PASS or FAIL line per check and exits 1 when any fails.
 USAGE
@@ -24,9 +25,9 @@ case "${1:-}" in
 *) usage >&2; exit 2 ;;
 esac
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 read -ra PYTHON <<<"${BENCH_PYTHON:-python3}"
-FIXTURE="$ROOT/scripts/fixtures/bench-boot.txt"
+FIXTURE="$ROOT/scripts/tests/fixtures/bench-boot.txt"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 FAILED=0
@@ -38,7 +39,7 @@ fail() { echo "FAIL $1: $2"; FAILED=1; }
 # $WORK/out and its exit code in $CODE.
 CODE=""
 serial() {
-    "${PYTHON[@]}" "$ROOT/scripts/bench-serial.py" --from-file "$FIXTURE" "$@" >"$WORK/out" 2>&1
+    "${PYTHON[@]}" "$ROOT/scripts/tests/bench-serial.py" --from-file "$FIXTURE" "$@" >"$WORK/out" 2>&1
     CODE=$?
 }
 
@@ -95,8 +96,8 @@ check usage 3 "bench-serial.py watch: the following arguments are required: --se
 
 # --- Settings -----------------------------------------------------------------
 
-mkdir -p "$WORK/root/scripts"
-cp "$ROOT/scripts/bench-env.sh" "$WORK/root/scripts/"
+mkdir -p "$WORK/root/scripts/tests"
+cp "$ROOT/scripts/tests/bench-env.sh" "$WORK/root/scripts/tests/"
 cat >"$WORK/root/test.env" <<'SETTINGS'
 DOORCODE_SERVER=http://server.test
 DOORCODE_TOKEN=secret
@@ -106,7 +107,7 @@ SETTINGS
 # settings SNIPPET: sources the scratch bench-env.sh in a clean shell and
 # runs SNIPPET. Its output is in $WORK/out and its exit code in $CODE.
 settings() {
-    env -i PATH="$PATH" bash -c "set -uo pipefail; source '$WORK/root/scripts/bench-env.sh'; $1" \
+    env -i PATH="$PATH" bash -c "set -uo pipefail; source '$WORK/root/scripts/tests/bench-env.sh'; $1" \
         >"$WORK/out" 2>&1
     CODE=$?
 }

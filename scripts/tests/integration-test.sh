@@ -5,11 +5,15 @@
 # access rule, and a firmware version, and deletes them again: run it only
 # against a development server. docs/testing.md describes it.
 
+# The checks are called through eventually and the EXIT trap, which the
+# linter does not follow.
+# shellcheck disable=SC2329
+
 set -uo pipefail
 
 usage() {
     cat >&2 <<'EOF'
-usage: scripts/integration-test.sh --server URL --token TOKEN
+usage: scripts/tests/integration-test.sh --server URL --token TOKEN
            [--broker-host HOST] [--keep] [--timeout SECONDS]
 
   --server URL        the server's address, such as http://localhost:8080
@@ -46,7 +50,7 @@ for tool in curl jq cargo; do
     command -v "$tool" >/dev/null || { echo "integration-test: $tool is required" >&2; exit 2; }
 done
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
 FAILED=0
 

@@ -1,10 +1,12 @@
 # Testing against a server
 
 The repository's own suites (`make verify-fast`, `make verify-mutation`,
-`make verify-integration`) need no server. `scripts/integration-test.sh`
+`make verify-integration`) need no server. `scripts/tests/integration-test.sh`
 goes further: it runs one `doorcode-host` door against a real doorcode
 server and checks the controller contract end to end, through the server's
 JSON API and the host's control API (see `host.md`).
+[`scripts/tests/README.md`](../scripts/tests/README.md) summarizes each test
+script there: what it needs, how to run it, and what it leaves behind.
 
 The script creates entities on the server and deletes them again: a door,
 a user with a door code, a zone, a group, an access rule over the built-in
@@ -43,7 +45,7 @@ first administrator's password, which the server logs on its first start
 
 ## Running it
 
-    scripts/integration-test.sh --server http://localhost:8080 --token "$TOKEN"
+    scripts/tests/integration-test.sh --server http://localhost:8080 --token "$TOKEN"
 
 | Flag | Meaning |
 | --- | --- |
@@ -208,10 +210,10 @@ board through one helper.
 | File | What it is |
 | --- | --- |
 | `test.env.example` | Every bench setting, with a comment each. Copy it to `test.env` at the repository root, which is never committed, and fill it in. |
-| `scripts/bench-env.sh` | Sourced by the bench scripts. Loads `test.env` when present, applies the defaults, and `bench_env_require` names every missing or unusable setting and exits 2. |
-| `scripts/bench-serial.py` | Resets the board and watches its serial log. |
-| `scripts/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/fixtures/bench-boot.txt`. |
-| `scripts/bench-test.sh` | Runs the board against the server and checks it end to end (below). |
+| `scripts/tests/bench-env.sh` | Sourced by the bench scripts. Loads `test.env` when present, applies the defaults, and `bench_env_require` names every missing or unusable setting and exits 2. |
+| `scripts/tests/bench-serial.py` | Resets the board and watches its serial log. |
+| `scripts/tests/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/tests/fixtures/bench-boot.txt`. |
+| `scripts/tests/bench-test.sh` | Runs the board against the server and checks it end to end (below). |
 
 ## Settings
 
@@ -230,8 +232,8 @@ A bench script's command-line flags override the file.
 
 The helper needs pyserial, which esptool's environment carries:
 
-    uvx --from esptool@5.6.0 python scripts/bench-serial.py --port /dev/ttyUSB0 reset
-    uvx --from esptool@5.6.0 python scripts/bench-serial.py --port /dev/ttyUSB0 \
+    uvx --from esptool@5.6.0 python scripts/tests/bench-serial.py --port /dev/ttyUSB0 reset
+    uvx --from esptool@5.6.0 python scripts/tests/bench-serial.py --port /dev/ttyUSB0 \
       watch --seconds 60 --until 'sta ip:' --fail-on-crash --log bench.log
 
 `reset` releases DTR, holds RTS for 100 ms, and releases it, which resets
@@ -250,23 +252,23 @@ first. With `--fail-on-crash` it exits 2 at the first line holding
 board; the end of the file counts as the time running out. The self-test
 uses it:
 
-    scripts/bench-serial-selftest.sh
-    BENCH_PYTHON='uvx --from esptool@5.6.0 python' scripts/bench-serial-selftest.sh
+    scripts/tests/bench-serial-selftest.sh
+    BENCH_PYTHON='uvx --from esptool@5.6.0 python' scripts/tests/bench-serial-selftest.sh
 
 ## The bench run
 
-`scripts/bench-test.sh` flashes the board, makes it a door on the server,
-and checks it through the server's API and the board's serial log. Like the
+`scripts/tests/bench-test.sh` flashes the board, makes it a door on the
+server, and checks it through the server's API and the board's serial log. Like the
 integration test it creates a door and changes it: **run it only against a
 development server.** It needs `bash`, `curl`, `jq`, `uvx`, `make`, and
 `docker`, the settings `DOORCODE_SERVER` and `DOORCODE_TOKEN`, the board
 on `DOORCODE_SERIAL_PORT`, and for the firmware updates
 `DOORCODE_SIGNING_KEY`.
 
-    scripts/bench-test.sh --dry-run     # the steps and settings; touches nothing
-    scripts/bench-test.sh               # flash and run every step
-    scripts/bench-test.sh --no-flash    # the board already runs the image
-    scripts/bench-test.sh --skip-ota    # steps 1 to 7, 11, and 12; no signing key
+    scripts/tests/bench-test.sh --dry-run     # the steps and settings; touches nothing
+    scripts/tests/bench-test.sh               # flash and run every step
+    scripts/tests/bench-test.sh --no-flash    # the board already runs the image
+    scripts/tests/bench-test.sh --skip-ota    # steps 1 to 7, 11, and 12; no signing key
 
 | Flag | Meaning |
 | --- | --- |

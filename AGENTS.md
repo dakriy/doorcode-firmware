@@ -158,6 +158,7 @@ Tool installation on a fresh machine (none needs root):
 | Entrypoint suite | `crates/app/tests` |
 | Connector suite, and how a test is marked slow | `crates/connectors-host/tests`, `crates/host/tests`, `crates/swarm/tests`; a slow test carries `#[ignore = "slow"]` and runs only under `cargo test -- --ignored` |
 | Test support, stubs, and the stub factory | `crates/testkit/src`: `StubConnectors` in `lib.rs`, one `Stub*` per connector, the scripted events and messages a server sends in `events.rs`, and what enrolled door 7 asks of the broker in `enrolled.rs` |
+| Tests against a server and the bench board, outside the gates | `scripts/tests` (see its `README.md`) |
 
 The entry function and how tests pass it the stub factory:
 `app::run(&dyn connectors::Connectors) -> Result<RunReport, RunError>`.

@@ -95,8 +95,8 @@ it only for bench boards; it is `false` by default.
 
 ## Trying a release on the bench
 
-`scripts/bench-test.sh` goes through this flow on a bench board against a
-development server: it releases and uploads the next patch versions with
+`scripts/tests/bench-test.sh` goes through this flow on a bench board against
+a development server: it releases and uploads the next patch versions with
 `make firmware-release` and `make firmware-upload`, updates the board to a
 signed image, has an unsigned one refused and then accepted with
 `accept_unsigned_firmware`, and fails a download on purpose. "The bench

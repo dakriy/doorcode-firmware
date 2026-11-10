@@ -6,7 +6,7 @@
 # and the board's health over the run. It creates or restores a door for the
 # board, uploads firmware, and changes the device_url setting, and undoes all
 # of it again: run it only against a development server. Settings come from
-# test.env (scripts/bench-env.sh); docs/testing.md describes the run.
+# test.env (scripts/tests/bench-env.sh); docs/testing.md describes the run.
 
 # The checks are called through within, eventually, and the EXIT trap,
 # which the linter does not follow.
@@ -14,13 +14,13 @@
 
 set -uo pipefail
 
-# shellcheck source=scripts/bench-env.sh
+# shellcheck source=SCRIPTDIR/bench-env.sh
 source "$(dirname "$0")/bench-env.sh"
 
 usage() {
     cat <<'EOF'
-usage: scripts/bench-test.sh [--no-flash] [--skip-ota] [--keep] [--dry-run]
-           [--server URL] [--token TOKEN] [--signing-key PATH]
+usage: scripts/tests/bench-test.sh [--no-flash] [--skip-ota] [--keep]
+           [--dry-run] [--server URL] [--token TOKEN] [--signing-key PATH]
            [--port PORT] [--door-name NAME] [--timeout SECONDS]
 
 Settings come from test.env at the repository root (see test.env.example);
@@ -171,7 +171,7 @@ is() { local want="$1"; shift; [ "$("$@")" = "$want" ]; }
 
 # esptool's Python, which carries pyserial.
 ESPTOOL_PYTHON=(uvx --from esptool@5.6.0 python)
-SERIAL=("${ESPTOOL_PYTHON[@]}" "$ROOT/scripts/bench-serial.py" --port "$PORT")
+SERIAL=("${ESPTOOL_PYTHON[@]}" "$ROOT/scripts/tests/bench-serial.py" --port "$PORT")
 CRASH_TEXT='Guru Meditation Error|Backtrace:|abort\(\)|Task watchdog got triggered'
 # Lines that fail any step: crash text, and the Wi-Fi driver as an access
 # point.

@@ -2,8 +2,8 @@
 
 Run it with esptool's Python, which carries pyserial:
 
-    uvx --from esptool@5.6.0 python scripts/bench-serial.py --port /dev/ttyUSB0 reset
-    uvx --from esptool@5.6.0 python scripts/bench-serial.py --port /dev/ttyUSB0 \\
+    uvx --from esptool@5.6.0 python scripts/tests/bench-serial.py --port /dev/ttyUSB0 reset
+    uvx --from esptool@5.6.0 python scripts/tests/bench-serial.py --port /dev/ttyUSB0 \\
         watch --seconds 60 --until 'sta ip:' --fail-on-crash
 
 `watch` prints the board's log with its colour codes removed as it arrives.

@@ -5,12 +5,12 @@
 # a flag overrides the file, and then calls bench_env_require with the keys
 # it needs. test.env.example lists and explains every key.
 
-BENCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BENCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BENCH_ENV_FILE="$BENCH_ROOT/test.env"
 
 bench_env_usage() {
     cat <<'USAGE'
-usage: source scripts/bench-env.sh
+usage: source scripts/tests/bench-env.sh
        bench_env_require [KEY...]
 
 Loads test.env from the repository root if present and applies defaults:

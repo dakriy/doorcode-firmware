@@ -109,9 +109,10 @@ broker tests. `AGENTS.md` lists the gates and the commands.
   latency, traffic, and recovery from a dropped connection. See
   `testing.md`.
 
-`scripts/integration-test.sh` drives one `doorcode-host` door through the
-whole controller contract against a development server, through the
-server's API and the host's control API. See `testing.md`.
+`scripts/tests/integration-test.sh` drives one `doorcode-host` door through
+the whole controller contract against a development server, through the
+server's API and the host's control API. See `testing.md` and
+`../scripts/tests/README.md`.
 
 ## The firmware workspace
 
