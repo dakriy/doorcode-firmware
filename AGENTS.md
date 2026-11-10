@@ -276,6 +276,26 @@ Suppressed mutants, each with why it is equivalent.
 
 None. `.cargo/mutants.toml` `exclude_re` is empty.
 
+## Commit messages
+
+- **Subject:** one line of at most 72 characters, in the imperative ("Add",
+  "Report", "Check"), with no trailing period and no type prefix such as
+  `feat:`. It names the change as a reader of `git log --oneline` needs
+  it: what the project can now do, or what changed. Leave out the list of
+  every detail.
+- **Body:** after a blank line, wrapped at 72 columns. It holds the detail
+  the subject leaves out: the behaviour now, why it changed when that isn't
+  obvious, and the tidy-ups that came along with it. A short bullet list
+  works when the change is a set of parallel items. A change whose subject
+  says it all needs no body.
+- **Describe the result, not the process.** Say what the code does after
+  the commit. Leave out how it was found, reviewed, or iterated on, and
+  apply the public repository rules under Deviations.
+- **One change per commit.** A follow-up that only tidies the commit before
+  it (renames, shared test helpers, review fixes) can be folded into that
+  commit before it is pushed, with its message merged into the body.
+  Pushed history is never rewritten.
+
 ## Deviations
 
 Intentional departures from the judgment rules, each with scope and reason.
