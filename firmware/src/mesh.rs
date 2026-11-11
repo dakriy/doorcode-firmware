@@ -298,7 +298,6 @@ impl MeshStation {
             log::warn!("configuring {}: {error}", credentials.ssid);
         }
         self.told = credentials;
-        self.changed_ms = now_ms();
         self.rejoin();
     }
 
@@ -352,20 +351,18 @@ impl MeshStation {
     }
 
     /// Has Mesh-Lite leave its parent and join again, choosing anew. The
-    /// disconnect this causes while the link is up is not counted as a
-    /// loss.
-    fn rejoin(&self) {
-        let counts = &self.context.counts;
-        if self.context.link.is_up() {
-            counts.leaving();
-        }
-        // SAFETY: takes no arguments; disconnecting while not connected
+    /// link is marked down first, as the station losing its address would
+    /// be, so that neither the disconnect nor a failed attempt to join
+    /// afterwards is counted as a loss.
+    fn rejoin(&mut self) {
+        self.context.link.set(false);
+        self.changed_ms = now_ms();
+        // SAFETY: both take no arguments; disconnecting while not connected
         // only reports an error.
-        if unsafe { mesh_lite::esp_mesh_lite_disconnect() } != sys::ESP_OK {
-            counts.stayed();
+        unsafe {
+            mesh_lite::esp_mesh_lite_disconnect();
+            mesh_lite::esp_mesh_lite_connect();
         }
-        // SAFETY: takes no arguments.
-        unsafe { mesh_lite::esp_mesh_lite_connect() };
     }
 
     /// Every access point in reach, on every channel, once the scan ends.

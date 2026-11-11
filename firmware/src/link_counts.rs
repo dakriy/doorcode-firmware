@@ -2,8 +2,13 @@
 //! times it lost its access point, the system's reason for the latest
 //! loss, and the times it roamed. Written by the Wi-Fi event handler and
 //! the station's thread, read by the radio from any thread.
+//!
+//! A disconnect is a loss only while `Link` is up. The station's thread
+//! sets the link from what it last saw, and marks it down before it ends
+//! an association itself, so neither that disconnect nor a failed attempt
+//! to join that follows it is a loss.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use esp_idf_svc::eventloop::{EspSubscription, EspSystemEventLoop, System};
@@ -24,9 +29,6 @@ struct Counts {
     drops: AtomicU32,
     roams: AtomicU32,
     last_reason: AtomicU32,
-    /// Whether the station is ending its association itself, so that the
-    /// disconnect which follows is not a loss.
-    leaving: AtomicBool,
 }
 
 impl Default for LinkCounts {
@@ -35,47 +37,32 @@ impl Default for LinkCounts {
             drops: AtomicU32::new(0),
             roams: AtomicU32::new(0),
             last_reason: AtomicU32::new(NO_REASON),
-            leaving: AtomicBool::new(false),
         }))
     }
 }
 
 impl LinkCounts {
     /// Counts each `WIFI_EVENT_STA_DISCONNECTED` while `link` is up as a
-    /// loss, for as long as the subscription is held. Subscribed before
-    /// the Wi-Fi driver's own handler, so it sees the link as it was.
+    /// loss, for as long as the subscription is held.
     pub(crate) fn watch(
         &self,
         event_loop: &EspSystemEventLoop,
         link: Link,
     ) -> Result<EspSubscription<'static, System>, EspError> {
         let counts = self.clone();
-        event_loop.subscribe::<WifiEvent, _>(move |event| {
-            if let WifiEvent::StaDisconnected(disconnected) = event {
-                counts.disconnected(link.is_up(), disconnected.reason());
-            }
+        event_loop.subscribe::<WifiEvent, _>(move |event| match event {
+            WifiEvent::StaDisconnected(lost) if link.is_up() => counts.lost(lost.reason()),
+            _ => {}
         })
     }
 
-    fn disconnected(&self, up: bool, reason: u16) {
-        let own = self.0.leaving.swap(false, Ordering::AcqRel);
-        if own || !up {
-            return;
-        }
-        self.0.drops.fetch_add(1, Ordering::AcqRel);
+    /// The reason is stored before the count, so a reader that sees a
+    /// count also sees the reason of that loss or a later one.
+    fn lost(&self, reason: u16) {
         self.0
             .last_reason
             .store(u32::from(reason), Ordering::Release);
-    }
-
-    /// The station is about to end its association itself.
-    pub(crate) fn leaving(&self) {
-        self.0.leaving.store(true, Ordering::Release);
-    }
-
-    /// The station did not end its association after all.
-    pub(crate) fn stayed(&self) {
-        self.0.leaving.store(false, Ordering::Release);
+        self.0.drops.fetch_add(1, Ordering::AcqRel);
     }
 
     /// The station moved to another access point by its own choice.

@@ -157,8 +157,7 @@ impl Station {
 
     fn roam_to(&mut self, credentials: &Credentials, access_point: &AccessPointInfo) {
         log::info!("roaming to {:02x?}", access_point.bssid);
-        let roamed = self.associate(credentials, access_point);
-        match roamed {
+        match self.associate(credentials, access_point) {
             Ok(()) => self.context.counts.roamed(),
             Err(error) => {
                 log::warn!("roaming: {error}");
@@ -201,18 +200,15 @@ impl Station {
         self.wifi.wait_netif_up()
     }
 
-    /// Ends the association the station holds, if any, so that the
-    /// disconnect which follows is not counted as a loss.
+    /// Ends the association the station holds, if any, with the link
+    /// marked down first, so that neither the disconnect nor a failed
+    /// attempt to join afterwards is counted as a loss.
     fn leave(&mut self) -> Result<(), EspError> {
         if !self.wifi.is_connected()? {
             return Ok(());
         }
-        self.context.counts.leaving();
-        let left = self.wifi.disconnect();
-        if left.is_err() {
-            self.context.counts.stayed();
-        }
-        left
+        self.context.link.set(false);
+        self.wifi.disconnect()
     }
 }
 
