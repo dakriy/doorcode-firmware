@@ -19,51 +19,6 @@ pub(crate) struct SinceStart {
     connections: u64,
     /// Whether the door has said that it started.
     started_said: bool,
-    /// The radio's cumulative counts as the last report sent read them;
-    /// zero before the first.
-    reported: Cumulative,
-}
-
-/// The cumulative counts the radio keeps, which reports turn into counts
-/// since the report before.
-#[derive(Debug, Clone, Copy, Default)]
-struct Cumulative {
-    tcp: TcpCounters,
-    wifi_drops: u32,
-    roams: u32,
-}
-
-/// What the radio read for a report.
-struct Reading {
-    tcp: Option<TcpCounters>,
-    wifi: WifiLink,
-}
-
-impl Reading {
-    fn of(device: &Device<'_>) -> Reading {
-        let radio = device.connectors.radio();
-        Reading {
-            tcp: radio.tcp_counters(),
-            wifi: radio.wifi_link(),
-        }
-    }
-
-    /// The cumulative counts this reading stands for, after a report that
-    /// read `reported`. Without TCP counters the TCP counts stay where they
-    /// were, so nothing counts since.
-    fn cumulative_after(&self, reported: Cumulative) -> Cumulative {
-        Cumulative {
-            tcp: self.tcp.unwrap_or(reported.tcp),
-            wifi_drops: self.wifi.drops,
-            roams: self.wifi.roams,
-        }
-    }
-}
-
-/// What the door counted since the last report, all from zero again once
-/// a report is sent.
-#[derive(Debug, Clone, Copy, Default)]
-struct SinceReport {
     /// Times the door opened.
     opens: u64,
     /// Checks sent.
@@ -74,17 +29,13 @@ struct SinceReport {
 
 pub(crate) struct Tally {
     since_start: SinceStart,
-    since_report: SinceReport,
 }
 
 impl Tally {
     /// Counting on from what the controller did before, as another door it
     /// was until revoked.
     pub(crate) fn after(since_start: SinceStart) -> Tally {
-        Tally {
-            since_start,
-            since_report: SinceReport::default(),
-        }
+        Tally { since_start }
     }
 
     /// What the controller did as a door since it started.
@@ -109,62 +60,63 @@ impl Tally {
 
     pub(crate) fn door_moved(&mut self, open: bool) {
         if open {
-            self.since_report.opens += 1;
+            self.since_start.opens += 1;
         }
     }
 
     pub(crate) fn check_sent(&mut self) {
-        self.since_report.checks_sent += 1;
+        self.since_start.checks_sent += 1;
     }
 
     pub(crate) fn check_lost(&mut self) {
-        self.since_report.checks_lost += 1;
+        self.since_start.checks_lost += 1;
     }
 
     /// What a report would count now, with the latest round trip
     /// `latency_ms`.
     pub(crate) fn counters(&self, device: &Device<'_>, latency_ms: u64) -> Counters {
-        self.counted(latency_ms, &Reading::of(device))
+        let radio = device.connectors.radio();
+        self.counted(latency_ms, radio.tcp_counters(), radio.wifi_link())
     }
 
     /// What a report counts with the latest round trip `latency_ms` and the
-    /// radio reading `reading`.
-    fn counted(&self, latency_ms: u64, reading: &Reading) -> Counters {
-        let reported = self.since_start.reported;
-        let now = reading.cumulative_after(reported);
+    /// radio's counts `tcp` and `wifi`, as the radio keeps them. Without TCP
+    /// counters the TCP counts are zero.
+    fn counted(&self, latency_ms: u64, tcp: Option<TcpCounters>, wifi: WifiLink) -> Counters {
+        let tcp = tcp.unwrap_or_default();
         Counters {
-            opens: self.since_report.opens,
+            opens: self.since_start.opens,
             reconnects: self.since_start.connections.saturating_sub(1),
             latency_ms,
-            checks_sent: self.since_report.checks_sent,
-            checks_lost: self.since_report.checks_lost,
-            tcp_sent: count_since(reported.tcp.segments_sent, now.tcp.segments_sent),
-            tcp_retransmits: count_since(reported.tcp.retransmits, now.tcp.retransmits),
-            tcp_drops: count_since(reported.tcp.drops, now.tcp.drops),
-            wifi_drops: count_since(reported.wifi_drops, now.wifi_drops),
-            roams: count_since(reported.roams, now.roams),
+            checks_sent: self.since_start.checks_sent,
+            checks_lost: self.since_start.checks_lost,
+            tcp_sent: tcp.segments_sent.into(),
+            tcp_retransmits: tcp.retransmits.into(),
+            tcp_drops: tcp.drops.into(),
+            wifi_drops: wifi.drops.into(),
+            roams: wifi.roams.into(),
         }
     }
 
     /// Publishes a report, naming the configuration in use by its digest
-    /// `config_digest`; what was counted since the last report counts from
-    /// zero again once it is sent.
+    /// `config_digest`.
     pub(crate) fn report(
-        &mut self,
+        &self,
         device: &Device<'_>,
         door_id: u64,
         latency_ms: u64,
         config_digest: &str,
     ) {
-        let reading = Reading::of(device);
-        let counters = self.counted(latency_ms, &reading);
-        let access_point = reading.wifi.access_point;
-        let mesh = device.connectors.radio().mesh();
+        let radio = device.connectors.radio();
+        let wifi = radio.wifi_link();
+        let counters = self.counted(latency_ms, radio.tcp_counters(), wifi);
+        let access_point = wifi.access_point;
+        let mesh = radio.mesh();
         let telemetry = Telemetry {
             signal: device.signal_dbm(),
             latency_ms: counters.latency_ms,
             uptime_s: device.now_ms() / 1000,
-            free_bytes: device.connectors.radio().free_bytes().into(),
+            free_bytes: radio.free_bytes().into(),
             firmware_version: device.firmware_version(),
             reconnects: counters.reconnects,
             door_open: device.connectors.door_sensor().is_open(),
@@ -178,30 +130,16 @@ impl Tally {
             tcp_retransmits: counters.tcp_retransmits,
             tcp_drops: counters.tcp_drops,
             wifi_drops: counters.wifi_drops,
-            wifi_drop_reason: reading.wifi.last_drop_reason.map_or(0, u64::from),
+            wifi_drop_reason: wifi.last_drop_reason.map_or(0, u64::from),
             roams: counters.roams,
             bssid: access_point.map_or(String::new(), |joined| hex(&joined.bssid)),
             channel: access_point.map_or(0, |joined| joined.channel.into()),
             config_digest: config_digest.to_owned(),
         };
-        match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
-            Ok(_) => {
-                self.since_report = SinceReport::default();
-                self.since_start.reported = reading.cumulative_after(self.since_start.reported);
-            }
-            Err(error) => device.log(Level::Warn, &format!("telemetry was not sent: {error}")),
+        if let Err(error) = device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
+            device.log(Level::Warn, &format!("telemetry was not sent: {error}"));
         }
     }
-}
-
-/// How far a cumulative count rose from `reported` to `now`. A count below
-/// the one reported wrapped around or started again from zero, so all of it
-/// is new.
-fn count_since(reported: u32, now: u32) -> u64 {
-    if now < reported {
-        return now.into();
-    }
-    (now - reported).into()
 }
 
 /// The door saying it started, and why.

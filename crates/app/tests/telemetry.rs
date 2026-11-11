@@ -390,7 +390,7 @@ fn the_latency_is_the_round_trip_of_the_last_answered_check() {
 }
 
 #[test]
-fn opens_counts_the_door_opening_since_the_last_report_and_starts_over() {
+fn opens_count_every_door_opening_since_the_controller_started() {
     let events = [
         (200, Event::Door { open: true }),
         (300, Event::Door { open: false }),
@@ -410,7 +410,7 @@ fn opens_counts_the_door_opening_since_the_last_report_and_starts_over() {
                 .collect::<Vec<_>>(),
             report.counters.opens
         ),
-        (vec![2, 1], 0)
+        (vec![2, 3], 3)
     );
 }
 
@@ -462,7 +462,7 @@ fn a_check_the_broker_does_not_take_is_not_counted_sent() {
 }
 
 #[test]
-fn checks_sent_and_lost_count_from_zero_after_each_report() {
+fn checks_sent_and_lost_keep_counting_across_reports() {
     // Sent at 200 and reported at 1000, the check is lost at 3200.
     let connectors = online_until(61_001, typed(200, "1234#"));
 
@@ -474,24 +474,7 @@ fn checks_sent_and_lost_count_from_zero_after_each_report() {
             report.counters.checks_sent,
             report.counters.checks_lost
         ),
-        (vec![(1, 0), (0, 1)], 0, 0)
-    );
-}
-
-#[test]
-fn a_report_the_broker_does_not_take_keeps_its_checks() {
-    let mut events = vec![(0, replies_within(500))];
-    events.extend(typed(200, "1234#"));
-    let connectors = StubConnectors {
-        broker: StubBroker::failing_publish_on("doorcode/doors/7/telemetry", "queue full"),
-        ..online_until(1001, events)
-    };
-
-    let report = app::run(&connectors).unwrap();
-
-    assert_eq!(
-        (report.counters.checks_sent, report.counters.checks_lost),
-        (1, 1)
+        (vec![(1, 0), (1, 1)], 1, 1)
     );
 }
 
@@ -506,19 +489,19 @@ fn tcp_to_report(report: &app::RunReport) -> (u64, u64, u64) {
 }
 
 #[test]
-fn the_first_report_counts_the_tcp_segments_since_the_door_started_and_starts_over() {
+fn the_tcp_segments_are_counted_as_the_radio_reads_them() {
     let connectors = reading_tcp(1001, Readings::tcp([Some((100, 4, 1))]));
 
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
         (tcp_counted(&connectors), tcp_to_report(&report)),
-        (vec![(100, 4, 1)], (0, 0, 0))
+        (vec![(100, 4, 1)], (100, 4, 1))
     );
 }
 
 #[test]
-fn each_report_counts_the_tcp_segments_since_the_report_before() {
+fn tcp_counts_keep_rising_across_reports() {
     let readings = Readings::tcp([Some((100, 4, 1)), Some((250, 9, 1)), Some((250, 9, 1))]);
     let connectors = reading_tcp(61_001, readings);
 
@@ -526,20 +509,20 @@ fn each_report_counts_the_tcp_segments_since_the_report_before() {
 
     assert_eq!(
         tcp_counted(&connectors),
-        vec![(100, 4, 1), (150, 5, 0), (0, 0, 0)]
+        vec![(100, 4, 1), (250, 9, 1), (250, 9, 1)]
     );
 }
 
 #[test]
-fn a_tcp_counter_below_its_last_report_counts_all_of_its_reading() {
-    let readings = Readings::tcp([Some((65_000, 300, 20)), Some((120, 302, 3))]);
+fn a_tcp_counter_that_wraps_or_starts_again_is_reported_as_the_radio_reads_it() {
+    let readings = Readings::tcp([Some((4_294_967_000, 300, 20)), Some((120, 302, 3))]);
     let connectors = reading_tcp(31_001, readings);
 
     app::run(&connectors).unwrap();
 
     assert_eq!(
         tcp_counted(&connectors),
-        vec![(65_000, 300, 20), (120, 2, 3)]
+        vec![(4_294_967_000, 300, 20), (120, 302, 3)]
     );
 }
 
@@ -550,31 +533,6 @@ fn a_radio_without_tcp_counters_reports_zero_tcp_segments() {
     app::run(&connectors).unwrap();
 
     assert_eq!(tcp_counted(&connectors), vec![(0, 0, 0), (0, 0, 0)]);
-}
-
-#[test]
-fn tcp_counts_resume_from_the_last_report_after_a_reading_without_counters() {
-    let readings = Readings::tcp([Some((100, 4, 1)), None, Some((130, 6, 2))]);
-    let connectors = reading_tcp(61_001, readings);
-
-    app::run(&connectors).unwrap();
-
-    assert_eq!(
-        tcp_counted(&connectors),
-        vec![(100, 4, 1), (0, 0, 0), (30, 2, 1)]
-    );
-}
-
-#[test]
-fn a_report_the_broker_does_not_take_keeps_its_tcp_counts() {
-    let connectors = StubConnectors {
-        broker: StubBroker::failing_publish_on("doorcode/doors/7/telemetry", "queue full"),
-        ..reading_tcp(1001, Readings::tcp([Some((100, 4, 1))]))
-    };
-
-    let report = app::run(&connectors).unwrap();
-
-    assert_eq!(tcp_to_report(&report), (100, 4, 1));
 }
 
 /// The Wi-Fi drops and roams each report counted, in order.
@@ -608,7 +566,7 @@ fn link_counting(drops: u32, roams: u32) -> WifiLink {
 }
 
 #[test]
-fn the_first_report_counts_the_wifi_drops_and_roams_since_the_door_started_and_starts_over() {
+fn the_wifi_drops_and_roams_are_counted_as_the_radio_reads_them() {
     let connectors = reading_wifi(1001, Readings::of([link_counting(3, 2)]));
 
     let report = app::run(&connectors).unwrap();
@@ -619,12 +577,12 @@ fn the_first_report_counts_the_wifi_drops_and_roams_since_the_door_started_and_s
             report.counters.wifi_drops,
             report.counters.roams
         ),
-        (vec![(3, 2)], 0, 0)
+        (vec![(3, 2)], 3, 2)
     );
 }
 
 #[test]
-fn each_report_counts_the_wifi_drops_and_roams_since_the_report_before() {
+fn wifi_drops_and_roams_keep_rising_across_reports() {
     let readings = Readings::of([
         link_counting(3, 2),
         link_counting(4, 6),
@@ -634,29 +592,17 @@ fn each_report_counts_the_wifi_drops_and_roams_since_the_report_before() {
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(wifi_counted(&connectors), vec![(3, 2), (1, 4), (0, 0)]);
+    assert_eq!(wifi_counted(&connectors), vec![(3, 2), (4, 6), (4, 6)]);
 }
 
 #[test]
-fn a_wifi_count_below_its_last_report_counts_all_of_its_reading() {
-    let readings = Readings::of([link_counting(3, 2), link_counting(1, 5)]);
+fn a_wifi_count_that_wraps_or_starts_again_is_reported_as_the_radio_reads_it() {
+    let readings = Readings::of([link_counting(4_294_967_295, 2), link_counting(1, 5)]);
     let connectors = reading_wifi(31_001, readings);
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(wifi_counted(&connectors), vec![(3, 2), (1, 3)]);
-}
-
-#[test]
-fn a_report_the_broker_does_not_take_keeps_its_wifi_drops_and_roams() {
-    let connectors = StubConnectors {
-        broker: StubBroker::failing_publish_on("doorcode/doors/7/telemetry", "queue full"),
-        ..reading_wifi(1001, Readings::of([link_counting(3, 2)]))
-    };
-
-    let report = app::run(&connectors).unwrap();
-
-    assert_eq!((report.counters.wifi_drops, report.counters.roams), (3, 2));
+    assert_eq!(wifi_counted(&connectors), vec![(4_294_967_295, 2), (1, 5)]);
 }
 
 #[test]
@@ -1021,7 +967,7 @@ fn nothing_from_while_disconnected_is_sent_later_and_the_reconnect_is_counted() 
                 })
             ],
             Counters {
-                opens: 0,
+                opens: 1,
                 reconnects: 1,
                 latency_ms: 0,
                 checks_sent: 0,

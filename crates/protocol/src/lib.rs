@@ -296,6 +296,8 @@ message! {
 }
 
 /// A door's periodic report of how it is doing. Every field is always sent.
+/// Counts are totals since the door started; the network stack's and the
+/// Wi-Fi station's may wrap around or start again from zero.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Telemetry {
     /// Signal strength now, in dBm.
@@ -308,7 +310,7 @@ pub struct Telemetry {
     /// How often the door connected again since it started.
     pub reconnects: u64,
     pub door_open: bool,
-    /// How often the door opened since the last report.
+    /// How often the door opened since it started.
     pub opens: u64,
     /// Hops to the building's access point: 0 when joined to it directly.
     pub mesh_layer: u64,
@@ -316,23 +318,23 @@ pub struct Telemetry {
     pub mesh_parent: String,
     /// Doors hopping through this one.
     pub mesh_children: u64,
-    /// Code checks sent to the server since the last report.
+    /// Code checks sent to the server since the door started.
     pub checks_sent: u64,
-    /// Checks since the last report whose reply did not come in time.
+    /// Checks since the door started whose reply did not come in time.
     pub checks_lost: u64,
-    /// TCP segments sent since the last report.
+    /// TCP segments sent since the door started.
     pub tcp_sent: u64,
-    /// TCP segments sent again since the last report.
+    /// TCP segments sent again since the door started.
     pub tcp_retransmits: u64,
-    /// TCP segments dropped since the last report.
+    /// TCP segments dropped since the door started.
     pub tcp_drops: u64,
-    /// Times the Wi-Fi station lost its access point since the last report.
+    /// Times the Wi-Fi station lost its access point since the door started.
     pub wifi_drops: u64,
     /// The system's reason code for the latest loss since the door started;
     /// 0 when there was none.
     pub wifi_drop_reason: u64,
     /// Times the Wi-Fi station moved to another access point by its own
-    /// choice since the last report.
+    /// choice since the door started.
     pub roams: u64,
     /// The access point joined now, 12 lowercase hex digits; empty with no
     /// link.

@@ -66,29 +66,30 @@ pub struct Access {
     pub strike: StrikeState,
 }
 
-/// The counts telemetry reports.
+/// The counts telemetry reports, each a total since the controller started.
+/// The radio's counts are as the radio keeps them, so they may wrap around
+/// or start again from zero.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counters {
-    /// How often the door opened since the last report.
+    /// How often the door opened.
     pub opens: u64,
-    /// How often the door connected again since it started.
+    /// How often the door connected again.
     pub reconnects: u64,
     /// The round trip of the last check that was answered; 0 until one is.
     pub latency_ms: u64,
-    /// Checks sent since the last report.
+    /// Checks sent.
     pub checks_sent: u64,
-    /// Checks since the last report whose reply did not come in time.
+    /// Checks whose reply did not come in time.
     pub checks_lost: u64,
-    /// TCP segments sent since the last report.
+    /// TCP segments sent.
     pub tcp_sent: u64,
-    /// TCP segments sent again since the last report.
+    /// TCP segments sent again.
     pub tcp_retransmits: u64,
-    /// TCP segments dropped since the last report.
+    /// TCP segments dropped.
     pub tcp_drops: u64,
-    /// Times the Wi-Fi station lost its access point since the last report.
+    /// Times the Wi-Fi station lost its access point.
     pub wifi_drops: u64,
-    /// Times the Wi-Fi station moved to another access point since the last
-    /// report.
+    /// Times the Wi-Fi station moved to another access point.
     pub roams: u64,
 }
 

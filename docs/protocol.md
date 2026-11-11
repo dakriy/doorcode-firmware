@@ -205,12 +205,13 @@ and to limit its checks.
 
 Published on `doorcode/doors/<id>/telemetry` every `telemetry_interval_s`
 while connected, the first about a second after the door comes online.
-Every field is always sent. Nothing is kept to send later. Counts since the
-last report start from zero once a report is sent; the first report counts
-since the door started. The three TCP counts are 0 on a door whose network
-stack keeps no TCP counters; when the stack's own count of TCP segments,
-Wi-Fi drops, or roams wraps around or starts again, the report counts what
-it has counted since.
+Every field is always sent. Nothing is kept to send later. Every count is
+a total since the door started, so each report's count is at least the one
+before, except for the counts the network stack and the Wi-Fi station keep:
+`tcp_sent`, `tcp_retransmits`, `tcp_drops`, `wifi_drops`, and `roams` are
+reported as the door reads them and wrap around or start again from zero,
+so a count lower than the report before means it did. The three TCP counts
+are 0 on a door whose network stack keeps no TCP counters.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -221,18 +222,18 @@ it has counted since.
 | `firmware_version` | text | The version the door runs. |
 | `reconnects` | uint | Broker connections since the door started, after the first. |
 | `door_open` | bool | Whether the door sensor sees the door open. |
-| `opens` | uint | Times the door opened since the last report. |
+| `opens` | uint | Times the door opened since it started. |
 | `mesh_layer` | uint | Hops to the access point: 0 when joined to it directly, and without the mesh. |
 | `mesh_parent` | text | The hardware id of the door this one hops through, 12 lowercase hex digits; empty when joined to the access point directly. |
 | `mesh_children` | uint | Doors joined to this door's soft-AP; 0 without the mesh. |
-| `checks_sent` | uint | Code checks sent to the server since the last report. |
-| `checks_lost` | uint | Checks since the last report whose reply did not come within `reply_timeout_ms`. A check replaced by a newer entry before then is not lost. |
-| `tcp_sent` | uint | TCP segments the door's network stack sent for the first time since the last report: those carrying data or opening or closing a connection. Bare acknowledgements, resets, and segments sent again are not counted. |
-| `tcp_retransmits` | uint | TCP segments it sent again since the last report. |
-| `tcp_drops` | uint | TCP segments it dropped since the last report. |
-| `wifi_drops` | uint | Times the Wi-Fi station lost its access point since the last report. |
+| `checks_sent` | uint | Code checks sent to the server since the door started. |
+| `checks_lost` | uint | Checks since the door started whose reply did not come within `reply_timeout_ms`. A check replaced by a newer entry before then is not lost. |
+| `tcp_sent` | uint | TCP segments the door's network stack sent for the first time since the door started: those carrying data or opening or closing a connection. Bare acknowledgements, resets, and segments sent again are not counted. |
+| `tcp_retransmits` | uint | TCP segments it sent again since the door started. |
+| `tcp_drops` | uint | TCP segments it dropped since the door started. |
+| `wifi_drops` | uint | Times the Wi-Fi station lost its access point since the door started. |
 | `wifi_drop_reason` | uint | The system's reason code for the latest loss since the door started (ESP-IDF `wifi_err_reason_t`); 0 when there was none. |
-| `roams` | uint | Times the Wi-Fi station moved to another access point by its own choice since the last report. |
+| `roams` | uint | Times the Wi-Fi station moved to another access point by its own choice since the door started. |
 | `bssid` | text | The access point joined now, 12 lowercase hex digits; empty with no link. |
 | `channel` | uint | The Wi-Fi channel of the access point joined now; 0 with no link. |
 | `config_digest` | text | The digest of the configuration in use, 16 lowercase hex digits (Configuration digest above); empty while the door runs with the defaults. |
