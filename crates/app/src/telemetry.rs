@@ -141,21 +141,20 @@ impl Tally {
     }
 }
 
-/// What the TCP counters counted from `reported` to `now`, as counts that
-/// fit a report; all zero when the network stack keeps no counters.
+/// What the TCP counters counted between two readings, as counts that fit
+/// a report.
+#[derive(Default)]
 struct TcpSince {
     segments_sent: u64,
     retransmits: u64,
     drops: u64,
 }
 
+/// What the TCP counters counted from `reported` to `now`; all zero when
+/// the network stack keeps no counters.
 fn tcp_since(reported: TcpCounters, now: Option<TcpCounters>) -> TcpSince {
     let Some(now) = now else {
-        return TcpSince {
-            segments_sent: 0,
-            retransmits: 0,
-            drops: 0,
-        };
+        return TcpSince::default();
     };
     TcpSince {
         segments_sent: count_since(reported.segments_sent, now.segments_sent),
