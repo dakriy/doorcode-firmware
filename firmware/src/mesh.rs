@@ -12,9 +12,12 @@
 //! the station has no address for `FALLBACK_AFTER_MS` it switches between
 //! those and the credentials that last associated. As a root whose signal
 //! has been below `wifi_roam_rssi` for five readings in a row, a second
-//! apart, it scans at most once a minute, and when an access point of the
-//! SSID is at least 8 dB stronger than the average of those readings it has
-//! Mesh-Lite join again, which picks the strongest.
+//! apart, it scans at most once a minute, and when another access point of
+//! the SSID is at least 8 dB stronger than the average of those readings it
+//! has Mesh-Lite join again, which picks the strongest. The access point it
+//! has joined, by its BSSID, is never a candidate, so with one access point
+//! it stays. The readings start again when the link comes up or goes down
+//! and when the BSSID joined changes.
 //!
 //! With `wifi_11b_disabled` set, the station interface leaves out the
 //! 802.11b rates. The bridge starts Wi-Fi as it creates its interfaces, so
@@ -80,6 +83,7 @@ pub(crate) fn start(
         told: wanted,
         changed_ms: now_ms(),
         last_scan_ms: 0,
+        joined: None,
         weak_run: WeakRun::default(),
     };
     threads::spawn("network", STACK_BYTES, move || station.run())
@@ -248,8 +252,15 @@ extern "C" fn scan_ended() {
     SCAN_OURS.store(false, Ordering::Release);
 }
 
-/// The access points a scan found, each an SSID and a signal.
-type Found = Vec<(String, i8)>;
+/// An access point a scan found.
+struct Heard {
+    ssid: String,
+    bssid: [u8; 6],
+    signal: i8,
+}
+
+/// The access points a scan found.
+type Found = Vec<Heard>;
 
 /// Hands the station the access points a roaming scan found.
 fn scan_done(found: &SyncSender<Found>) {
@@ -263,14 +274,18 @@ fn scan_done(found: &SyncSender<Found>) {
     // SAFETY: `records` holds `count` records, the length passed.
     unsafe { sys::esp_wifi_scan_get_ap_records(&mut count, records.as_mut_ptr()) };
     records.truncate(usize::from(count));
-    let _ = found.try_send(records.iter().map(ssid_and_signal).collect());
+    let _ = found.try_send(records.iter().map(heard).collect());
     scan_ended();
 }
 
-fn ssid_and_signal(record: &sys::wifi_ap_record_t) -> (String, i8) {
+fn heard(record: &sys::wifi_ap_record_t) -> Heard {
     let length = record.ssid.iter().position(|byte| *byte == 0);
     let ssid = &record.ssid[..length.unwrap_or(record.ssid.len())];
-    (String::from_utf8_lossy(ssid).into_owned(), record.rssi)
+    Heard {
+        ssid: String::from_utf8_lossy(ssid).into_owned(),
+        bssid: record.bssid,
+        signal: record.rssi,
+    }
 }
 
 /// Whether the bridge's station holds an IPv4 address.
@@ -299,6 +314,8 @@ struct MeshStation {
     /// other credentials.
     changed_ms: u64,
     last_scan_ms: u64,
+    /// The BSSID of the access point the readings in `weak_run` are of.
+    joined: Option<[u8; 6]>,
     /// The parent's signal while it stays below `roam_rssi`.
     weak_run: WeakRun,
 }
@@ -315,6 +332,7 @@ impl MeshStation {
         let up = station_has_address();
         if up != self.context.link.is_up() {
             self.changed_ms = now_ms();
+            self.weak_run.reset();
         }
         self.context.link.set(up);
         if settings.wanted != self.asked {
@@ -360,12 +378,12 @@ impl MeshStation {
             return;
         }
         self.context.memory.remember(&self.told);
-        let Some(signal) = self.weak_signal(roam_rssi) else {
+        let Some((bssid, signal)) = self.weak_link(roam_rssi) else {
             return;
         };
         let ssid = self.told.ssid.clone();
         let stronger = self
-            .strongest(&ssid)
+            .strongest(&ssid, bssid)
             .filter(|found| worth_roaming(*found, signal));
         if stronger.is_some() {
             log::info!("roaming: an access point of {ssid} is stronger");
@@ -374,19 +392,28 @@ impl MeshStation {
         }
     }
 
-    /// The average signal of the access point joined, when it has stayed
-    /// below `roam_rssi` and a roaming scan is due.
-    fn weak_signal(&mut self, roam_rssi: i32) -> Option<i32> {
-        let signal = i32::from(access_point()?.rssi);
-        let average = self.weak_run.weak(signal, roam_rssi)?;
-        roam_scan_due(self.last_scan_ms).then_some(average)
+    /// The BSSID of the access point joined and the average of its weak
+    /// signal, when that has stayed below `roam_rssi` and a roaming scan is
+    /// due. Readings of an access point joined earlier do not count.
+    fn weak_link(&mut self, roam_rssi: i32) -> Option<([u8; 6], i32)> {
+        let current = access_point()?;
+        if self.joined != Some(current.bssid) {
+            self.joined = Some(current.bssid);
+            self.weak_run.reset();
+        }
+        let average = self.weak_run.weak(i32::from(current.rssi), roam_rssi)?;
+        roam_scan_due(self.last_scan_ms).then_some((current.bssid, average))
     }
 
-    /// The signal of the strongest access point of `ssid`, from a scan
-    /// Mesh-Lite runs between its own.
-    fn strongest(&mut self, ssid: &str) -> Option<i32> {
-        let matching = self.scan()?.into_iter().filter(|(name, _)| name == ssid);
-        matching.map(|(_, signal)| i32::from(signal)).max()
+    /// The signal of the strongest access point of `ssid` other than the
+    /// one whose BSSID is `except`, from a scan Mesh-Lite runs between its
+    /// own.
+    fn strongest(&mut self, ssid: &str, except: [u8; 6]) -> Option<i32> {
+        let found = self.scan()?;
+        let matching = found
+            .into_iter()
+            .filter(|heard| heard.ssid == ssid && heard.bssid != except);
+        matching.map(|heard| i32::from(heard.signal)).max()
     }
 
     /// Has Mesh-Lite leave its parent and join again, choosing anew. The

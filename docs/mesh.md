@@ -50,10 +50,13 @@ With the mesh on:
   the access point, as the plain station does.
 - **Roaming.** A root whose signal has been below `wifi_roam_rssi` for
   five readings in a row, a second apart, scans at most once a minute; when
-  an access point of the same SSID is at least 8 dB stronger than the
+  another access point of the same SSID is at least 8 dB stronger than the
   average of those readings, it leaves and joins again, picking the
   strongest access point, or a neighbouring door if none is strong enough.
-  Doors hopping through it find their way back on their own.
+  The access point it has joined is never a candidate, so with one access
+  point it stays, and readings taken before the link last came up or of an
+  access point joined earlier do not count. Doors hopping through it find
+  their way back on their own.
 
 Mesh-Lite recovers on its own when a parent door goes away: the doors below
 it look for another parent or, if their access point is strong enough

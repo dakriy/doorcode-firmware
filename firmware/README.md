@@ -171,8 +171,9 @@ for size so an image fits.
   access point is too weak hops through a neighbouring door
   (`docs/mesh.md`). The choice is made once at start, so a configuration
   that changes any mesh setting restarts the door. The counts are kept the
-  same way; a roam is a root rejoining for a stronger access point, and
-  the access point reported is the parent door's soft-AP below the root.
+  same way; a roam is a root rejoining for another, stronger access point
+  (never the one it has joined, by BSSID), and the access point reported
+  is the parent door's soft-AP below the root.
 - **Configuration trial.** A configuration that changes how the door
   connects is stored as `config_try` and the door restarts. The next start
   takes it up before the network starts: it stores the configuration's
