@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::command;
 use crate::device::Device;
 use crate::signature::SignedImage;
-use crate::{stored, RunError};
+use crate::{hex, stored, RunError};
 
 /// The status of a download that brings the image.
 const OK: u16 = 200;
@@ -178,10 +178,6 @@ fn download_failed(reason: impl Display) -> String {
 /// The detail of an update the firmware could not install.
 fn install_failed(error: FirmwareError) -> String {
     format!("install failed: {error}")
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// What this boot is to an update.

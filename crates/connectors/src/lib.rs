@@ -188,6 +188,30 @@ pub struct TcpCounters {
     pub drops: u32,
 }
 
+/// The Wi-Fi access point a station is joined to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AccessPoint {
+    /// Its MAC address.
+    pub bssid: [u8; 6],
+    /// Its Wi-Fi channel.
+    pub channel: u8,
+}
+
+/// What the Wi-Fi station counted of its link since the device started,
+/// as it keeps the counts, and where the link stands now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WifiLink {
+    /// Times the station lost its access point.
+    pub drops: u32,
+    /// Times the station moved to another access point by its own choice.
+    pub roams: u32,
+    /// The system's reason code for the latest loss, or `None` before the
+    /// first.
+    pub last_drop_reason: Option<u16>,
+    /// The access point joined now, or `None` with no link.
+    pub access_point: Option<AccessPoint>,
+}
+
 /// Facts about the device and its network link.
 pub trait Radio {
     /// Signal strength in dBm, or `None` when there is no radio link.
@@ -200,6 +224,8 @@ pub trait Radio {
     fn mesh(&self) -> Mesh;
     /// The network stack's TCP counters, or `None` when it keeps none.
     fn tcp_counters(&self) -> Option<TcpCounters>;
+    /// The Wi-Fi station's link counts and the access point it is joined to.
+    fn wifi_link(&self) -> WifiLink;
 }
 
 /// HTTPS downloads. Calls start work; progress arrives through `Events` as

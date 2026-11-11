@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 
 use connectors::{
     Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Mesh,
-    Radio, Random, Status, StatusReport, Storage, Strike, TcpCounters,
+    Radio, Random, Status, StatusReport, Storage, Strike, TcpCounters, WifiLink,
 };
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
@@ -82,41 +82,46 @@ pub struct StubRadio {
     pub free_bytes: u32,
     pub hardware_id: String,
     pub mesh: Mesh,
-    pub tcp_counters: TcpReadings,
+    pub tcp_counters: Readings<Option<TcpCounters>>,
+    pub wifi_link: Readings<WifiLink>,
 }
 
-/// The TCP counters a stub radio reports, one reading after another, where
-/// `None` is a reading without counters; the last repeats, and with no
-/// readings at all the radio keeps no counters.
+/// What a stub radio reads, one reading after another; the last repeats,
+/// and with no readings at all it reads the default: no TCP counters, or a
+/// Wi-Fi link that counted nothing.
 #[derive(Debug, Default)]
-pub struct TcpReadings {
-    queued: RefCell<VecDeque<Option<TcpCounters>>>,
+pub struct Readings<T> {
+    queued: RefCell<VecDeque<T>>,
 }
 
-impl TcpReadings {
-    /// Readings of `segments_sent`, `retransmits`, and `drops`, in order.
-    pub fn of(readings: impl IntoIterator<Item = Option<(u32, u32, u32)>>) -> Self {
-        let queued = readings
-            .into_iter()
-            .map(|reading| {
-                reading.map(|(segments_sent, retransmits, drops)| TcpCounters {
-                    segments_sent,
-                    retransmits,
-                    drops,
-                })
-            })
-            .collect();
+impl<T: Clone + Default> Readings<T> {
+    /// `readings`, in order.
+    pub fn of(readings: impl IntoIterator<Item = T>) -> Self {
         Self {
-            queued: RefCell::new(queued),
+            queued: RefCell::new(readings.into_iter().collect()),
         }
     }
 
-    fn next(&self) -> Option<TcpCounters> {
+    fn next(&self) -> T {
         let mut queued = self.queued.borrow_mut();
         if queued.len() > 1 {
-            return queued.pop_front().flatten();
+            return queued.pop_front().unwrap_or_default();
         }
-        queued.front().copied().flatten()
+        queued.front().cloned().unwrap_or_default()
+    }
+}
+
+impl Readings<Option<TcpCounters>> {
+    /// Readings of the TCP `segments_sent`, `retransmits`, and `drops`, in
+    /// order, where `None` is a reading without counters.
+    pub fn tcp(readings: impl IntoIterator<Item = Option<(u32, u32, u32)>>) -> Self {
+        Self::of(readings.into_iter().map(|reading| {
+            reading.map(|(segments_sent, retransmits, drops)| TcpCounters {
+                segments_sent,
+                retransmits,
+                drops,
+            })
+        }))
     }
 }
 
@@ -127,7 +132,8 @@ impl Default for StubRadio {
             free_bytes: 180_000,
             hardware_id: "a1b2c3d4e5f6".to_owned(),
             mesh: Mesh::default(),
-            tcp_counters: TcpReadings::default(),
+            tcp_counters: Readings::default(),
+            wifi_link: Readings::default(),
         }
     }
 }
@@ -151,6 +157,10 @@ impl Radio for StubRadio {
 
     fn tcp_counters(&self) -> Option<TcpCounters> {
         self.tcp_counters.next()
+    }
+
+    fn wifi_link(&self) -> WifiLink {
+        self.wifi_link.next()
     }
 }
 

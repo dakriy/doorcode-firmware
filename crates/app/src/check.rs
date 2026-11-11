@@ -47,8 +47,7 @@ pub(crate) fn send(
 
 /// Sixteen lowercase hex digits from eight random bytes.
 fn request_id(device: &Device<'_>) -> String {
-    let bytes = device.connectors.random().bytes(8);
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    crate::hex(&device.connectors.random().bytes(8))
 }
 
 /// The reply in `payload` when it answers `outstanding`.

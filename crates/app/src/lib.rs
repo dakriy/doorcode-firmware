@@ -82,6 +82,11 @@ pub struct Counters {
     pub tcp_retransmits: u64,
     /// TCP segments dropped since the last report.
     pub tcp_drops: u64,
+    /// Times the Wi-Fi station lost its access point since the last report.
+    pub wifi_drops: u64,
+    /// Times the Wi-Fi station moved to another access point since the last
+    /// report.
+    pub roams: u64,
 }
 
 /// Whether the strike holds the door.
@@ -117,6 +122,11 @@ impl RunReport {
             counters,
         }
     }
+}
+
+/// `bytes` as lowercase hex digits, two to a byte.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// What the device is set up with before it first talks to a server.

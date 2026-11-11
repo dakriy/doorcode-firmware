@@ -1,11 +1,12 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use connectors::{Mesh, Radio, TcpCounters};
+use connectors::{Mesh, Radio, TcpCounters, WifiLink};
 
 /// A device whose link, memory, and mesh position are whatever its control
 /// handle last set; it starts with no signal, no free memory, joined to the
-/// access point directly with no doors hopping through it, and no TCP
-/// counters.
+/// access point directly with no doors hopping through it, no TCP
+/// counters, and a Wi-Fi link that counted nothing and joined no access
+/// point.
 #[derive(Debug)]
 pub struct HostRadio {
     hardware_id: String,
@@ -24,6 +25,7 @@ struct Facts {
     free_bytes: u32,
     mesh: Mesh,
     tcp_counters: Option<TcpCounters>,
+    wifi_link: WifiLink,
 }
 
 fn lock(facts: &Mutex<Facts>) -> MutexGuard<'_, Facts> {
@@ -62,6 +64,10 @@ impl RadioControl {
     pub fn set_tcp_counters(&self, tcp_counters: Option<TcpCounters>) {
         lock(&self.facts).tcp_counters = tcp_counters;
     }
+
+    pub fn set_wifi_link(&self, wifi_link: WifiLink) {
+        lock(&self.facts).wifi_link = wifi_link;
+    }
 }
 
 impl Radio for HostRadio {
@@ -83,5 +89,9 @@ impl Radio for HostRadio {
 
     fn tcp_counters(&self) -> Option<TcpCounters> {
         lock(&self.facts).tcp_counters
+    }
+
+    fn wifi_link(&self) -> WifiLink {
+        lock(&self.facts).wifi_link
     }
 }

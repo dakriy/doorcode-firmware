@@ -566,6 +566,8 @@ fn reconnects_count_on_after_the_door_is_revoked_and_enrolls_again() {
             tcp_sent: 0,
             tcp_retransmits: 0,
             tcp_drops: 0,
+            wifi_drops: 0,
+            roams: 0,
         }
     );
 }

@@ -101,8 +101,9 @@ while connected, the first about a second after the door comes online.
 Every field is always sent. Nothing is kept to send later. Counts since the
 last report start from zero once a report is sent; the first report counts
 since the door started. The three TCP counts are 0 on a door whose network
-stack keeps no TCP counters; when the stack's own count wraps around or
-starts again, the report counts what it has counted since.
+stack keeps no TCP counters; when the stack's own count of TCP segments,
+Wi-Fi drops, or roams wraps around or starts again, the report counts what
+it has counted since.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -122,6 +123,11 @@ starts again, the report counts what it has counted since.
 | `tcp_sent` | uint | TCP segments the door's network stack sent since the last report. |
 | `tcp_retransmits` | uint | TCP segments it sent again since the last report. |
 | `tcp_drops` | uint | TCP segments it dropped since the last report. |
+| `wifi_drops` | uint | Times the Wi-Fi station lost its access point since the last report. |
+| `wifi_drop_reason` | uint | The system's reason code for the latest loss since the door started (ESP-IDF `wifi_err_reason_t`); 0 when there was none. |
+| `roams` | uint | Times the Wi-Fi station moved to another access point by its own choice since the last report. |
+| `bssid` | text | The access point joined now, 12 lowercase hex digits; empty with no link. |
+| `channel` | uint | The Wi-Fi channel of the access point joined now; 0 with no link. |
 
 ## Door events
 

@@ -322,6 +322,19 @@ pub struct Telemetry {
     pub tcp_retransmits: u64,
     /// TCP segments dropped since the last report.
     pub tcp_drops: u64,
+    /// Times the Wi-Fi station lost its access point since the last report.
+    pub wifi_drops: u64,
+    /// The system's reason code for the latest loss since the door started;
+    /// 0 when there was none.
+    pub wifi_drop_reason: u64,
+    /// Times the Wi-Fi station moved to another access point by its own
+    /// choice since the last report.
+    pub roams: u64,
+    /// The access point joined now, 12 lowercase hex digits; empty with no
+    /// link.
+    pub bssid: String,
+    /// The Wi-Fi channel of the access point joined now; 0 with no link.
+    pub channel: u64,
 }
 
 message! {
@@ -342,6 +355,11 @@ message! {
         tcp_sent: always,
         tcp_retransmits: always,
         tcp_drops: always,
+        wifi_drops: always,
+        wifi_drop_reason: always,
+        roams: always,
+        bssid: always,
+        channel: always,
     }
 }
 

@@ -2,11 +2,11 @@
 //! at the configured interval, once that it started, and each time it opens
 //! or closes. Nothing is kept to send later.
 
-use connectors::{Level, StartReason, TcpCounters};
+use connectors::{Level, StartReason, TcpCounters, WifiLink};
 use protocol::{DoorEvent, Telemetry};
 
 use crate::device::Device;
-use crate::Counters;
+use crate::{hex, Counters};
 
 /// How long after the online status the first report goes out.
 pub(crate) const FIRST_REPORT_AFTER_MS: u64 = 1000;
@@ -19,9 +19,45 @@ pub(crate) struct SinceStart {
     connections: u64,
     /// Whether the door has said that it started.
     started_said: bool,
-    /// The network stack's TCP counters as the last report sent read them;
+    /// The radio's cumulative counts as the last report sent read them;
     /// zero before the first.
-    tcp_reported: TcpCounters,
+    reported: Cumulative,
+}
+
+/// The cumulative counts the radio keeps, which reports turn into counts
+/// since the report before.
+#[derive(Debug, Clone, Copy, Default)]
+struct Cumulative {
+    tcp: TcpCounters,
+    wifi_drops: u32,
+    roams: u32,
+}
+
+/// What the radio read for a report.
+struct Reading {
+    tcp: Option<TcpCounters>,
+    wifi: WifiLink,
+}
+
+impl Reading {
+    fn of(device: &Device<'_>) -> Reading {
+        let radio = device.connectors.radio();
+        Reading {
+            tcp: radio.tcp_counters(),
+            wifi: radio.wifi_link(),
+        }
+    }
+
+    /// The cumulative counts to count the next report from, once a report
+    /// with this reading was sent after one that read `reported`. Without
+    /// TCP counters the TCP counts stay where they were.
+    fn reported_after(&self, reported: Cumulative) -> Cumulative {
+        Cumulative {
+            tcp: self.tcp.unwrap_or(reported.tcp),
+            wifi_drops: self.wifi.drops,
+            roams: self.wifi.roams,
+        }
+    }
 }
 
 /// What the door counted since the last report, all from zero again once
@@ -88,13 +124,14 @@ impl Tally {
     /// What a report would count now, with the latest round trip
     /// `latency_ms`.
     pub(crate) fn counters(&self, device: &Device<'_>, latency_ms: u64) -> Counters {
-        self.counted(latency_ms, device.connectors.radio().tcp_counters())
+        self.counted(latency_ms, &Reading::of(device))
     }
 
     /// What a report counts with the latest round trip `latency_ms` and the
-    /// TCP counters reading `tcp`.
-    fn counted(&self, latency_ms: u64, tcp: Option<TcpCounters>) -> Counters {
-        let tcp_since = tcp_since(self.since_start.tcp_reported, tcp);
+    /// radio reading `reading`.
+    fn counted(&self, latency_ms: u64, reading: &Reading) -> Counters {
+        let reported = self.since_start.reported;
+        let tcp_since = tcp_since(reported.tcp, reading.tcp);
         Counters {
             opens: self.since_report.opens,
             reconnects: self.since_start.connections.saturating_sub(1),
@@ -104,14 +141,17 @@ impl Tally {
             tcp_sent: tcp_since.segments_sent,
             tcp_retransmits: tcp_since.retransmits,
             tcp_drops: tcp_since.drops,
+            wifi_drops: count_since(reported.wifi_drops, reading.wifi.drops),
+            roams: count_since(reported.roams, reading.wifi.roams),
         }
     }
 
     /// Publishes a report; what was counted since the last report counts
     /// from zero again once it is sent.
     pub(crate) fn report(&mut self, device: &Device<'_>, door_id: u64, latency_ms: u64) {
-        let tcp = device.connectors.radio().tcp_counters();
-        let counters = self.counted(latency_ms, tcp);
+        let reading = Reading::of(device);
+        let counters = self.counted(latency_ms, &reading);
+        let access_point = reading.wifi.access_point;
         let mesh = device.connectors.radio().mesh();
         let telemetry = Telemetry {
             signal: device.signal_dbm(),
@@ -130,11 +170,16 @@ impl Tally {
             tcp_sent: counters.tcp_sent,
             tcp_retransmits: counters.tcp_retransmits,
             tcp_drops: counters.tcp_drops,
+            wifi_drops: counters.wifi_drops,
+            wifi_drop_reason: reading.wifi.last_drop_reason.map_or(0, u64::from),
+            roams: counters.roams,
+            bssid: access_point.map_or(String::new(), |joined| hex(&joined.bssid)),
+            channel: access_point.map_or(0, |joined| joined.channel.into()),
         };
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
             Ok(_) => {
                 self.since_report = SinceReport::default();
-                self.since_start.tcp_reported = tcp.unwrap_or(self.since_start.tcp_reported);
+                self.since_start.reported = reading.reported_after(self.since_start.reported);
             }
             Err(error) => device.log(Level::Warn, &format!("telemetry was not sent: {error}")),
         }
