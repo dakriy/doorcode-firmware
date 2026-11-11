@@ -676,22 +676,7 @@ impl Door {
             }
         };
         let digest = trial::digest(payload);
-        if self.trial.is_some() && digest == self.config_digest {
-            device.log(
-                Level::Debug,
-                &format!("config {digest} on trial arrived again"),
-            );
-            return Ok(self);
-        }
-        if self
-            .trial
-            .as_ref()
-            .is_some_and(|trial| trial.withdrawn_by(&digest))
-        {
-            trial::withdraw(device, &self.config_digest)?;
-            return Ok(self);
-        }
-        if trial::given_up(device, &digest)? {
+        if self.settled_by_trial(device, &digest)? {
             return Ok(self);
         }
         if let Some(why) = self.to_try(&config) {
@@ -709,6 +694,29 @@ impl Door {
             config_digest: digest,
             ..self
         })
+    }
+
+    /// Whether the trial settles the configuration whose digest is
+    /// `digest`, leaving nothing more to do with it: the one on trial
+    /// arriving again is ignored, the door's own withdraws the trial, and
+    /// the one last given up is ignored.
+    fn settled_by_trial(&self, device: &Device<'_>, digest: &str) -> Result<bool, RunError> {
+        if self.trial.is_some() && digest == self.config_digest {
+            device.log(
+                Level::Debug,
+                &format!("config {digest} on trial arrived again"),
+            );
+            return Ok(true);
+        }
+        if self
+            .trial
+            .as_ref()
+            .is_some_and(|trial| trial.withdrawn_by(digest))
+        {
+            trial::withdraw(device, &self.config_digest)?;
+            return Ok(true);
+        }
+        trial::given_up(device, digest)
     }
 
     /// Why `received` is to be tried rather than run at once, if it is.
