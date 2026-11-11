@@ -11,7 +11,10 @@ The tests that call a server create entities on it or change a door's
 configuration: **run them only against a development server.** Each
 prints one `PASS step: detail`, `FAIL step: detail`, or `SKIP step: detail`
 line per step and exits non-zero when any step fails. Run them from any directory;
-they find the repository from their own path.
+they find the repository from their own path. Each writes the API token to a
+header file in a temporary directory only its user can read, which curl reads
+and the script removes on exit, so the token never appears in the process
+list; it is there only when passed with `--token`.
 
 | File | What it is |
 | --- | --- |
@@ -21,7 +24,7 @@ they find the repository from their own path.
 | `config-revert-test.sh` | Checks that an online door gives up a configuration it cannot come online with. |
 | `bench-serial-selftest.sh` | Checks the serial helper and the settings without a board or a server. |
 | `bench-serial.py` | The serial helper: resets the board and watches its log. |
-| `bench-env.sh` | Sourced by the bench scripts: loads `test.env` and checks the settings. |
+| `bench-env.sh` | Sourced by the bench scripts: loads `test.env`, checks the settings, and writes the token's header file. |
 | `fixtures/bench-boot.txt` | A recorded boot log the self-test reads in place of the board. |
 
 ## integration-test.sh
@@ -229,8 +232,9 @@ restarts and the alarms `configuration reverted` in the door's event log.
 
 Checks `bench-serial.py` against `fixtures/bench-boot.txt` (a match, a
 timeout, crash detection, the log file, and reset) and `bench-env.sh`
-against a scratch `test.env` (defaults, required keys, and a signing key
-inside the repository). Needs only `bash` and `python3`; it creates
+against a scratch `test.env` (defaults, required keys, a signing key
+inside the repository, and the token's header file readable by its user
+only). Needs only `bash` and `python3`; it creates
 nothing outside a temporary directory, which it removes.
 
     scripts/tests/bench-serial-selftest.sh

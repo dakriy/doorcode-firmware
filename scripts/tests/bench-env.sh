@@ -12,6 +12,7 @@ bench_env_usage() {
     cat <<'USAGE'
 usage: source scripts/tests/bench-env.sh
        bench_env_require [KEY...]
+       bench_env_write_auth FILE TOKEN
 
 Loads test.env from the repository root if present and applies defaults:
   DOORCODE_SERIAL_PORT  /dev/ttyUSB0
@@ -20,7 +21,9 @@ Loads test.env from the repository root if present and applies defaults:
 bench_env_require exits 2 naming each KEY that is empty (by default
 DOORCODE_SERVER, DOORCODE_TOKEN, and DOORCODE_SIGNING_KEY), a timeout that is
 not a whole number of seconds, or a signing key that is not a readable file
-outside the repository. test.env.example explains every key.
+outside the repository. bench_env_write_auth writes the Authorization header
+for TOKEN to FILE, readable by this user only, for curl -H @FILE.
+test.env.example explains every key.
 USAGE
 }
 
@@ -53,6 +56,14 @@ bench_env_signing_key_problem() {
     case "$(cd "$(dirname "$key")" && pwd)/" in
     "$BENCH_ROOT"/*) echo "$key is inside the repository; keep the signing key outside it" ;;
     esac
+}
+
+# bench_env_write_auth FILE TOKEN: writes the Authorization header for TOKEN
+# to FILE, readable by this user only. curl reads it with -H @FILE, so the
+# token never appears on a command line. FILE belongs in the script's
+# private temporary directory, which the script removes on exit.
+bench_env_write_auth() {
+    (umask 077 && printf 'Authorization: Bearer %s\n' "$2" >"$1")
 }
 
 # bench_env_require [KEY...]: exits 2 with one line per problem when a key

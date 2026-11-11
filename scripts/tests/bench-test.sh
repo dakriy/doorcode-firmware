@@ -121,12 +121,13 @@ skip() { echo "SKIP $1: $2"; }
 
 # --- HTTP -----------------------------------------------------------------
 
+bench_env_write_auth "$WORK/auth" "$DOORCODE_TOKEN"
+
 # api METHOD PATH [JSON]: calls the server's API. The answer is in
 # $WORK/answer and its status in $STATUS.
 STATUS=""
 api() {
-    local args=(-sS -o "$WORK/answer" -w '%{http_code}' -X "$1"
-        -H "Authorization: Bearer $DOORCODE_TOKEN")
+    local args=(-sS -o "$WORK/answer" -w '%{http_code}' -X "$1" -H "@$WORK/auth")
     [ $# -ge 3 ] && args+=(-H 'Content-Type: application/json' --data "$3")
     STATUS="$(curl "${args[@]}" "$API$2" 2>"$WORK/curl-error")" || STATUS="000"
 }
@@ -677,12 +678,14 @@ step_release() {
     pass release "the door runs $running; released $SIGNED_VERSION and $UNSIGNED_VERSION"
 }
 
-# upload VERSION FILE: uploads FILE as VERSION and sets UPLOADED_ID.
+# upload VERSION FILE: uploads FILE as VERSION and sets UPLOADED_ID. The
+# token reaches make on its standard input, never its command line.
 UPLOADED_ID=""
 upload() {
     UPLOADED_ID=""
-    make -C "$ROOT" --no-print-directory firmware-upload SERVER="$DOORCODE_SERVER" \
-        TOKEN="$DOORCODE_TOKEN" FILE="$2" VERSION="$1" >"$WORK/upload.log" 2>&1 || return 1
+    printf '%s\n' "$DOORCODE_TOKEN" |
+        make -C "$ROOT" --no-print-directory firmware-upload SERVER="$DOORCODE_SERVER" \
+            TOKEN=- FILE="$2" VERSION="$1" >"$WORK/upload.log" 2>&1 || return 1
     UPLOADED_ID="$(grep -v '^HTTP ' "$WORK/upload.log" | jq -r '.id // empty' 2>/dev/null)"
     [ -n "$UPLOADED_ID" ] || return 1
     FIRMWARE_IDS+=("$UPLOADED_ID")

@@ -3,7 +3,8 @@
 # (POST /api/v1/firmware, multipart fields `version` and `image`) with an
 # API token of a user who holds the manage-firmware role, and prints the
 # server's answer. SERVER is the server's base address, such as
-# https://doors.example.org.
+# https://doors.example.org. A TOKEN of - reads the token from the first
+# line of standard input instead, keeping it off every command line.
 #
 # Usage: scripts/firmware-upload.sh SERVER TOKEN FILE VERSION
 set -eu
@@ -16,6 +17,12 @@ server=${1%/}
 token=$2
 file=$3
 version=$4
+if [ "$token" = - ]; then
+    IFS= read -r token || [ -n "$token" ] || {
+        echo "no token on standard input" >&2
+        exit 2
+    }
+fi
 
 if [ ! -f "$file" ]; then
     echo "no image at $file" >&2

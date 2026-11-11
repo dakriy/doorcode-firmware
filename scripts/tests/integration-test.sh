@@ -70,12 +70,13 @@ skip() { echo "SKIP $1: $2"; }
 
 # --- HTTP -----------------------------------------------------------------
 
+bench_env_write_auth "$WORK/auth" "$TOKEN"
+
 # api METHOD PATH [JSON]: calls the server's API. The answer is in
 # $WORK/answer and its status in $STATUS.
 STATUS=""
 api() {
-    local args=(-sS -o "$WORK/answer" -w '%{http_code}' -X "$1"
-        -H "Authorization: Bearer $TOKEN")
+    local args=(-sS -o "$WORK/answer" -w '%{http_code}' -X "$1" -H "@$WORK/auth")
     [ $# -ge 3 ] && args+=(-H 'Content-Type: application/json' --data "$3")
     STATUS="$(curl "${args[@]}" "$API$2" 2>"$WORK/curl-error")" || STATUS="000"
 }
@@ -449,7 +450,7 @@ update_ended() { [ "$(update_state .state)" = "$1" ]; }
 
 step_firmware_upload() {
     head -c 4096 /dev/urandom >"$WORK/firmware.bin"
-    STATUS="$(curl -sS -o "$WORK/answer" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+    STATUS="$(curl -sS -o "$WORK/answer" -w '%{http_code}' -H "@$WORK/auth" \
         -F "version=$NEW_VERSION" -F "notes=Made by the integration test." \
         -F "image=@$WORK/firmware.bin;type=application/octet-stream" "$API/firmware" 2>"$WORK/curl-error")" ||
         STATUS=000

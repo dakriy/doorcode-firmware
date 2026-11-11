@@ -120,9 +120,7 @@ skip() { echo "SKIP $1: $2"; }
 
 # --- HTTP -----------------------------------------------------------------
 
-# The token goes to curl in a header file only this user can read, so it
-# never appears on a command line.
-printf 'Authorization: Bearer %s\n' "$DOORCODE_TOKEN" >"$WORK/auth"
+bench_env_write_auth "$WORK/auth" "$DOORCODE_TOKEN"
 
 # api METHOD PATH [JSON]: calls the server's API. The answer is in
 # $WORK/answer and its status in $STATUS.

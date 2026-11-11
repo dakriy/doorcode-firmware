@@ -51,7 +51,12 @@ or `scripts/firmware-upload.sh SERVER TOKEN FILE VERSION`. It posts the
 image to `POST /api/v1/firmware` as a multipart form (`version`, `image`)
 with an API token of a user who holds the `manage-firmware` role, prints
 the server's answer, and fails unless the server answered `201 Created`.
-The version must be new to the server.
+The version must be new to the server. `TOKEN=-` reads the token from the
+first line of standard input instead, so that it stays out of the process
+list:
+
+    printf '%s\n' "$TOKEN" | make firmware-upload SERVER=https://doors.example.org \
+        TOKEN=- FILE=dist/doorcode-firmware-2.1.0.bin VERSION=2.1.0
 
 ## 3. Roll out
 

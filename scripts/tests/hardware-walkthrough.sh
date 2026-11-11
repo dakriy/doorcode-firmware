@@ -147,12 +147,13 @@ saw() {
 
 # --- HTTP -----------------------------------------------------------------
 
+bench_env_write_auth "$WORK/auth" "$DOORCODE_TOKEN"
+
 # api METHOD PATH [JSON]: calls the server's API. The answer is in
 # $WORK/answer and its status in $STATUS.
 STATUS=""
 api() {
-    local args=(-sS -o "$WORK/answer" -w '%{http_code}' -X "$1"
-        -H "Authorization: Bearer $DOORCODE_TOKEN")
+    local args=(-sS -o "$WORK/answer" -w '%{http_code}' -X "$1" -H "@$WORK/auth")
     [ $# -ge 3 ] && args+=(-H 'Content-Type: application/json' --data "$3")
     STATUS="$(curl "${args[@]}" "$API$2" 2>"$WORK/curl-error")" || STATUS="000"
 }

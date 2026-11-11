@@ -15,7 +15,8 @@ usage: scripts/tests/bench-serial-selftest.sh [--help]
 
 Runs bench-serial.py against scripts/tests/fixtures/bench-boot.txt and checks
 a match, a timeout, crash detection, the log file, and reset, then checks that
-bench-env.sh loads test.env, applies defaults, and names missing keys.
+bench-env.sh loads test.env, applies defaults, names missing keys, and writes
+the token's header file for this user only.
 Prints one PASS or FAIL line per check and exits 1 when any fails.
 USAGE
 }
@@ -130,5 +131,14 @@ check settings-key-inside 2 "bench settings: DOORCODE_SIGNING_KEY: $WORK/root/si
 echo 'key' >"$WORK/signing.key"
 settings "DOORCODE_SIGNING_KEY='$WORK/signing.key'; DOORCODE_TIMEOUT_S=soon; bench_env_require"
 check settings-timeout 2 "bench settings: DOORCODE_TIMEOUT_S is soon, not a whole number of seconds"
+
+settings "bench_env_write_auth '$WORK/auth' secret && stat -c %a '$WORK/auth' && cat '$WORK/auth'"
+check settings-auth 0 "Authorization: Bearer secret"
+mode="$(head -n 1 "$WORK/out")"
+if [ "$mode" = 600 ]; then
+    pass settings-auth-private "mode $mode"
+else
+    fail settings-auth-private "mode $mode (want 600)"
+fi
 
 exit "$FAILED"
