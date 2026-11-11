@@ -1,10 +1,13 @@
-//! The doorcode server's JSON API, as an administrator's token reaches it.
+//! The doorcode server's JSON API, as a token of a user holding `admin`
+//! reaches it.
 
 use std::time::Duration;
 
 use serde_json::Value;
 use ureq::http::{Request, Response};
 use ureq::{Agent, Body};
+
+use crate::cleanup::Answer;
 
 /// How long any one API call may take.
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -45,6 +48,17 @@ impl Server {
         self.call("DELETE", path, None)
     }
 
+    /// Calls `method` on `path` without a body, and returns the answer's
+    /// status and up to 300 characters of its body on one line, whatever
+    /// the status.
+    pub(crate) fn status(&self, method: &str, path: &str) -> Answer {
+        let mut response = self.response(method, path, None)?;
+        let text = response.body_mut().read_to_string();
+        let text = text.map_err(|error| error.to_string())?;
+        let line = text.replace('\n', " ").chars().take(300).collect();
+        Ok((response.status().as_u16(), line))
+    }
+
     /// Calls `method` on `path` with `body` as JSON, and returns the JSON
     /// answer, null when it is empty; a status other than 2xx is an error
     /// that quotes the answer.
@@ -54,10 +68,19 @@ impl Server {
     }
 
     fn answer(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+        read(self.response(method, path, body)?)
+    }
+
+    fn response(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<Response<Body>, String> {
         let request = self.request(method, path, body);
         let request = request.map_err(|error| error.to_string())?;
         let response = self.agent.run(request);
-        read(response.map_err(|error| error.to_string())?)
+        response.map_err(|error| error.to_string())
     }
 
     fn request(

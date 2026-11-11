@@ -44,8 +44,10 @@ with `curl`. See [`docs/host.md`](docs/host.md).
 
 ## Integration test and load tool
 
-Both create entities on the server and delete them again, so run them only
-against a development server, such as the server's own compose stack:
+Both create entities on the server and delete them again, the doors and
+users for good, so run them only against a development server, such as the
+server's own compose stack, with a personal API token of a user holding
+the `admin` role:
 
     scripts/tests/integration-test.sh   # server and token from test.env, or --server and --token
 

@@ -32,9 +32,9 @@ page):
 
 ## A token
 
-The script needs a personal API token of a user holding the `admin` role,
-since it deletes the door and the user it made for good, which only `admin`
-may do (`scripts/tests/README.md`). Create one on the portal's API tokens
+The script, like the load tool below, needs a personal API token of a
+user holding the `admin` role, since it deletes the doors and the users it
+made for good, which only `admin` may do (`scripts/tests/README.md`). Create one on the portal's API tokens
 page, or through the API after signing in with the first administrator's
 password, which the server logs on its first start
 (`docker compose logs app`):
@@ -132,7 +132,7 @@ id. Typing doors have a code typed at them; traffic doors, from
 can be many doors with lots of opening and closing and some codes entered
 at the other doors. Like the integration test, it creates entities on the
 server and
-deletes them again, and it drives real traffic through the server's
+deletes them again, the doors and the user for good, and it drives real traffic through the server's
 broker and database. **Run it only against a development server**, never
 against a server that runs real doors.
 
@@ -173,6 +173,24 @@ against a server that runs real doors.
    Cleanup also runs when a step fails or the run is interrupted with
    Ctrl-C.
 
+The doors and the user are deleted for good, with
+`DELETE /api/v1/doors/{id}?force=true` and
+`DELETE /api/v1/users/{id}?force=true`, so the server keeps nothing of
+them: not their events, telemetry, or credentials, and the `swarm-` door
+names and the user's email are free again. Only what the run created is
+deleted; the doors go first, and the user, who only types its code, made
+no override and uploaded no firmware that would stop it going for good.
+Only a user holding the `admin` role may delete for good, so **the token
+must belong to a user holding `admin`.** When the server refuses (403 to
+a token without `admin`, or 409 for a user who made an override or
+uploaded firmware) the swarm deletes the door or user the ordinary way
+instead, so it is refused everywhere, and prints a `cleanup:` line to
+standard error saying it is kept and why; it does the same when a server
+too old to know `force` only deleted it the ordinary way, which it finds
+by asking for it again. These are the rules the scripts under
+`scripts/tests` follow. Zones, groups, and access rules are gone for good
+with an ordinary delete.
+
 A run of 60 seconds therefore takes about two minutes: enrollment, 30
 seconds idle, the typing, and the grace period.
 
@@ -185,7 +203,7 @@ seconds idle, the typing, and the grace period.
 | Flag | Meaning |
 | --- | --- |
 | `--server URL` | The server's address. |
-| `--token TOKEN` | A personal API token of an administrator (see "A token" above). |
+| `--token TOKEN` | A personal API token of a user holding `admin` (see "A token" above). |
 | `--doors N` | How many typing doors to run. |
 | `--rate R` | Entries per typing door per minute. |
 | `--duration D` | How many seconds to type and open for. |

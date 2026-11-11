@@ -6,6 +6,7 @@
 //! each traffic door at a steady rate, and reports how the server kept up.
 //! See `docs/testing.md`.
 
+pub mod cleanup;
 mod door;
 mod recorder;
 pub mod report;
@@ -167,7 +168,9 @@ fn read_json(path: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|error| at(&error))
 }
 
-/// Deletes what the run created, or says what was kept.
+/// Deletes what the run created, the doors and the user for good, or says
+/// what was kept. The user only types its code, so it made no override and
+/// uploaded no firmware that would stop it going for good.
 fn finish(server: &Server, created: &Created, keep: bool) {
     if keep {
         eprintln!("kept: {created:?}");
@@ -175,18 +178,26 @@ fn finish(server: &Server, created: &Created, keep: bool) {
     }
     remove(server, "/access-rules", created.rule);
     for door in &created.doors {
-        remove(server, "/doors", Some(*door));
+        remove_for_good(server, "/doors", Some(*door));
     }
     remove(server, "/zones", created.zone);
     remove(server, "/zones", created.open_zone);
     remove(server, "/groups", created.group);
-    remove(server, "/users", created.user);
+    remove_for_good(server, "/users", created.user);
 }
 
 fn remove(server: &Server, kind: &str, id: Option<u64>) {
     let Some(id) = id else { return };
     if let Err(error) = server.delete(&format!("{kind}/{id}")) {
         eprintln!("cleanup: {error}");
+    }
+}
+
+fn remove_for_good(server: &Server, kind: &str, id: Option<u64>) {
+    let Some(id) = id else { return };
+    let call = |method: &str, path: &str| server.status(method, path);
+    if let Some(kept) = cleanup::delete_for_good(&format!("{kind}/{id}"), call) {
+        eprintln!("cleanup: {kept}");
     }
 }
 

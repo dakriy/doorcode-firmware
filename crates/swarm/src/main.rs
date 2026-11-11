@@ -13,7 +13,9 @@ use swarm::Options;
 
 const USAGE: &str = "usage: doorcode-swarm --server URL --token TOKEN --doors N --rate R \
 --duration SECONDS [--idle SECONDS] [--traffic-doors N --traffic-rate R] [--open-seconds S] \
-[--forced] [--provisioning PATH] [--broker-host HOST] [--storm] [--json PATH] [--keep]";
+[--forced] [--provisioning PATH] [--broker-host HOST] [--storm] [--json PATH] [--keep]
+The token's user must hold admin: unless --keep, the doors and the user the run created \
+are deleted for good with ?force=true.";
 
 /// Flags that take no value.
 const SWITCHES: [&str; 3] = ["--storm", "--keep", "--forced"];
