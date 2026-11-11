@@ -48,10 +48,10 @@ impl Reading {
         }
     }
 
-    /// The cumulative counts to count the next report from, once a report
-    /// with this reading was sent after one that read `reported`. Without
-    /// TCP counters the TCP counts stay where they were.
-    fn reported_after(&self, reported: Cumulative) -> Cumulative {
+    /// The cumulative counts this reading stands for, after a report that
+    /// read `reported`. Without TCP counters the TCP counts stay where they
+    /// were, so nothing counts since.
+    fn cumulative_after(&self, reported: Cumulative) -> Cumulative {
         Cumulative {
             tcp: self.tcp.unwrap_or(reported.tcp),
             wifi_drops: self.wifi.drops,
@@ -131,18 +131,18 @@ impl Tally {
     /// radio reading `reading`.
     fn counted(&self, latency_ms: u64, reading: &Reading) -> Counters {
         let reported = self.since_start.reported;
-        let tcp_since = tcp_since(reported.tcp, reading.tcp);
+        let now = reading.cumulative_after(reported);
         Counters {
             opens: self.since_report.opens,
             reconnects: self.since_start.connections.saturating_sub(1),
             latency_ms,
             checks_sent: self.since_report.checks_sent,
             checks_lost: self.since_report.checks_lost,
-            tcp_sent: tcp_since.segments_sent,
-            tcp_retransmits: tcp_since.retransmits,
-            tcp_drops: tcp_since.drops,
-            wifi_drops: count_since(reported.wifi_drops, reading.wifi.drops),
-            roams: count_since(reported.roams, reading.wifi.roams),
+            tcp_sent: count_since(reported.tcp.segments_sent, now.tcp.segments_sent),
+            tcp_retransmits: count_since(reported.tcp.retransmits, now.tcp.retransmits),
+            tcp_drops: count_since(reported.tcp.drops, now.tcp.drops),
+            wifi_drops: count_since(reported.wifi_drops, now.wifi_drops),
+            roams: count_since(reported.roams, now.roams),
         }
     }
 
@@ -179,32 +179,10 @@ impl Tally {
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
             Ok(_) => {
                 self.since_report = SinceReport::default();
-                self.since_start.reported = reading.reported_after(self.since_start.reported);
+                self.since_start.reported = reading.cumulative_after(self.since_start.reported);
             }
             Err(error) => device.log(Level::Warn, &format!("telemetry was not sent: {error}")),
         }
-    }
-}
-
-/// What the TCP counters counted between two readings, as counts that fit
-/// a report.
-#[derive(Default)]
-struct TcpSince {
-    segments_sent: u64,
-    retransmits: u64,
-    drops: u64,
-}
-
-/// What the TCP counters counted from `reported` to `now`; all zero when
-/// the network stack keeps no counters.
-fn tcp_since(reported: TcpCounters, now: Option<TcpCounters>) -> TcpSince {
-    let Some(now) = now else {
-        return TcpSince::default();
-    };
-    TcpSince {
-        segments_sent: count_since(reported.segments_sent, now.segments_sent),
-        retransmits: count_since(reported.retransmits, now.retransmits),
-        drops: count_since(reported.drops, now.drops),
     }
 }
 
