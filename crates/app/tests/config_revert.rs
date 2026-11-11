@@ -34,6 +34,10 @@ fn moved_with_longer_pulse() -> Vec<u8> {
     ))
 }
 
+/// About a thousand centuries in milliseconds, far past any deadline a
+/// door counts in practice.
+const A_THOUSAND_CENTURIES_MS: u64 = 3_155_760_000_000_000;
+
 /// The username of the pair a rotation hands door 7 over to.
 const NEXT_USERNAME: &str = "door-7-fedcba987654";
 
@@ -556,6 +560,95 @@ fn the_config_on_trial_arriving_again_before_it_is_kept_leaves_the_trial_running
             (Some(good().encode()), None, Some(MOVED_DIGEST.to_owned()))
         )
     );
+}
+
+#[test]
+fn the_stored_config_arriving_during_the_trial_withdraws_it_and_restarts_onto_the_stored_one() {
+    let connectors = on_trial_not_kept([(10, config_message(good().encode()))]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            connectors.firmware.calls(),
+            connectors.log.lines_at(Level::Warn),
+            trial_state(&connectors)
+        ),
+        (
+            vec![FirmwareCall::Restart],
+            vec![
+                "not connected (broker: queue full); connecting again in 1000 ms".to_owned(),
+                format!(
+                    "config {MOVED_DIGEST} on trial was withdrawn; restarting with the stored config"
+                )
+            ],
+            (Some(good().encode()), None, None)
+        )
+    );
+}
+
+#[test]
+fn after_a_withdrawn_trial_the_door_stays_on_the_stored_config_however_long_it_is_offline() {
+    let withdrawn = on_trial_not_kept([(10, config_message(good().encode()))]);
+    app::run(&withdrawn).unwrap();
+    let offline = restarted(withdrawn, [(400_000, Event::Stop)]);
+    app::run(&offline).unwrap();
+    let connectors = restarted(offline, [(0, Event::Connected)]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            report.config,
+            first_address(&connectors),
+            reverted_digests(&connectors),
+            trial_state(&connectors)
+        ),
+        (
+            good(),
+            previous_broker(),
+            vec![],
+            (Some(good().encode()), None, None)
+        )
+    );
+}
+
+#[test]
+fn a_withdrawn_config_sent_again_is_tried_again() {
+    let withdrawn = on_trial_not_kept([(10, config_message(good().encode()))]);
+    app::run(&withdrawn).unwrap();
+    let connectors = restarted(
+        withdrawn,
+        [(0, Event::Connected), (10, config_message(moved()))],
+    );
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (connectors.firmware.calls(), trial_state(&connectors)),
+        (
+            vec![FirmwareCall::Restart],
+            (Some(good().encode()), Some(moved()), None)
+        )
+    );
+}
+
+#[test]
+fn a_connect_timeout_too_long_to_count_in_milliseconds_keeps_the_trial_going() {
+    let endless = Config {
+        update_connect_timeout_s: u64::MAX,
+        ..Config::default()
+    };
+    let first = StubConnectors {
+        storage: StubStorage::enrolled().with_config(&endless),
+        ..StubConnectors::online([(10, config_message(moved()))])
+    };
+    app::run(&first).unwrap();
+    let connectors = restarted(first, [(A_THOUSAND_CENTURIES_MS, Event::Connected)]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(trial_state(&connectors), (Some(moved()), None, None));
 }
 
 #[test]

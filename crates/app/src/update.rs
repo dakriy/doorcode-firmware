@@ -195,7 +195,8 @@ pub(crate) enum Boot {
 /// What this boot is to an update, given the configuration stored.
 pub(crate) fn boot(device: &Device<'_>, config: &Config) -> Result<Boot, RunError> {
     if device.connectors.firmware().first_boot_of_new_image() {
-        let revert_at = device.now_ms() + config.update_connect_timeout_s * 1000;
+        let deadline_ms = config.update_connect_timeout_s.saturating_mul(1000);
+        let revert_at = device.now_ms().saturating_add(deadline_ms);
         return Ok(Boot::Trial { revert_at });
     }
     let boot = match stored::update(device.connectors.storage())? {

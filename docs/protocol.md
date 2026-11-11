@@ -148,7 +148,13 @@ A configuration that arrives while the one on trial is not kept yet is
 tried in turn, whatever it changes: the door stores it as the one to try
 and restarts, and the stored configuration stays the one it goes back to.
 The configuration on trial arriving again is the exception: it changes
-nothing, and the trial goes on.
+nothing, and the trial goes on. The door's stored configuration arriving
+again (the same digest) is the other: the server has withdrawn the
+trial. The door forgets the digest tried and restarts onto its stored
+configuration, so it neither says `config_reverted` for the configuration
+withdrawn nor ignores it when it is sent again. A power cut before the door
+forgot the digest is a trial cut short as any other, and the door says
+`config_reverted` for it as above.
 
 Back on its stored configuration after giving one up, the door says
 `config_reverted` (Door events) the first time it comes online, once, and

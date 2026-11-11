@@ -666,6 +666,7 @@ impl Door {
     /// and not kept yet: the stored configuration never holds connection
     /// settings the door has not been online with. Ignores the
     /// configuration last given up, and the one on trial arriving again.
+    /// The door's own configuration arriving during a trial withdraws it.
     fn receive_config(self, device: &Device<'_>, payload: &[u8]) -> Result<Door, RunError> {
         let config = match Config::decode(payload) {
             Ok(config) => config,
@@ -680,6 +681,14 @@ impl Door {
                 Level::Debug,
                 &format!("config {digest} on trial arrived again"),
             );
+            return Ok(self);
+        }
+        if self
+            .trial
+            .as_ref()
+            .is_some_and(|trial| trial.withdrawn_by(&digest))
+        {
+            trial::withdraw(device, &self.config_digest)?;
             return Ok(self);
         }
         if trial::given_up(device, &digest)? {

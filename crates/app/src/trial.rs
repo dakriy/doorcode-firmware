@@ -9,7 +9,9 @@
 //! The digest of the configuration tried stays stored until the door comes
 //! online with it or another configuration arrives, so that a door back on
 //! its previous configuration says once that it gave that one up, and
-//! ignores it when it is sent again.
+//! ignores it when it is sent again. The door's own configuration arriving
+//! during the trial withdraws it: the digest is forgotten before the
+//! restart onto that configuration, so there is nothing to say or ignore.
 
 use connectors::{BrokerAddress, Level};
 use protocol::Config;
@@ -74,16 +76,24 @@ pub(crate) struct Running {
 }
 
 /// A configuration on trial: its message, stored as the door's
-/// configuration once the door comes online, and the time it is given up
-/// at unless it has by then.
+/// configuration once the door comes online, the time it is given up at
+/// unless it has by then, and the digest of the door's configuration it
+/// goes back to.
 pub(crate) struct Trial {
     payload: Vec<u8>,
     revert_at: u64,
+    stored_digest: String,
 }
 
 impl Trial {
     pub(crate) fn revert_at(&self) -> u64 {
         self.revert_at
+    }
+
+    /// Whether the configuration with `digest` is the door's configuration
+    /// this trial goes back to, which withdraws the trial when it arrives.
+    pub(crate) fn withdrawn_by(&self, digest: &str) -> bool {
+        digest == self.stored_digest
     }
 }
 
@@ -98,13 +108,14 @@ pub(crate) fn boot(device: &Device<'_>) -> Result<Running, RunError> {
         Level::Info,
         &format!("trying config {digest} until the door comes online"),
     );
-    let deadline_ms = settled.config.update_connect_timeout_s * 1000;
+    let deadline_ms = settled.config.update_connect_timeout_s.saturating_mul(1000);
     Ok(Running {
         config,
         digest,
         trial: Some(Trial {
             payload,
-            revert_at: device.now_ms() + deadline_ms,
+            revert_at: device.now_ms().saturating_add(deadline_ms),
+            stored_digest: settled.digest,
         }),
         given_up: None,
     })
@@ -204,6 +215,20 @@ pub(crate) fn revert(device: &Device<'_>, digest: &str, why: &str) {
         Level::Error,
         &format!("{why} on config {digest}; restarting with the previous config"),
     );
+}
+
+/// Ends the trial of the configuration with `digest` that the server
+/// withdrew by sending the door's configuration again: forgets the digest
+/// tried, so that it is neither said given up nor ignored, and restarts
+/// onto the door's configuration. A restart before the digest is
+/// forgotten gives the trial up as any other cut short.
+pub(crate) fn withdraw(device: &Device<'_>, digest: &str) -> Result<(), RunError> {
+    stored::remove(device.connectors.storage(), &[CONFIG_TRIED])?;
+    device.restart(
+        Level::Warn,
+        &format!("config {digest} on trial was withdrawn; restarting with the stored config"),
+    );
+    Ok(())
 }
 
 /// Now that door `door_id` has come online: keeps the configuration on

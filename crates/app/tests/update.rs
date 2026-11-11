@@ -488,6 +488,24 @@ fn the_connect_timeout_of_a_new_image_is_the_one_stored() {
 }
 
 #[test]
+fn a_connect_timeout_too_long_to_count_in_milliseconds_keeps_a_new_image_on_trial() {
+    let config = Config {
+        update_connect_timeout_s: u64::MAX,
+        ..Config::default()
+    };
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled()
+            .with_update(ID, VERSION)
+            .with_config(&config),
+        ..new_image([(3_155_760_000_000_000, Event::Connected)])
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(connectors.firmware.calls(), vec![MarkValid]);
+}
+
+#[test]
 fn a_new_image_whose_online_status_is_not_published_is_not_kept() {
     let connectors = StubConnectors {
         broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
