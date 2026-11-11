@@ -140,6 +140,11 @@ for size so an image fits.
   disconnect it makes itself, to roam or to join other credentials, is not
   a loss. Telemetry reports these with the joined access point's BSSID and
   channel.
+  Power save is off on every station, plain or mesh and in the
+  stepping-stone image: once Wi-Fi has started, the radio stays awake
+  (`WIFI_PS_NONE`) instead of ESP-IDF's default modem sleep, which holds
+  frames for the station until a later beacon and delays or loses them
+  under load. Neither Mesh-Lite nor the IoT bridge changes it afterwards.
 - **Mesh.** With `mesh_enabled` set and `mesh_ssid` named in the stored
   configuration at start, Mesh-Lite runs Wi-Fi instead, and a door whose
   access point is too weak hops through a neighbouring door

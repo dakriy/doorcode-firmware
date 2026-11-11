@@ -58,6 +58,14 @@ pub(crate) fn worth_roaming(found: i32, signal: i32) -> bool {
     found >= signal + ROAM_MARGIN_DB
 }
 
+/// Keeps the radio awake between beacons once Wi-Fi has started. ESP-IDF's
+/// default modem sleep holds frames for the station until the next beacon
+/// it listens to, which delays replies and loses some under load.
+pub(crate) fn power_save_off() -> Result<(), EspError> {
+    // SAFETY: takes a plain value; Wi-Fi is initialized and started.
+    sys::esp!(unsafe { sys::esp_wifi_set_ps(sys::wifi_ps_type_t_WIFI_PS_NONE) })
+}
+
 /// Whether the station has an IP link, readable from any thread.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Link(Arc<AtomicBool>);

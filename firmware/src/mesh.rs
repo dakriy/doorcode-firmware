@@ -29,7 +29,8 @@ use esp_idf_svc::wifi::WifiEvent;
 
 use crate::clock::now_ms;
 use crate::network::{
-    roam_scan_due, worth_roaming, Context, Credentials, MeshSettings, CHECK_EVERY, STACK_BYTES,
+    power_save_off, roam_scan_due, worth_roaming, Context, Credentials, MeshSettings, CHECK_EVERY,
+    STACK_BYTES,
 };
 use crate::radio::access_point;
 use crate::threads;
@@ -91,16 +92,23 @@ fn subscribe_to_scans(
 /// Creates the bridge's station and soft-AP and starts Mesh-Lite on them,
 /// joining `router`.
 fn bring_up(settings: &MeshSettings, router: &Credentials) -> Result<(), EspError> {
-    // SAFETY: called once, before anything else uses Wi-Fi.
-    sys::esp!(unsafe { sys::esp_netif_init() })?;
-    // SAFETY: as above, after the network interfaces are initialized.
-    unsafe { mesh_lite::esp_bridge_create_all_netif() };
+    start_wifi()?;
     configure_soft_ap(&settings.network)?;
     initialize(settings)?;
     configure_router(router)?;
     // SAFETY: takes no arguments; Mesh-Lite is initialized and configured.
     unsafe { mesh_lite::esp_mesh_lite_start() };
     Ok(())
+}
+
+/// Creates the bridge's network interfaces, which initializes and starts
+/// Wi-Fi, and turns power save off.
+fn start_wifi() -> Result<(), EspError> {
+    // SAFETY: called once, before anything else uses Wi-Fi.
+    sys::esp!(unsafe { sys::esp_netif_init() })?;
+    // SAFETY: as above, after the network interfaces are initialized.
+    unsafe { mesh_lite::esp_bridge_create_all_netif() };
+    power_save_off()
 }
 
 /// Names the bridge's soft-AP and hides it: its beacons leave the name

@@ -17,7 +17,8 @@ use esp_idf_svc::wifi::{
 
 use crate::clock::now_ms;
 use crate::network::{
-    roam_scan_due, worth_roaming, Context, Credentials, Settings, CHECK_EVERY, STACK_BYTES,
+    power_save_off, roam_scan_due, worth_roaming, Context, Credentials, Settings, CHECK_EVERY,
+    STACK_BYTES,
 };
 use crate::threads;
 
@@ -70,11 +71,13 @@ impl Station {
 
     /// Starts the driver as a station and nothing else. Without a client
     /// configuration first, the driver comes up as an access point with a
-    /// DHCP server, and a station scan fails.
+    /// DHCP server, and a station scan fails. Power save goes off once the
+    /// driver runs.
     fn start(&mut self) -> Result<(), EspError> {
         self.wifi
             .set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
-        self.wifi.start()
+        self.wifi.start()?;
+        power_save_off()
     }
 
     /// Looks at the link once, and returns how long to wait before the next
