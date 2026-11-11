@@ -5,8 +5,10 @@
 # and revocation, signed and unsigned firmware updates, a failed download,
 # and the board's health over the run. It creates or restores a door for the
 # board, uploads firmware, and changes the device_url setting, and undoes all
-# of it again: run it only against a development server. Settings come from
-# test.env (scripts/tests/bench-env.sh); docs/testing.md describes the run.
+# of it again, deleting a door it created for good, which needs a token of a
+# user holding the admin role: run it only against a development server.
+# Settings come from test.env (scripts/tests/bench-env.sh); docs/testing.md
+# describes the run.
 
 # The checks are called through within, eventually, and the EXIT trap,
 # which the linter does not follow.
@@ -35,7 +37,8 @@ a flag overrides its key.
                       and print their ids
   --dry-run           print the steps and settings, and touch nothing
   --server URL        DOORCODE_SERVER, the server's base address
-  --token TOKEN       DOORCODE_TOKEN, an administrator's API token
+  --token TOKEN       DOORCODE_TOKEN, an API token of a user holding the
+                      admin role
   --signing-key PATH  DOORCODE_SIGNING_KEY, the private signing key's PEM
                       file, outside the repository
   --port PORT         DOORCODE_SERIAL_PORT, the board's serial port
@@ -81,7 +84,7 @@ STEPS=(
     "9 ota-unsigned, ota-unsigned-accepted, ota-unsigned-accepted-started, override-cleared: upload the second image without its 68-byte signature block, update; it fails with bad signature; with the override accept_unsigned_firmware \"true\" it succeeds and GET /events records a newer start, a restart its firmware asked for; the overrides are put back"
     "10 bad-download, device-url-restored: with the device_url setting at an address that refuses, update to the first image; it fails; device_url is put back and the door is online"
     "11 no-crash, free-memory: the run's serial log holds no crash text; free_bytes in the last telemetry sample is at most 10% below the first"
-    "12 cleanup: put device_url and the overrides back; unless --keep, put the door's firmware choice back and delete the uploaded firmware and the door the run created or restored"
+    "12 cleanup: put device_url and the overrides back; unless --keep, put the door's firmware choice back and delete the uploaded firmware, and the door: for good when the run created it, the ordinary way when it restored it"
 )
 
 if $DRY_RUN; then
@@ -221,8 +224,9 @@ log_wait() {
 
 HARDWARE_ID=""
 DOOR_ID=""
-# Whether the run created or restored the door, and so deletes it.
-DOOR_OURS=false
+# created or restored when the run created the door or restored a deleted
+# one, and so deletes it again; empty for a door that existed before.
+DOOR_MADE=""
 
 # What the firmware steps changed, for the cleanup to put back. Each restore
 # forgets what it put back, so the EXIT trap repeats only what is left.
@@ -275,12 +279,24 @@ delete_firmware() {
     [ ${#left[@]} -eq 0 ]
 }
 
-# delete_door: deletes the door when the run created or restored it.
+# delete_door: deletes the door for good when the run created it, and the
+# ordinary way when it restored a deleted one, which the run did not make.
 # Deleting a door also revokes its credentials, so the board waits to enroll
-# again, ready for the next run.
+# again, ready for the next run. Forgets the door once it is deleted, and
+# adds what it could not do to TIDY_PROBLEMS.
 delete_door() {
-    [ -n "$DOOR_ID" ] && $DOOR_OURS || return 0
-    api_ok DELETE "/doors/$DOOR_ID" && DOOR_ID=""
+    local problem=""
+    [ -n "$DOOR_ID" ] && [ -n "$DOOR_MADE" ] || return 0
+    if [ "$DOOR_MADE" = created ]; then
+        problem="$(bench_env_delete_for_good "$API" "$WORK" "/doors/$DOOR_ID")"
+        # 2: not deleted at all, so a later cleanup tries again.
+        [ $? -eq 2 ] || DOOR_ID=""
+    elif api_ok DELETE "/doors/$DOOR_ID"; then
+        DOOR_ID=""
+    else
+        problem="deleting door $DOOR_ID $(reason)"
+    fi
+    [ -z "$problem" ] || TIDY_PROBLEMS+=("$problem")
 }
 
 # tidy: puts back device_url, the overrides, and the door's firmware choice,
@@ -294,7 +310,7 @@ tidy() {
     $KEEP && return 0
     restore_door_firmware || TIDY_PROBLEMS+=("restoring door $DOOR_ID's firmware choice $(reason)")
     delete_firmware || TIDY_PROBLEMS+=("deleting firmware ${FIRMWARE_IDS[*]} $(reason)")
-    delete_door || TIDY_PROBLEMS+=("deleting door $DOOR_ID $(reason)")
+    delete_door
 }
 
 # kept: what the run leaves on the server.
@@ -437,13 +453,13 @@ find_door() {
     DOOR_ID="$(named_door deleted)"
     if [ -n "$DOOR_ID" ]; then
         api_ok POST "/doors/$DOOR_ID/restore" || abort enroll "restoring door $DOOR_ID $(reason)"
-        DOOR_OURS=true
+        DOOR_MADE=restored
         return 0
     fi
     api_ok POST /doors "$(jq -cn --arg name "$DOORCODE_DOOR_NAME" '{name: $name, notes: "Made by the bench test."}')" ||
         abort enroll "creating the door $(reason)"
     DOOR_ID="$(answer .id)"
-    DOOR_OURS=true
+    DOOR_MADE=created
 }
 
 # The time of the door's latest telemetry sample before it was approved.

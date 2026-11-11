@@ -2,10 +2,11 @@
 # Runs one doorcode-host door against a doorcode server and checks the
 # controller contract end to end through the server's API and the host's
 # control API. It creates a door, a user with a code, a zone, a group, an
-# access rule, and a firmware version, and deletes them again: run it only
-# against a development server. The server and token come from test.env
-# (scripts/tests/bench-env.sh) unless flags give them. docs/testing.md
-# describes it.
+# access rule, and a firmware version, and deletes them again, the door and
+# the user for good, which needs a token of a user holding the admin role:
+# run it only against a development server. The server and token come from
+# test.env (scripts/tests/bench-env.sh) unless flags give them.
+# docs/testing.md describes it.
 
 # The checks are called through eventually and the EXIT trap, which the
 # linter does not follow.
@@ -20,8 +21,8 @@ usage: scripts/tests/integration-test.sh [--server URL] [--token TOKEN]
 
   --server URL        the server's address, such as http://localhost:8080
                       (default DOORCODE_SERVER from test.env)
-  --token TOKEN       a personal API token of an administrator
-                      (default DOORCODE_TOKEN from test.env)
+  --token TOKEN       a personal API token of a user holding the admin
+                      role (default DOORCODE_TOKEN from test.env)
   --broker-host HOST  the broker host to connect to instead of the one the
                       provisioning file names
   --keep              leave the created entities on the server
@@ -142,6 +143,14 @@ remove() {
     api_ok DELETE "$1/$2" || echo "cleanup: deleting $1/$2 $(reason)" >&2
 }
 
+# remove_for_good KIND ID: deletes the door or user the run made for good,
+# so the server keeps nothing of it.
+remove_for_good() {
+    local problem
+    [ -n "$2" ] || return 0
+    problem="$(bench_env_delete_for_good "$API" "$WORK" "$1/$2")" || echo "cleanup: $problem" >&2
+}
+
 cleanup() {
     # A second interrupt while tidying still removes the token's header file.
     trap 'rm -rf "$WORK"; exit 130' INT TERM
@@ -154,10 +163,12 @@ cleanup() {
             api_ok PUT "/doors/$DOOR_ID/firmware" '{"firmware_id":null}'
         remove /access-rules "$RULE_ID"
         remove /firmware "$FIRMWARE_ID"
-        remove /doors "$DOOR_ID"
+        # The door goes first: with it go the overrides the user made from
+        # its keypad, which would stop the user going for good.
+        remove_for_good /doors "$DOOR_ID"
         remove /zones "$ZONE_ID"
         remove /groups "$GROUP_ID"
-        remove /users "$USER_ID"
+        remove_for_good /users "$USER_ID"
         [ -n "$URL_SETTING_SET" ] && api_ok PUT "/settings/$URL_SETTING_SET" '{"clear":true}'
     fi
     rm -rf "$WORK"

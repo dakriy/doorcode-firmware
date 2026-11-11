@@ -16,6 +16,20 @@ header file in a temporary directory only its user can read, which curl reads
 and the script removes on exit, so the token never appears in the process
 list; it is there only when passed with `--token`.
 
+The doors and users a test creates it deletes for good when it ends, with
+`DELETE /api/v1/doors/{id}?force=true` and `DELETE /api/v1/users/{id}?force=true`,
+so the server keeps nothing of them: not their events, telemetry, or
+credentials, and their names and emails are free again. Only a user holding
+the `admin` role may do that, so **the API token (`DOORCODE_TOKEN` or
+`--token`) must belong to a user holding `admin`.** When the server refuses
+(403 to a token without `admin`, or 409 for a user who made an override
+or uploaded firmware that still exists) the script deletes the door or user the
+ordinary way instead, so it is refused everywhere, and prints a `cleanup:`
+line saying it is kept; it does the same when a server too old to know
+`force` only deleted it the ordinary way, which it finds by asking for it
+again. Zones, groups, access rules, overrides, and firmware are gone for
+good with an ordinary delete.
+
 | File | What it is |
 | --- | --- |
 | `integration-test.sh` | One desktop `doorcode-host` door against a server. |
@@ -24,8 +38,9 @@ list; it is there only when passed with `--token`.
 | `config-revert-test.sh` | Checks that an online door gives up a configuration it cannot come online with. |
 | `bench-serial-selftest.sh` | Checks the serial helper and the settings without a board or a server. |
 | `bench-serial.py` | The serial helper: resets the board and watches its log. |
-| `bench-env.sh` | Sourced by the bench scripts: loads `test.env`, checks the settings, and writes the token's header file. |
+| `bench-env.sh` | Sourced by the bench scripts: loads `test.env`, checks the settings, writes the token's header file, and deletes a door or user for good. |
 | `fixtures/bench-boot.txt` | A recorded boot log the self-test reads in place of the board. |
+| `fixtures/stub-api.py` | A stand-in server the self-test deletes from for good, which refuses or ignores `force` as asked. |
 
 ## integration-test.sh
 
@@ -36,7 +51,7 @@ telemetry, door events, keypad overrides, credential rotation and
 revocation, and an unsigned firmware update refused and then accepted.
 
 Needs: a server whose provisioning file names a broker this computer
-reaches, a personal API token of an administrator, and `bash`, `curl`,
+reaches, a personal API token of a user holding `admin`, and `bash`, `curl`,
 `jq`, and `cargo`. No board and no signing key. The server and token come
 from `test.env` (`DOORCODE_SERVER`, `DOORCODE_TOKEN`); flags override it.
 
@@ -45,7 +60,7 @@ from `test.env` (`DOORCODE_SERVER`, `DOORCODE_TOKEN`); flags override it.
 | Flag | Meaning |
 | --- | --- |
 | `--server URL` | The server's address instead of `DOORCODE_SERVER`. |
-| `--token TOKEN` | An administrator's API token instead of `DOORCODE_TOKEN`. |
+| `--token TOKEN` | An API token of a user holding `admin` instead of `DOORCODE_TOKEN`. |
 | `--broker-host HOST` | Connect to this broker host instead of the provisioning file's. |
 | `--keep` | Leave the created entities on the server and print their ids. |
 | `--timeout SECONDS` | How long each outcome may take instead of `DOORCODE_TIMEOUT_S` (60). |
@@ -58,7 +73,9 @@ On the server it creates a door, a user with a door code, a zone, a group,
 an access rule, and a firmware version, and changes the door's
 configuration overrides; when `device_url` is empty it sets it and clears
 it again. On any exit, unless `--keep`, it stops the host and deletes what
-it created.
+it created, the door and the user for good. The door goes first, and with
+it the overrides the user made from its keypad, which would otherwise stop
+the user going for good.
 
 ## bench-test.sh
 
@@ -77,7 +94,7 @@ and `ota-unsigned-accepted-started`, each of which must say a restart the
 firmware asked for. Each waits up to the timeout and fails naming the event
 it looked after.
 
-Needs: a server, an administrator's API token allowed to manage firmware,
+Needs: a server, an API token of a user holding `admin`,
 the board on its USB serial port, and for the firmware updates the private
 signing key's PEM file, kept outside the repository. Tools: `bash`,
 `curl`, `jq`, `uvx`, `make`, and `docker`. Settings come from `test.env`
@@ -117,8 +134,15 @@ chooses them for the door, and changes the door's overrides and the
 `device_url` setting. On any exit it puts `device_url` and the overrides
 back, and unless `--keep` puts the door's firmware choice back, deletes
 the uploaded firmware, and deletes the door when the run created or
-restored it. A door that existed before the run stays. The start checks
-only read the event log.
+restored it: for good when the run created it, and the ordinary way when
+it restored a deleted door of that name, which the run did not make and
+which so stays among the deleted doors for the next run to restore. A door
+that existed before the run stays. Such a deleted door is left from runs
+before the server could delete for good, or with a token without `admin`;
+deleting it once with `DELETE /api/v1/doors/{id}?force=true` lets the next
+run create the door afresh. A created door the server would not delete
+for good is deleted the ordinary way and fails the `cleanup` step (or,
+after an early exit, gets a `cleanup:` line), naming why it is kept. The start checks only read the event log.
 
 ## hardware-walkthrough.sh
 
@@ -146,7 +170,7 @@ door must already be enrolled, installed, and online; nothing is flashed
 and no serial port is needed, so it works on a door in service, against the
 server that door belongs to.
 
-Needs: an administrator's API token, someone at the door, a terminal, and
+Needs: an API token of a user holding `admin`, someone at the door, a terminal, and
 `bash`, `curl`, and `jq`. The server, token, door, and timeout come from
 `test.env`; flags override them.
 
@@ -174,9 +198,11 @@ zone holding only this door, and a door commander in a second group. The
 keypad commands make a locked and an open override of one minute each. On
 any exit it ends the overrides it made (never one in force before the run),
 puts the door's configuration overrides back, and unless `--keep` deletes
-the users, groups, zone, and rule. The server keeps deleted users, refused
-everywhere, so their events keep a name: each run leaves two among the
-deleted users, named `walkthrough-<random>`. The checks of the event log
+the users, groups, zone, and rule. The two users, named
+`walkthrough-<random>`, are deleted for good, and with them every event
+that names them, such as their checks at the door; the overrides the
+commander made, ended by then, are deleted first, since they name the
+commander and would stop it going for good. The checks of the event log
 only read it; the opening by hand leaves a forced open alarm in the log,
 and the openings, closings, and restart their own events, as at any door.
 
@@ -234,7 +260,9 @@ Checks `bench-serial.py` against `fixtures/bench-boot.txt` (a match, a
 timeout, crash detection, the log file, and reset) and `bench-env.sh`
 against a scratch `test.env` (defaults, required keys, a signing key
 inside the repository, and the token's header file readable by its user
-only). Needs only `bash` and `python3`; it creates
+only), and deleting for good against `fixtures/stub-api.py` (gone, a
+server that refuses `force`, one that ignores it, and one that fails).
+Needs only `bash`, `curl`, and `python3`; it creates
 nothing outside a temporary directory, which it removes.
 
     scripts/tests/bench-serial-selftest.sh

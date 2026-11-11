@@ -10,8 +10,10 @@
 # with a door code, a group, a zone holding only this door, and an access
 # rule, and may put the door in open or locked mode for a minute. On any
 # exit it ends the overrides it made, puts the door's configuration
-# overrides back, and deletes what it created. Settings come from test.env
-# (scripts/tests/bench-env.sh); docs/testing.md describes the walkthrough.
+# overrides back, and deletes what it created: the users, and the overrides
+# they made, for good, which needs a token of a user holding the admin
+# role. Settings come from test.env (scripts/tests/bench-env.sh);
+# docs/testing.md describes the walkthrough.
 
 # The checks are called through within, eventually, and the EXIT trap,
 # which the linter does not follow.
@@ -39,7 +41,8 @@ a flag overrides its key.
   --yes               start without asking to confirm the door
   --dry-run           print the steps and settings, and touch nothing
   --server URL        DOORCODE_SERVER, the server's base address
-  --token TOKEN       DOORCODE_TOKEN, an administrator's API token
+  --token TOKEN       DOORCODE_TOKEN, an API token of a user holding the
+                      admin role
   --timeout SECONDS   DOORCODE_TIMEOUT_S, how long the server may take to
                       show each outcome once the person has acted
   --help              print this and exit
@@ -346,6 +349,10 @@ OVERRIDES_BEFORE=""
 # The ids of the door's open or locked overrides in force before the run,
 # as a JSON array; the run never ends those.
 OVERRIDES_IN_FORCE="[]"
+# note_made OVERRIDE: notes that the run made OVERRIDE, in
+# $WORK/overrides-made. The cleanup deletes those, ended or not, since they
+# name the commander, who cannot be deleted for good while they stay.
+note_made() { echo "$1" >>"$WORK/overrides-made"; }
 
 set_overrides() { api_ok PUT "/doors/$DOOR_ID/config" "{\"overrides\":$1}"; }
 
@@ -368,6 +375,7 @@ end_our_overrides() {
     local id ok=0
     [ -n "$DOOR_ID" ] || return 0
     for id in $(ours); do
+        note_made "$id"
         api_ok POST "/doors/$DOOR_ID/overrides/$id/cancel" || ok=1
     done
     return "$ok"
@@ -376,6 +384,25 @@ end_our_overrides() {
 remove() {
     [ -n "$2" ] || return 0
     api_ok DELETE "$1/$2" || echo "cleanup: deleting $1/$2 $(reason)" >&2
+}
+
+# remove_for_good KIND ID: deletes the user the run made for good, with the
+# events that name them, so the server keeps nothing of them.
+remove_for_good() {
+    local problem
+    [ -n "$2" ] || return 0
+    problem="$(bench_env_delete_for_good "$API" "$WORK" "$1/$2")" || echo "cleanup: $problem" >&2
+}
+
+# delete_our_overrides: deletes every override the run made, ended or not.
+delete_our_overrides() {
+    local id
+    [ -n "$DOOR_ID" ] && [ -f "$WORK/overrides-made" ] || return 0
+    while read -r id; do
+        api DELETE "/doors/$DOOR_ID/overrides/$id"
+        [[ "$STATUS" == 2* || "$STATUS" == 404 ]] ||
+            echo "cleanup: deleting override $id of door $DOOR_ID $(reason)" >&2
+    done < <(sort -u "$WORK/overrides-made")
 }
 
 cleanup() {
@@ -392,8 +419,9 @@ cleanup() {
         remove /zones "$ZONE_ID"
         remove /groups "$COMMANDER_GROUP_ID"
         remove /groups "$GROUP_ID"
-        remove /users "$COMMANDER_ID"
-        remove /users "$USER_ID"
+        delete_our_overrides
+        remove_for_good /users "$COMMANDER_ID"
+        remove_for_good /users "$USER_ID"
     fi
     rm -rf "$WORK"
 }
@@ -631,6 +659,7 @@ step_locked_command() {
         fail locked-command "$(described), but no locked override came into force"
         return
     fi
+    note_made "$id"
     say "Locked. Now type the ordinary user's code:   $CODE #   The strike must stay locked."
     mark_events
     ready locked-command "Typed it?" || return
@@ -659,6 +688,7 @@ step_open_command() {
         fail open-command "$(described), but no open override came into force"
         return
     fi
+    note_made "$id"
     say "Open mode. Press any one key."
     saw open-command "Did the strike release?" || return
     say "Ending open mode from the server (keypad commands are not sent in open mode)."

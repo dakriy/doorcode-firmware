@@ -32,9 +32,11 @@ page):
 
 ## A token
 
-The script needs a personal API token of an administrator. Create one on
-the portal's API tokens page, or through the API after signing in with the
-first administrator's password, which the server logs on its first start
+The script needs a personal API token of a user holding the `admin` role,
+since it deletes the door and the user it made for good, which only `admin`
+may do (`scripts/tests/README.md`). Create one on the portal's API tokens
+page, or through the API after signing in with the first administrator's
+password, which the server logs on its first start
 (`docker compose logs app`):
 
     curl -c cookies -d email=admin@example.com --data-urlencode "password=$PASSWORD" \
@@ -50,7 +52,7 @@ first administrator's password, which the server logs on its first start
 | Flag | Meaning |
 | --- | --- |
 | `--server URL` | The server's address. |
-| `--token TOKEN` | A personal API token of an administrator. |
+| `--token TOKEN` | A personal API token of a user holding `admin`. |
 | `--broker-host HOST` | Connect to this broker host instead of the one the provisioning file names. |
 | `--keep` | Leave the created entities on the server, and print their ids. |
 | `--timeout SECONDS` | How long to wait for each outcome instead of `DOORCODE_TIMEOUT_S` (60). |
@@ -60,7 +62,10 @@ reason. The exit code is non-zero when any step fails. When a step the
 rest need fails (the provisioning file, starting the host, enrollment,
 approval, connecting, creating the access model), the script stops there.
 On any exit, unless `--keep`, it stops the host and deletes what it
-created.
+created, the door and the user for good (`?force=true`), so the server
+keeps none of their events. When the server refuses that, or is too old
+to know it, they are deleted the ordinary way and a `cleanup:` line says
+they are kept.
 
 ## What it checks
 
@@ -239,9 +244,9 @@ board through one helper.
 | File | What it is |
 | --- | --- |
 | `test.env.example` | Every bench setting, with a comment each. Copy it to `test.env` at the repository root, which is never committed, and fill it in. |
-| `scripts/tests/bench-env.sh` | Sourced by the bench scripts. Loads `test.env` when present, applies the defaults, and `bench_env_require` names every missing or unusable setting and exits 2. |
+| `scripts/tests/bench-env.sh` | Sourced by the bench scripts. Loads `test.env` when present, applies the defaults, and `bench_env_require` names every missing or unusable setting and exits 2. `bench_env_delete_for_good` deletes a door or user a script made for good, and the ordinary way when the server refuses, saying what is kept. |
 | `scripts/tests/bench-serial.py` | Resets the board and watches its serial log. |
-| `scripts/tests/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/tests/fixtures/bench-boot.txt`. |
+| `scripts/tests/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/tests/fixtures/bench-boot.txt`, and deleting for good against the stand-in server `scripts/tests/fixtures/stub-api.py`. |
 | `scripts/tests/bench-test.sh` | Runs the board against the server and checks it end to end (below). |
 | `scripts/tests/hardware-walkthrough.sh` | Walks a person at an installed door through its hardware (below). |
 | `scripts/tests/config-revert-test.sh` | Checks that a door gives up a configuration it cannot come online with (below). |
@@ -251,7 +256,7 @@ board through one helper.
 | Key | Meaning | Default |
 | --- | --- | --- |
 | `DOORCODE_SERVER` | The server's base address. | required |
-| `DOORCODE_TOKEN` | A personal API token of an administrator allowed to manage firmware (see "A token" above). | required |
+| `DOORCODE_TOKEN` | A personal API token of a user holding `admin`, who may manage firmware and delete doors and users for good (see "A token" above). | required |
 | `DOORCODE_SIGNING_KEY` | The private signing key's PEM file, kept outside the repository (`firmware-signing.md`). | required for signed releases |
 | `DOORCODE_SERIAL_PORT` | The board's serial port. | `/dev/ttyUSB0` |
 | `DOORCODE_DOOR_NAME` | The name of the door created for the board. | `Bench board` |
@@ -392,7 +397,13 @@ point, fails the step that is waiting.
 12. **cleanup**: `device_url` and the overrides are put back if a step
     left them changed. Unless `--keep`, the door's own firmware choice is
     put back, the uploaded firmware versions are deleted, and the door is
-    deleted when the run created or restored it.
+    deleted when the run created or restored it: for good when it created
+    it, and the ordinary way when it restored a deleted door of that name,
+    which stays among the deleted doors for the next run to restore. A
+    door the server would not delete for good, refusing a token without
+    `admin` or too old to know `force`, is deleted the ordinary way and
+    fails the step (or, after an early exit, gets a `cleanup:` line),
+    naming why it is kept.
 
 The same cleanup runs on any exit, so a run that stops early still puts
 `device_url`, the overrides, and the provisioning file back. Deleting a
@@ -475,9 +486,12 @@ before it fails, naming the event it looked after.
 
 On any exit the script ends every override it made, leaving any that was
 in force before the run, puts the door's configuration overrides back, and
-unless `--keep` deletes the users, groups, zone, and rule. The server keeps
-a deleted user, refused everywhere, so the events still name them: each run
-leaves two among the deleted users, named `walkthrough-<random>`.
+unless `--keep` deletes the users, groups, zone, and rule. The two users,
+named `walkthrough-<random>`, are deleted for good with every event that
+names them, after the overrides the commander made, which would stop that.
+When the server refuses (a token without `admin`) or is too old to delete
+for good, they are deleted the ordinary way, refused everywhere, and a
+`cleanup:` line says they are kept.
 
 ## The configuration revert test
 

@@ -2,7 +2,8 @@
 # Checks scripts/tests/bench-serial.py and scripts/tests/bench-env.sh without
 # a board: the helper reads the recorded boot log in
 # scripts/tests/fixtures/bench-boot.txt instead of a serial port, and the
-# settings are loaded from a scratch copy of the repository root. Runs with
+# settings are loaded from a scratch copy of the repository root, and the
+# server is scripts/tests/fixtures/stub-api.py. Runs with
 # python3; BENCH_PYTHON picks another interpreter command, such as
 # BENCH_PYTHON='uvx --from esptool@5.6.0 python'.
 # docs/testing.md describes the bench files.
@@ -15,8 +16,10 @@ usage: scripts/tests/bench-serial-selftest.sh [--help]
 
 Runs bench-serial.py against scripts/tests/fixtures/bench-boot.txt and checks
 a match, a timeout, crash detection, the log file, and reset, then checks that
-bench-env.sh loads test.env, applies defaults, names missing keys, and writes
-the token's header file for this user only.
+bench-env.sh loads test.env, applies defaults, names missing keys, writes
+the token's header file for this user only, and deletes a door or user for
+good against scripts/tests/fixtures/stub-api.py, saying what was kept when
+the stand-in server refuses or ignores force.
 Prints one PASS or FAIL line per check and exits 1 when any fails.
 USAGE
 }
@@ -30,7 +33,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 read -ra PYTHON <<<"${BENCH_PYTHON:-python3}"
 FIXTURE="$ROOT/scripts/tests/fixtures/bench-boot.txt"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+STUB_PID=""
+trap '[ -z "$STUB_PID" ] || kill "$STUB_PID"; rm -rf "$WORK"' EXIT
 FAILED=0
 
 pass() { echo "PASS $1: $2"; }
@@ -140,5 +144,34 @@ if [ "$mode" = 600 ]; then
 else
     fail settings-auth-private "mode $mode (want 600)"
 fi
+
+# --- Deleting for good ----------------------------------------------------------
+
+"${PYTHON[@]}" "$ROOT/scripts/tests/fixtures/stub-api.py" "$WORK/stub-port" &
+STUB_PID=$!
+for _ in $(seq 50); do
+    [ -s "$WORK/stub-port" ] && break
+    sleep 0.1
+done
+STUB="http://127.0.0.1:$(cat "$WORK/stub-port" 2>/dev/null)"
+mkdir -p "$WORK/purge"
+
+# purge SCENARIO PATH: deletes PATH for good from the stand-in server as it
+# answers in SCENARIO. Its output is in $WORK/out and its exit code in $CODE.
+purge() {
+    settings "bench_env_write_auth '$WORK/purge/auth' secret && bench_env_delete_for_good '$STUB/$1' '$WORK/purge' $2"
+}
+
+purge admin /doors/1
+check purge-gone 0 ""
+
+purge viewer /users/2
+check purge-refused 1 "/users/2 is deleted but kept: the server answered 403 {\"error\":\"the admin role is required to delete for good\"} to deleting it for good, so it is deleted the ordinary way"
+
+purge old /doors/3
+check purge-ignored 1 "/doors/3 is deleted but kept: the server still has it after deleting it for good, so it does not know force=true and deleted it the ordinary way"
+
+purge broken /doors/4
+check purge-failed 2 "/doors/4 is not deleted: the server answered 500 {\"error\":\"the server failed\"} to deleting it for good"
 
 exit "$FAILED"
