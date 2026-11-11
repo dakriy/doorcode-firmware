@@ -136,8 +136,10 @@ for size so an image fits.
   joins the strongest access point of that SSID. The credentials that last
   associated are kept in the `wifi` namespace and used when the ones it was
   told fail to associate. While the signal is below `wifi_roam_rssi`, it
-  scans at most once a minute and moves to an access point at least 8 dB
-  stronger. A broker connection asked for while Wi-Fi is down fails at once.
+  scans at most once a minute and moves to another access point of the
+  SSID at least 8 dB stronger. The access point it has joined, by the BSSID
+  the driver reports, is never a candidate, so with one access point it
+  never roams. A broker connection asked for while Wi-Fi is down fails at once.
   It counts the times it lost its access point while the link was up,
   keeping the system's reason for the latest, and the times it roamed; a
   disconnect it makes itself, to roam or to join other credentials, is not

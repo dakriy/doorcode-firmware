@@ -3,7 +3,9 @@
 //! It scans every channel and joins the strongest access point of the SSID
 //! it was told, or the network that last associated when that fails. While
 //! the signal is below `wifi_roam_rssi`, it scans at most once a minute and
-//! moves to an access point at least 8 dB stronger.
+//! moves to another access point of the SSID at least 8 dB stronger; the
+//! access point it has joined is never a candidate, so with one access point
+//! it stays.
 //!
 //! With `wifi_11b_disabled` set it starts Wi-Fi with the 802.11b rates off.
 //! When the switch changes, it leaves the access point, restarts Wi-Fi with
@@ -164,7 +166,7 @@ impl Station {
     /// Joins the strongest access point of `credentials.ssid`.
     fn join(&mut self, credentials: &Credentials) -> bool {
         self.joined = None;
-        let Some(access_point) = self.strongest(&credentials.ssid) else {
+        let Some(access_point) = self.strongest(&credentials.ssid, None) else {
             return false;
         };
         let joined = self.associate(credentials, &access_point);
@@ -176,29 +178,30 @@ impl Station {
         self.joined.is_some()
     }
 
-    /// Moves to a stronger access point of the same SSID while the signal
-    /// is below `roam_rssi`.
+    /// Moves to another, stronger access point of the same SSID while the
+    /// signal is below `roam_rssi`.
     fn roam(&mut self, roam_rssi: i32) {
-        let Some(signal) = self.weak_signal(roam_rssi) else {
+        let Some(current) = self.weak_link(roam_rssi) else {
             return;
         };
         let Some(joined) = self.joined.clone() else {
             return;
         };
+        let signal = i32::from(current.signal_strength);
         let stronger = self
-            .strongest(&joined.ssid)
+            .strongest(&joined.ssid, Some(current.bssid))
             .filter(|candidate| worth_roaming(candidate.signal_strength.into(), signal));
         if let Some(candidate) = stronger {
             self.roam_to(&joined, &candidate);
         }
     }
 
-    /// The signal of the access point joined, when it is below `roam_rssi`
-    /// and a roaming scan is due.
-    fn weak_signal(&mut self, roam_rssi: i32) -> Option<i32> {
+    /// The access point joined, when its signal is below `roam_rssi` and a
+    /// roaming scan is due.
+    fn weak_link(&mut self, roam_rssi: i32) -> Option<AccessPointInfo> {
         let current = self.wifi.wifi_mut().driver_mut().get_ap_info().ok()?;
         let signal = i32::from(current.signal_strength);
-        roam_scan_due(signal, roam_rssi, self.last_scan_ms).then_some(signal)
+        roam_scan_due(signal, roam_rssi, self.last_scan_ms).then_some(current)
     }
 
     fn roam_to(&mut self, credentials: &Credentials, access_point: &AccessPointInfo) {
@@ -213,13 +216,14 @@ impl Station {
         }
     }
 
-    /// The strongest access point of `ssid` on any channel.
-    fn strongest(&mut self, ssid: &str) -> Option<AccessPointInfo> {
+    /// The strongest access point of `ssid` on any channel, other than the
+    /// one whose BSSID is `except`.
+    fn strongest(&mut self, ssid: &str, except: Option<[u8; 6]>) -> Option<AccessPointInfo> {
         if ssid.is_empty() {
             return None;
         }
-        let matching = self.scan()?.into_iter().filter(|found| found.ssid == ssid);
-        matching.max_by_key(|found| found.signal_strength)
+        let found = self.scan()?;
+        strongest_of(found, ssid, except)
     }
 
     /// Every access point in reach, on every channel.
@@ -256,6 +260,20 @@ impl Station {
         self.context.link.set(false);
         self.wifi.disconnect()
     }
+}
+
+/// The strongest of `found` with `ssid`, other than the one whose BSSID is
+/// `except`.
+fn strongest_of(
+    found: Vec<AccessPointInfo>,
+    ssid: &str,
+    except: Option<[u8; 6]>,
+) -> Option<AccessPointInfo> {
+    let matching = found
+        .into_iter()
+        .filter(|found| found.ssid == ssid)
+        .filter(|found| Some(found.bssid) != except);
+    matching.max_by_key(|found| found.signal_strength)
 }
 
 fn client_configuration(
