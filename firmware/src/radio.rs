@@ -1,5 +1,5 @@
 //! Facts about the device: the Wi-Fi signal, the free heap, the station
-//! MAC as the hardware id, where the door sits in the mesh, and what the
+//! MAC as the hardware id, where the door sits in the mesh, what the
 //! station counted of its link, and lwIP's TCP counters.
 
 use connectors::{AccessPoint, Mesh, Radio, TcpCounters, WifiLink};
@@ -63,15 +63,16 @@ impl Radio for EspRadio {
     }
 
     fn tcp_counters(&self) -> Option<TcpCounters> {
-        let stats = core::ptr::addr_of!(sys::lwip_stats);
-        // SAFETY: `lwip_stats` lives for the program, and lwIP's task only
-        // ever adds to these counters, each a single aligned word that a
-        // read sees whole, before or after an increment.
+        let stats = &raw const sys::lwip_stats;
+        // SAFETY: `lwip_stats` lives for the program and no reference to it
+        // is made. lwIP's thread only increments these counters, each an
+        // aligned 16- or 32-bit value the ESP32 loads in one instruction, so
+        // a read sees it before or after an increment, never torn.
         unsafe {
             Some(TcpCounters {
-                segments_sent: core::ptr::addr_of!((*stats).mib2.tcpoutsegs).read_volatile(),
-                retransmits: core::ptr::addr_of!((*stats).mib2.tcpretranssegs).read_volatile(),
-                drops: u32::from(core::ptr::addr_of!((*stats).tcp.drop).read_volatile()),
+                segments_sent: (&raw const (*stats).mib2.tcpoutsegs).read_volatile(),
+                retransmits: (&raw const (*stats).mib2.tcpretranssegs).read_volatile(),
+                drops: u32::from((&raw const (*stats).tcp.drop).read_volatile()),
             })
         }
     }
