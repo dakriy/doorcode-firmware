@@ -271,9 +271,9 @@ fn strongest_of(
 ) -> Option<AccessPointInfo> {
     let matching = found
         .into_iter()
-        .filter(|found| found.ssid == ssid)
-        .filter(|found| Some(found.bssid) != except);
-    matching.max_by_key(|found| found.signal_strength)
+        .filter(|candidate| candidate.ssid == ssid)
+        .filter(|candidate| Some(candidate.bssid) != except);
+    matching.max_by_key(|candidate| candidate.signal_strength)
 }
 
 fn client_configuration(
