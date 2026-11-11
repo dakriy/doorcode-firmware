@@ -314,18 +314,19 @@ impl Context {
     pub(crate) fn settings(&self) -> Settings {
         let settings = Settings::read(&self.told);
         if settings.mesh != self.mesh {
-            restart("the mesh settings changed");
+            restart("the mesh settings changed, which apply only at start");
         }
         if self.mesh.is_some() && settings.disable_11b != self.disable_11b {
-            restart("the 802.11b switch changed");
+            restart("the 802.11b switch changed, which applies only at start under the mesh");
         }
         settings
     }
 }
 
-/// Restarts the device to apply a setting the network takes only at start.
-pub(crate) fn restart(changed: &str) -> ! {
-    log::warn!("{changed}; restarting to apply it");
+/// Restarts the device for `why`: a setting the network takes only at
+/// start changed, or Wi-Fi did not start.
+pub(crate) fn restart(why: &str) -> ! {
+    log::warn!("{why}; restarting the device");
     // SAFETY: takes no arguments and does not return.
     unsafe { sys::esp_restart() }
 }

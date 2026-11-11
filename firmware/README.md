@@ -156,7 +156,8 @@ for size so an image fits.
   setting only between initializing and starting Wi-Fi. The plain station
   applies a change by leaving the access point, stopping Wi-Fi, setting
   the rates, and starting and joining again, and restarts the device if
-  that fails. Under the mesh the IoT bridge starts Wi-Fi as it creates its
+  that fails. It restarts the device too when Wi-Fi does not start at
+  all. Under the mesh the IoT bridge starts Wi-Fi as it creates its
   interfaces, so the station stops and starts it around the setting before
   Mesh-Lite starts, and a change restarts the device; the soft-AP keeps
   the 802.11b rates for the doors hopping through it.

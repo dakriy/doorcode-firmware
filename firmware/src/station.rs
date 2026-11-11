@@ -8,7 +8,8 @@
 //! With `wifi_11b_disabled` set it starts Wi-Fi with the 802.11b rates off.
 //! When the switch changes, it leaves the access point, restarts Wi-Fi with
 //! the rates off or back on, and joins again; should that fail, it restarts
-//! the device.
+//! the device. So does Wi-Fi not starting at all, since nothing else would
+//! start it again.
 
 use std::time::Duration;
 
@@ -66,10 +67,12 @@ struct Station {
 }
 
 impl Station {
+    /// Starts Wi-Fi, restarting the device when that fails, and then
+    /// looks after the link.
     fn run(mut self) {
         if let Err(error) = self.start() {
             log::error!("starting Wi-Fi: {error}");
-            return;
+            restart("Wi-Fi did not start");
         }
         threads::repeat(|| self.check())
     }
