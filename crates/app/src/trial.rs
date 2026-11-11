@@ -128,7 +128,8 @@ pub(crate) fn rejected(device: &Device<'_>, digest: &str) -> Result<bool, RunErr
 /// network with it. The last known good configuration is the one `running`
 /// stored now, unless a trial is `under_way`: then it stays the one that
 /// trial would go back to, and the trial keeps its deadline and its count
-/// of starts.
+/// of starts. Otherwise the count starts from none, whatever a trial before
+/// left of it when its end was cut short.
 pub(crate) fn start(
     device: &Device<'_>,
     under_way: Option<Trial>,
@@ -141,11 +142,11 @@ pub(crate) fn start(
         Some(trial) => trial,
         None => {
             copy(storage, CONFIG, CONFIG_GOOD)?;
+            stored::remove(storage, &[CONFIG_TRIAL_STARTS])?;
             Trial::after(device, running)
         }
     };
-    stored::store(storage, CONFIG_TRIAL, digest)?;
-    stored::store_bytes(storage, CONFIG, payload)?;
+    store_on_trial(storage, payload, digest)?;
     device.restart(
         Level::Warn,
         &format!("config {digest} changes how the door connects; restarting to try it"),
@@ -162,12 +163,43 @@ pub(crate) fn revert(device: &Device<'_>, digest: &str, why: &str) -> Result<(),
     copy(storage, CONFIG_GOOD, CONFIG)?;
     stored::store(storage, CONFIG_REJECTED, digest)?;
     stored::store(storage, CONFIG_REVERTED, digest)?;
-    stored::remove(storage, &[CONFIG_TRIAL, CONFIG_TRIAL_STARTS, CONFIG_GOOD])?;
+    end(storage)?;
     device.restart(
         Level::Error,
         &format!("{why} on config {digest}; restarting with the previous config"),
     );
     Ok(())
+}
+
+/// Stores `payload`, with `digest`, as the configuration that runs on
+/// trial: the trial mark always names the configuration stored with it.
+fn store_on_trial(storage: &dyn Storage, payload: &[u8], digest: &str) -> Result<(), RunError> {
+    stored::store(storage, CONFIG_TRIAL, digest)?;
+    stored::store_bytes(storage, CONFIG, payload)
+}
+
+/// Stores `payload`, with `digest`, as a configuration that changes nothing
+/// of how the door connects. While a trial is `under_way` it is the one on
+/// trial, and that trial goes on.
+pub(crate) fn store(
+    device: &Device<'_>,
+    under_way: Option<Trial>,
+    payload: &[u8],
+    digest: &str,
+) -> Result<Option<Trial>, RunError> {
+    let storage = device.connectors.storage();
+    match under_way {
+        Some(_) => store_on_trial(storage, payload, digest)?,
+        None => stored::store_bytes(storage, CONFIG, payload)?,
+    }
+    Ok(under_way)
+}
+
+/// Forgets the trial, its mark first: a restart that cuts this short
+/// leaves no trial, only a count of starts that the next trial starts
+/// over and a last known good configuration that it replaces.
+fn end(storage: &dyn Storage) -> Result<(), RunError> {
+    stored::remove(storage, &[CONFIG_TRIAL, CONFIG_TRIAL_STARTS, CONFIG_GOOD])
 }
 
 /// Stores what is stored under `from` under `to` as well, or nothing
@@ -190,7 +222,7 @@ pub(crate) fn online(
 ) -> Result<(), RunError> {
     let storage = device.connectors.storage();
     if trial.is_some() {
-        stored::remove(storage, &[CONFIG_TRIAL, CONFIG_TRIAL_STARTS, CONFIG_GOOD])?;
+        end(storage)?;
         stored::store_broker(storage, broker)?;
         device.log(Level::Info, "online on the new config; it is kept");
     }

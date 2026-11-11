@@ -667,8 +667,7 @@ impl Door {
             let trial = trial::start(device, under_way, &self.config, payload, &digest)?;
             Some(trial)
         } else {
-            stored::store_bytes(device.connectors.storage(), stored::CONFIG, payload)?;
-            under_way
+            trial::store(device, under_way, payload, &digest)?
         };
         let level = log_level(&config.log_level);
         if level != log_level(&self.config.log_level) {

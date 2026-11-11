@@ -30,6 +30,17 @@ fn moved_elsewhere() -> Vec<u8> {
 /// The first 16 hex digits of the SHA-256 of `moved_elsewhere()`.
 const MOVED_ELSEWHERE_DIGEST: &str = "36c4797cfe0e6962";
 
+/// `moved()` with a `strike_pulse_ms` of 5000 as well.
+fn moved_with_longer_pulse() -> Vec<u8> {
+    hex(concat!(
+        "a36176016b62726f6b65725f686f73747362726f6b6572322e6578616d706c652e6f7267",
+        "6f737472696b655f70756c73655f6d73191388"
+    ))
+}
+
+/// The first 16 hex digits of the SHA-256 of `moved_with_longer_pulse()`.
+const MOVED_WITH_LONGER_PULSE_DIGEST: &str = "22373fcd8c16804a";
+
 /// The username of the pair a rotation hands door 7 over to.
 const NEXT_USERNAME: &str = "door-7-fedcba987654";
 
@@ -202,6 +213,19 @@ fn the_config_on_trial_is_kept_with_its_broker_once_the_door_comes_online() {
 }
 
 #[test]
+fn a_config_kept_stays_however_long_the_door_is_offline_after() {
+    let kept = restarted(received(moved()), [(0, Event::Connected)]);
+    app::run(&kept).unwrap();
+    let offline = restarted(kept, [(400_000, Event::Stop)]);
+    app::run(&offline).unwrap();
+    let connectors = restarted(offline, []);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(report.config.broker_host, "broker2.example.org".to_owned());
+}
+
+#[test]
 fn a_config_on_trial_not_online_within_the_previous_connect_timeout_is_given_up() {
     let connectors = restarted(received(moved()), [(60_001, Event::Stop)]);
 
@@ -354,6 +378,50 @@ fn a_config_taking_the_place_of_one_on_trial_goes_on_counting_its_starts() {
         vec![format!(
             "not online in 2 starts on config {MOVED_ELSEWHERE_DIGEST}; restarting with the previous config"
         )]
+    );
+}
+
+#[test]
+fn a_config_changing_only_other_settings_during_the_trial_is_the_one_given_up() {
+    let changed = StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
+        ..restarted(
+            received(moved()),
+            [
+                (0, Event::Connected),
+                (10, config_message(moved_with_longer_pulse())),
+            ],
+        )
+    };
+    app::run(&changed).unwrap();
+    let connectors = restarted(cut_short(changed), []);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.log.lines_at(Level::Error),
+        vec![format!(
+            "not online in 2 starts on config {MOVED_WITH_LONGER_PULSE_DIGEST}; restarting with the previous config"
+        )]
+    );
+}
+
+#[test]
+fn starts_left_counted_by_a_trial_whose_end_was_cut_short_do_not_count_on_the_next() {
+    let first = StubConnectors {
+        storage: StubStorage::enrolled()
+            .with_config(&good())
+            .with("config_trial_starts", b"2"),
+        ..StubConnectors::online([(10, config_message(moved()))])
+    };
+    app::run(&first).unwrap();
+    let connectors = restarted(first, []);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (first_address(&connectors), report.config.broker_host),
+        (broker2(), "broker2.example.org".to_owned())
     );
 }
 
