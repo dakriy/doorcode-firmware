@@ -7,10 +7,10 @@ suites behind `make verify-fast`, `make verify-mutation`, and
 [`docs/testing.md`](../../docs/testing.md) lists every step each test
 takes; this file says what each one needs and how to run it.
 
-Both tests that call a server create entities on it and change its
-settings: **run them only against a development server.** Each prints one
-`PASS step: detail`, `FAIL step: detail`, or `SKIP step: detail` line per
-step and exits non-zero when any step fails. Run them from any directory;
+The tests that call a server create entities on it or change a door's
+configuration: **run them only against a development server.** Each
+prints one `PASS step: detail`, `FAIL step: detail`, or `SKIP step: detail`
+line per step and exits non-zero when any step fails. Run them from any directory;
 they find the repository from their own path.
 
 | File | What it is |
@@ -18,6 +18,7 @@ they find the repository from their own path.
 | `integration-test.sh` | One desktop `doorcode-host` door against a server. |
 | `bench-test.sh` | The bench board, flashed over USB, against a server. |
 | `hardware-walkthrough.sh` | Walks a person at an installed door through its strike, sensor, and keypad. |
+| `config-revert-test.sh` | Checks that an online door gives up a configuration it cannot come online with. |
 | `bench-serial-selftest.sh` | Checks the serial helper and the settings without a board or a server. |
 | `bench-serial.py` | The serial helper: resets the board and watches its log. |
 | `bench-env.sh` | Sourced by the bench scripts: loads `test.env` and checks the settings. |
@@ -175,6 +176,54 @@ everywhere, so their events keep a name: each run leaves two among the
 deleted users, named `walkthrough-<random>`. The checks of the event log
 only read it; the opening by hand leaves a forced open alarm in the log,
 and the openings, closings, and restart their own events, as at any door.
+
+## config-revert-test.sh
+
+Checks the trial of a configuration (`docs/protocol.md`, "Trying a
+configuration") on an enrolled, online door: it records the configuration
+the door runs (telemetry's `config_digest`), sets the door's `broker_host`
+override to a host no broker answers, and checks that the door goes
+offline to try it, comes back online on the configuration it ran before
+once `update_connect_timeout_s` has passed, that `GET /api/v1/events`
+records a newer alarm `configuration reverted` naming the configuration
+given up, and that the door's state has `config_reverted` and
+`config_mismatch`. It then removes the override and checks the flag
+clears and the door runs the configuration sent again. The door is offline
+for each trial. Nothing is flashed, and no serial port is needed unless
+`--reset-mid-trial` is given.
+
+Needs: an enrolled door online with firmware that reports
+`config_digest`, an administrator's API token, and `bash`, `curl`, and
+`jq`; for `--reset-mid-trial` also the board on its USB serial port and
+`uvx`. The server, token, door, port, and timeout come from `test.env`;
+flags override them.
+
+    scripts/tests/config-revert-test.sh --dry-run     # the 8 steps and the settings; touches nothing
+    scripts/tests/config-revert-test.sh --door 12 --trial-timeout 60
+    scripts/tests/config-revert-test.sh --door 12 --trial-timeout 60 --reset-mid-trial
+
+| Flag | Meaning |
+| --- | --- |
+| `--door NAME\|ID` | The door, by id or by name ignoring case, instead of `DOORCODE_DOOR_NAME`. |
+| `--bad-host HOST` | The broker host the door cannot reach, `192.0.2.1` by default: an address reserved for documentation (RFC 5737) that nothing answers. |
+| `--trial-timeout SECONDS` | First lower the door's `update_connect_timeout_s` to SECONDS, at least 60, so each trial ends sooner than the default 300 s. |
+| `--reset-mid-trial` | Also reset the board over its serial port part way through a second trial, and check it comes straight back on its configuration. |
+| `--dry-run` | Print the steps and settings and exit without touching the server or the port. |
+| `--server URL`, `--token TOKEN`, `--port PORT`, `--timeout SECONDS` | `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_SERIAL_PORT`, `DOORCODE_TIMEOUT_S`. |
+
+Results are the `PASS`/`FAIL`/`SKIP` lines on standard output. A run
+without flags waits the door's whole `update_connect_timeout_s` for the
+trial, five minutes by default.
+
+On the server it changes only the door's configuration overrides: it adds
+one `broker_host` override for each trial and removes it again, keeping
+the door's other overrides; with `--trial-timeout` it also sets
+`update_connect_timeout_s` for that door first and puts it back at the
+end. On any exit, even when a step fails or the run is interrupted, it
+puts the door's overrides back exactly as they were before the run.
+Interrupted during a trial, the door still comes back on its own
+configuration once the trial's deadline passes. The run leaves its
+restarts and the alarms `configuration reverted` in the door's event log.
 
 ## bench-serial-selftest.sh
 

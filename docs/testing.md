@@ -244,6 +244,7 @@ board through one helper.
 | `scripts/tests/bench-serial-selftest.sh` | Checks the helper and the settings without a board, against `scripts/tests/fixtures/bench-boot.txt`. |
 | `scripts/tests/bench-test.sh` | Runs the board against the server and checks it end to end (below). |
 | `scripts/tests/hardware-walkthrough.sh` | Walks a person at an installed door through its hardware (below). |
+| `scripts/tests/config-revert-test.sh` | Checks that a door gives up a configuration it cannot come online with (below). |
 
 ## Settings
 
@@ -477,3 +478,81 @@ in force before the run, puts the door's configuration overrides back, and
 unless `--keep` deletes the users, groups, zone, and rule. The server keeps
 a deleted user, refused everywhere, so the events still name them: each run
 leaves two among the deleted users, named `walkthrough-<random>`.
+
+## The configuration revert test
+
+`scripts/tests/config-revert-test.sh` checks the trial of a configuration
+(`protocol.md`, "Trying a configuration") on a real, enrolled, online
+door. It changes that door's configuration and takes it offline for the
+length of each trial: **run it only against a development server.** It
+flashes nothing and needs no serial port, except for `--reset-mid-trial`.
+
+    scripts/tests/config-revert-test.sh --dry-run   # the steps and settings; touches nothing
+    scripts/tests/config-revert-test.sh --door 12 --trial-timeout 60 --reset-mid-trial
+
+The door comes from `--door` (an id, or a name ignoring case) or
+`DOORCODE_DOOR_NAME`. The broker host the door cannot reach is
+`192.0.2.1` unless `--bad-host` names another: an address reserved for
+documentation (RFC 5737), which no network routes, so nothing answers the
+door there. A trial lasts the door's `update_connect_timeout_s`, 300 s by
+default; `--trial-timeout SECONDS` (at least 60) lowers it for the run.
+
+1. **door**: the door is enrolled and online, its telemetry names a
+   configuration (`config_digest`), the one last sent
+   (`config_sent_digest` of `GET /api/v1/doors/{id}/state`), and neither
+   `config_mismatch` nor `config_reverted` is set.
+2. **shorten**: with `--trial-timeout`, the door's
+   `update_connect_timeout_s` override is set, keeping its other
+   overrides. That field alone is no connectivity change, so the door
+   takes it at once, with no trial; the step waits until its telemetry
+   names the new configuration as sent, since a trial's deadline comes
+   from the configuration the door stored before it, not from the one on
+   trial. Without the flag it prints `SKIP`.
+3. **push**: the door's `broker_host` override is set to the bad host,
+   keeping its other overrides, and the server names the configuration it
+   sent.
+4. **trial**: the server sees the door go offline as it restarts to try
+   the configuration. The restart closes no connection, so the server
+   learns of it only when the broker's keep-alive runs out, 1.5 times the
+   door's `keepalive_s`; the step waits that long plus
+   `DOORCODE_TIMEOUT_S`.
+5. **revert**: within `update_connect_timeout_s` plus `DOORCODE_TIMEOUT_S`
+   of the push, the door is online again and its telemetry names the
+   configuration it ran before; fails if that came sooner than the
+   deadline. **reverted-event**: the events (`GET /api/v1/events`) record
+   an alarm `configuration reverted` with outcome `alert`, newer than the
+   door's newest event before the push, naming the configuration given
+   up. **reverted-flagged**: the door's state has `config_reverted` and
+   `config_mismatch` for that configuration.
+6. **clear**: the `broker_host` override is removed; `config_reverted`
+   clears and the door's telemetry names the configuration sent, the one
+   it ran before the push.
+7. **reset-trial**, **reset-revert**, **reset-event**, **reset-flagged**,
+   **reset-clear**: with `--reset-mid-trial`, the bad host is pushed again
+   while the serial helper watches the board's log (through `uvx`, as the
+   bench run does). Once the board logs that it is trying that
+   configuration, the helper resets it a few seconds later. Within
+   `DOORCODE_TIMEOUT_S` of the reset the door is online again on the
+   configuration it ran before, sooner than the trial's deadline; then
+   the event, the flag, and the clear as in steps 5 and 6. Without the
+   flag `reset-trial` prints `SKIP`.
+8. **restore**: with `--trial-timeout`, the door's overrides are put back
+   as they were before the run, and its telemetry names the configuration
+   it started on, as sent, with no flag. Without the flag it prints
+   `SKIP`: the clear already put them back.
+
+A wait for the door's telemetry lasts `DOORCODE_TIMEOUT_S` plus the door's
+`telemetry_interval_s`. When a step the rest need fails (the door, the
+shorten, a push, a revert, a clear), the script stops there.
+
+On the server the script changes only the door's configuration overrides:
+one `broker_host` override for each trial, always removed again, and with
+`--trial-timeout` the door's `update_connect_timeout_s`, put back at the
+end. A PUT replaces a door's whole override set, so every change keeps the
+overrides the door already had (a secret, read back as `********`, is kept
+as it is). On any exit, even when a step fails or the run is interrupted,
+the script puts the overrides back exactly as they were. Interrupted
+during a trial, the door still comes back on its own configuration once
+the trial's deadline passes, and then takes the restored one. The door's
+event log keeps the run's restarts and its `configuration reverted`
+alarms.
