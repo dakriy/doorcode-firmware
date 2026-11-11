@@ -10,10 +10,11 @@
 //!
 //! This thread tells Mesh-Lite the access point's credentials, and while
 //! the station has no address for `FALLBACK_AFTER_MS` it switches between
-//! those and the credentials that last associated. As a root below
-//! `wifi_roam_rssi` it scans at most once a minute, and when an access
-//! point of the SSID is at least 8 dB stronger it has Mesh-Lite
-//! join again, which picks the strongest.
+//! those and the credentials that last associated. As a root whose signal
+//! has been below `wifi_roam_rssi` for five readings in a row, a second
+//! apart, it scans at most once a minute, and when an access point of the
+//! SSID is at least 8 dB stronger than the average of those readings it has
+//! Mesh-Lite join again, which picks the strongest.
 //!
 //! With `wifi_11b_disabled` set, the station interface leaves out the
 //! 802.11b rates. The bridge starts Wi-Fi as it creates its interfaces, so
@@ -37,7 +38,7 @@ use esp_idf_svc::wifi::WifiEvent;
 use crate::clock::now_ms;
 use crate::network::{
     power_save_off, roam_scan_due, set_11b_disabled, worth_roaming, Context, Credentials,
-    MeshSettings, CHECK_EVERY, STACK_BYTES,
+    MeshSettings, WeakRun, CHECK_EVERY, STACK_BYTES,
 };
 use crate::radio::access_point;
 use crate::threads;
@@ -79,6 +80,7 @@ pub(crate) fn start(
         told: wanted,
         changed_ms: now_ms(),
         last_scan_ms: 0,
+        weak_run: WeakRun::default(),
     };
     threads::spawn("network", STACK_BYTES, move || station.run())
 }
@@ -297,6 +299,8 @@ struct MeshStation {
     /// other credentials.
     changed_ms: u64,
     last_scan_ms: u64,
+    /// The parent's signal while it stays below `roam_rssi`.
+    weak_run: WeakRun,
 }
 
 impl MeshStation {
@@ -370,11 +374,12 @@ impl MeshStation {
         }
     }
 
-    /// The signal of the access point joined, when it is below `roam_rssi`
-    /// and a roaming scan is due.
-    fn weak_signal(&self, roam_rssi: i32) -> Option<i32> {
+    /// The average signal of the access point joined, when it has stayed
+    /// below `roam_rssi` and a roaming scan is due.
+    fn weak_signal(&mut self, roam_rssi: i32) -> Option<i32> {
         let signal = i32::from(access_point()?.rssi);
-        roam_scan_due(signal, roam_rssi, self.last_scan_ms).then_some(signal)
+        let average = self.weak_run.weak(signal, roam_rssi)?;
+        roam_scan_due(self.last_scan_ms).then_some(average)
     }
 
     /// The signal of the strongest access point of `ssid`, from a scan
@@ -389,6 +394,7 @@ impl MeshStation {
     /// be, so that neither the disconnect nor a failed attempt to join
     /// afterwards is counted as a loss.
     fn rejoin(&mut self) {
+        self.weak_run.reset();
         self.context.link.set(false);
         self.changed_ms = now_ms();
         // SAFETY: both take no arguments; disconnecting while not connected

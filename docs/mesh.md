@@ -30,7 +30,7 @@ door's station; its soft-AP keeps the 802.11b rates (`protocol.md`).
 With the mesh off, the door is a Wi-Fi station only, as the firmware's
 README describes: it joins the strongest access point of `wifi_ssid`, falls
 back to the network that last associated, and roams to an access point at
-least 8 dB stronger while its signal is below `wifi_roam_rssi`.
+least 8 dB stronger while its signal stays below `wifi_roam_rssi`.
 
 With the mesh on:
 
@@ -48,9 +48,10 @@ With the mesh on:
 - **Fallback.** When the door has had no address for 30 seconds, it
   switches between the credentials it was told and those that last joined
   the access point, as the plain station does.
-- **Roaming.** A root whose signal is below `wifi_roam_rssi` scans at most
-  once a minute; when an access point of the same SSID is at least 8 dB
-  stronger, it leaves and joins again, picking the strongest access point,
+- **Roaming.** A root whose signal has been below `wifi_roam_rssi` for
+  five readings in a row, a second apart, scans at most once a minute; when
+  an access point of the same SSID is at least 8 dB stronger than the
+  average of those readings, it leaves and joins again, picking the strongest access point,
   or a neighbouring door if none is strong enough. Doors hopping through it
   find their way back on their own.
 

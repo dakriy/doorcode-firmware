@@ -51,10 +51,45 @@ pub(crate) const CHECK_EVERY: Duration = Duration::from_secs(1);
 /// The stack of either station's thread.
 pub(crate) const STACK_BYTES: usize = 12 * 1024;
 
-/// Whether to scan for an access point to roam to: the signal is below
-/// `roam_rssi` and the last scan, at `last_scan_ms`, was long enough ago.
-pub(crate) fn roam_scan_due(signal: i32, roam_rssi: i32, last_scan_ms: u64) -> bool {
-    signal < roam_rssi && now_ms() >= last_scan_ms + ROAM_SCAN_EVERY_MS
+/// How many readings in a row, one a check apart, must be below
+/// `wifi_roam_rssi` before the signal counts as weak. A single low reading
+/// between strong ones is noise, not a reason to scan and roam.
+const WEAK_READINGS: usize = 5;
+
+/// The latest readings of the joined access point's signal, while each has
+/// been below `wifi_roam_rssi`.
+#[derive(Default)]
+pub(crate) struct WeakRun {
+    readings: Vec<i32>,
+}
+
+impl WeakRun {
+    /// Adds a reading. A reading at or above `roam_rssi` ends the run.
+    /// Once the last `WEAK_READINGS` readings were all below it, returns
+    /// their average, the signal a candidate is measured against.
+    pub(crate) fn weak(&mut self, signal: i32, roam_rssi: i32) -> Option<i32> {
+        if signal >= roam_rssi {
+            self.readings.clear();
+            return None;
+        }
+        if self.readings.len() == WEAK_READINGS {
+            self.readings.remove(0);
+        }
+        self.readings.push(signal);
+        let full = self.readings.len() == WEAK_READINGS;
+        full.then(|| self.readings.iter().sum::<i32>() / WEAK_READINGS as i32)
+    }
+
+    /// Forgets the readings, for an access point joined anew.
+    pub(crate) fn reset(&mut self) {
+        self.readings.clear();
+    }
+}
+
+/// Whether the last scan, at `last_scan_ms`, was long enough ago for a
+/// roaming scan.
+pub(crate) fn roam_scan_due(last_scan_ms: u64) -> bool {
+    now_ms() >= last_scan_ms + ROAM_SCAN_EVERY_MS
 }
 
 /// Whether an access point heard at `found` is worth roaming to from one

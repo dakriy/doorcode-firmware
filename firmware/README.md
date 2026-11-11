@@ -135,9 +135,12 @@ for size so an image fits.
   configuration, or the provisioned network while those are empty. It scans every channel and
   joins the strongest access point of that SSID. The credentials that last
   associated are kept in the `wifi` namespace and used when the ones it was
-  told fail to associate. While the signal is below `wifi_roam_rssi`, it
-  scans at most once a minute and moves to another access point of the
-  SSID at least 8 dB stronger. The access point it has joined, by the BSSID
+  told fail to associate. It reads the signal once a second; once five
+  readings in a row have been below `wifi_roam_rssi`, it scans at most
+  once a minute and moves to another access point of the SSID at least
+  8 dB stronger than the average of those readings. A reading at or above
+  the threshold starts the count again, so one stray low reading never
+  scans. The access point it has joined, by the BSSID
   the driver reports, is never a candidate, so with one access point it
   never roams. A broker connection asked for while Wi-Fi is down fails at once.
   It counts the times it lost its access point while the link was up,

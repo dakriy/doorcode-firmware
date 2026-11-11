@@ -1,11 +1,13 @@
 //! The plain Wi-Fi station, which runs while the mesh is off.
 //!
 //! It scans every channel and joins the strongest access point of the SSID
-//! it was told, or the network that last associated when that fails. While
-//! the signal is below `wifi_roam_rssi`, it scans at most once a minute and
-//! moves to another access point of the SSID at least 8 dB stronger; the
-//! access point it has joined is never a candidate, so with one access point
-//! it stays.
+//! it was told, or the network that last associated when that fails. It
+//! reads the signal once a second, and once five readings in a row have been
+//! below `wifi_roam_rssi` it scans, at most once a minute, and moves to
+//! another access point of the SSID at least 8 dB stronger than the average
+//! of those readings. A reading at or above the threshold starts the count
+//! again, so a single low reading never scans. The access point it has
+//! joined is never a candidate, so with one access point it stays.
 //!
 //! With `wifi_11b_disabled` set it starts Wi-Fi with the 802.11b rates off.
 //! When the switch changes, it leaves the access point, restarts Wi-Fi with
@@ -26,7 +28,7 @@ use esp_idf_svc::wifi::{
 use crate::clock::now_ms;
 use crate::network::{
     power_save_off, restart, roam_scan_due, set_11b_disabled, worth_roaming, Context, Credentials,
-    Settings, CHECK_EVERY, STACK_BYTES,
+    Settings, WeakRun, CHECK_EVERY, STACK_BYTES,
 };
 use crate::threads;
 
@@ -45,6 +47,7 @@ pub(crate) fn start(
         tried: None,
         joined: None,
         last_scan_ms: 0,
+        weak_run: WeakRun::default(),
     };
     threads::spawn("network", STACK_BYTES, move || station.run())
 }
@@ -66,6 +69,8 @@ struct Station {
     /// The credentials of the association the station holds.
     joined: Option<Credentials>,
     last_scan_ms: u64,
+    /// The joined access point's signal while it stays below `roam_rssi`.
+    weak_run: WeakRun,
 }
 
 impl Station {
@@ -179,29 +184,30 @@ impl Station {
     }
 
     /// Moves to another, stronger access point of the same SSID while the
-    /// signal is below `roam_rssi`.
+    /// signal stays below `roam_rssi`.
     fn roam(&mut self, roam_rssi: i32) {
-        let Some(current) = self.weak_link(roam_rssi) else {
+        let Some((bssid, signal)) = self.weak_link(roam_rssi) else {
             return;
         };
         let Some(joined) = self.joined.clone() else {
             return;
         };
-        let signal = i32::from(current.signal_strength);
         let stronger = self
-            .strongest(&joined.ssid, Some(current.bssid))
+            .strongest(&joined.ssid, Some(bssid))
             .filter(|candidate| worth_roaming(candidate.signal_strength.into(), signal));
         if let Some(candidate) = stronger {
             self.roam_to(&joined, &candidate);
         }
     }
 
-    /// The access point joined, when its signal is below `roam_rssi` and a
-    /// roaming scan is due.
-    fn weak_link(&mut self, roam_rssi: i32) -> Option<AccessPointInfo> {
+    /// The BSSID of the access point joined and the average of its weak
+    /// signal, when that has stayed below `roam_rssi` and a roaming scan is
+    /// due.
+    fn weak_link(&mut self, roam_rssi: i32) -> Option<([u8; 6], i32)> {
         let current = self.wifi.wifi_mut().driver_mut().get_ap_info().ok()?;
         let signal = i32::from(current.signal_strength);
-        roam_scan_due(signal, roam_rssi, self.last_scan_ms).then_some(current)
+        let average = self.weak_run.weak(signal, roam_rssi)?;
+        roam_scan_due(self.last_scan_ms).then_some((current.bssid, average))
     }
 
     fn roam_to(&mut self, credentials: &Credentials, access_point: &AccessPointInfo) {
@@ -243,6 +249,7 @@ impl Station {
         access_point: &AccessPointInfo,
     ) -> Result<(), EspError> {
         let configuration = client_configuration(credentials, access_point)?;
+        self.weak_run.reset();
         self.leave()?;
         self.wifi
             .set_configuration(&Configuration::Client(configuration))?;

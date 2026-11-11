@@ -76,7 +76,7 @@ Trying a configuration below).
 | `reconnect_max_s` | 60 | The longest pause between attempts to connect again. The door backs off 1, 2, 4 seconds and so on up to this, each pause plus up to a quarter more at random so doors that lost the broker together do not return together. |
 | `wifi_ssid` | empty | The Wi-Fi network to join. Empty keeps the provisioned one. If the network the door was told fails to associate, it falls back to the one that last did. |
 | `wifi_password` | empty | That network's password. |
-| `wifi_roam_rssi` | -70 | While the signal is below this, in dBm, the door scans at most once a minute and moves to an access point of the same network at least 8 dB stronger. |
+| `wifi_roam_rssi` | -70 | Once the signal has been below this, in dBm, for five readings in a row a second apart, the door scans at most once a minute and moves to an access point of the same network at least 8 dB stronger than the average of those readings. |
 | `wifi_11b_disabled` | `false` | When `true`, the door's Wi-Fi station never uses the slow 802.11b rates, 1 to 11 Mbps, and stays on the faster OFDM rates. See below. |
 | `mesh_enabled` | `false` | Whether the door may join or offer the Wi-Fi mesh (`mesh.md`). |
 | `mesh_ssid` | empty | The name of every door's mesh soft-AP; the mesh stays off while it is empty. |
