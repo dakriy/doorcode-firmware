@@ -15,7 +15,7 @@ use crate::access::{Gate, Situation};
 use crate::command::{self, Order, PendingRestart};
 use crate::device::Device;
 use crate::rotation::Rotation;
-use crate::telemetry::{self, SinceStart, Tally};
+use crate::telemetry::{self, SinceStart};
 use crate::trial::{self, Running, Trial};
 use crate::update::{self, Boot, Install};
 use crate::{
@@ -53,7 +53,7 @@ pub(crate) struct Door {
     /// Connection attempts that failed since the door was last online.
     failures: u32,
     gate: Gate,
-    tally: Tally,
+    since_start: SinceStart,
     /// When the door opened, as the sensor saw it; `None` while it is
     /// closed, and while it is open since before the door started.
     opened_at_ms: Option<u64>,
@@ -140,7 +140,7 @@ pub(crate) fn start(
         link: Link::Connecting,
         failures: 0,
         gate: Gate::default(),
-        tally: Tally::after(since_start),
+        since_start,
         opened_at_ms: None,
         restart: None,
         install: None,
@@ -254,7 +254,7 @@ impl Door {
 
     pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
         let connection = self.link.connection();
-        let counters = self.tally.counters(device, self.gate.latency_ms());
+        let counters = self.since_start.counters(device, self.gate.latency_ms());
         RunReport::new(
             device,
             Some(self.credentials),
@@ -272,7 +272,7 @@ impl Door {
     /// not come online in time, and tries new credentials again.
     fn when_due(mut self, device: &Device<'_>) -> Result<Door, RunError> {
         if self.gate.expire(device, &self.config) {
-            self.tally.check_lost();
+            self.since_start.check_lost();
         }
         if device.is_due(self.link.report_at()) {
             self.report_telemetry(device);
@@ -344,7 +344,7 @@ impl Door {
     fn report_telemetry(&mut self, device: &Device<'_>) {
         let door_id = self.credentials.door_id;
         let latency_ms = self.gate.latency_ms();
-        self.tally
+        self.since_start
             .report(device, door_id, latency_ms, &self.config_digest);
         let interval_ms = self.config.telemetry_interval_s.max(1) * 1000;
         self.link = Link::Online {
@@ -360,7 +360,7 @@ impl Door {
             online: self.is_online(),
         };
         if self.gate.press(device, key, &situation) {
-            self.tally.check_sent();
+            self.since_start.check_sent();
         }
     }
 
@@ -372,7 +372,7 @@ impl Door {
         let in_open_span = self.mode(device) == Mode::Open;
         let unlocked = in_open_span || self.gate.is_unlocked(device);
         self.gate.door_moved(device, open);
-        self.tally.door_moved(open);
+        self.since_start.door_moved(open);
         let message = self.door_event(device.now_ms(), open, unlocked);
         if self.is_online() {
             telemetry::send_door_event(device, self.credentials.door_id, &message);
@@ -444,11 +444,12 @@ impl Door {
     /// controller started, says so after the online status, in an open span
     /// too. The first telemetry report follows the online status shortly.
     fn come_online(mut self, device: &Device<'_>) -> Result<Door, RunError> {
-        self.tally.connected();
+        self.since_start.connected();
         if let Err(error) = self.subscribe_and_publish_online(device) {
             return Ok(self.pause(device, &error.to_string()));
         }
-        self.tally.say_started(device, self.credentials.door_id);
+        self.since_start
+            .say_started(device, self.credentials.door_id);
         std::mem::replace(&mut self.boot, Boot::Settled)
             .online(device, self.credentials.door_id)?;
         let door_id = self.credentials.door_id;
@@ -590,11 +591,10 @@ impl Door {
                 self.credentials.door_id
             ),
         );
-        let since_start = self.tally.since_start();
         Ok(Phase::Enrolling(enrollment::start(
             device,
             self.broker,
-            since_start,
+            self.since_start,
         )))
     }
 

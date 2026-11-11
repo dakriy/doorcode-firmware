@@ -27,49 +27,34 @@ pub(crate) struct SinceStart {
     checks_lost: u64,
 }
 
-pub(crate) struct Tally {
-    since_start: SinceStart,
-}
-
-impl Tally {
-    /// Counting on from what the controller did before, as another door it
-    /// was until revoked.
-    pub(crate) fn after(since_start: SinceStart) -> Tally {
-        Tally { since_start }
-    }
-
-    /// What the controller did as a door since it started.
-    pub(crate) fn since_start(&self) -> SinceStart {
-        self.since_start
-    }
-
+impl SinceStart {
     pub(crate) fn connected(&mut self) {
-        self.since_start.connections += 1;
+        self.connections += 1;
     }
 
     /// Says that the door started, the first time it is online since the
     /// controller started.
     pub(crate) fn say_started(&mut self, device: &Device<'_>, door_id: u64) {
-        if self.since_start.started_said {
+        if self.started_said {
             return;
         }
-        self.since_start.started_said = true;
+        self.started_said = true;
         let reason = device.connectors.firmware().start_reason();
         send_door_event(device, door_id, &started(reason));
     }
 
     pub(crate) fn door_moved(&mut self, open: bool) {
         if open {
-            self.since_start.opens += 1;
+            self.opens += 1;
         }
     }
 
     pub(crate) fn check_sent(&mut self) {
-        self.since_start.checks_sent += 1;
+        self.checks_sent += 1;
     }
 
     pub(crate) fn check_lost(&mut self) {
-        self.since_start.checks_lost += 1;
+        self.checks_lost += 1;
     }
 
     /// What a report would count now, with the latest round trip
@@ -85,11 +70,11 @@ impl Tally {
     fn counted(&self, latency_ms: u64, tcp: Option<TcpCounters>, wifi: WifiLink) -> Counters {
         let tcp = tcp.unwrap_or_default();
         Counters {
-            opens: self.since_start.opens,
-            reconnects: self.since_start.connections.saturating_sub(1),
+            opens: self.opens,
+            reconnects: self.connections.saturating_sub(1),
             latency_ms,
-            checks_sent: self.since_start.checks_sent,
-            checks_lost: self.since_start.checks_lost,
+            checks_sent: self.checks_sent,
+            checks_lost: self.checks_lost,
             tcp_sent: tcp.segments_sent.into(),
             tcp_retransmits: tcp.retransmits.into(),
             tcp_drops: tcp.drops.into(),
