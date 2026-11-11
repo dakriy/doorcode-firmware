@@ -6,10 +6,10 @@
 
 use connectors::{BrokerAddress, Event, Level};
 use pretty_assertions::assert_eq;
-use protocol::{Config, DoorEvent, Telemetry};
+use protocol::{Config, DoorEvent};
 use testkit::{
     config_for, door_connection_to, door_message, hex, BrokerCall, FirmwareCall, Message,
-    StubConnectors, StubEvents, StubStorage,
+    StubBroker, StubConnectors, StubEvents, StubStorage,
 };
 
 /// A configuration moving the door to broker2, every other field left to
@@ -97,10 +97,10 @@ fn door_events(connectors: &StubConnectors) -> Vec<DoorEvent> {
     })
 }
 
-/// The telemetry reports published, in order.
-fn reports(connectors: &StubConnectors) -> Vec<Telemetry> {
+/// The config digests the telemetry reports named, in order.
+fn digests_reported(connectors: &StubConnectors) -> Vec<String> {
     published(connectors, |message| match message {
-        Message::Telemetry(telemetry) => Some(telemetry),
+        Message::Telemetry(telemetry) => Some(telemetry.config_digest),
         _ => None,
     })
 }
@@ -191,6 +191,43 @@ fn a_config_on_trial_not_online_within_the_previous_connect_timeout_is_given_up(
 }
 
 #[test]
+fn a_restart_during_the_trial_does_not_keep_the_config_on_trial() {
+    let interrupted = restarted(received(moved()), [(30_000, Event::Stop)]);
+    app::run(&interrupted).unwrap();
+    let connectors = restarted(interrupted, [(60_001, Event::Stop)]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.log.lines_at(Level::Error),
+        vec![format!(
+            "not online in time on config {MOVED_DIGEST}; restarting with the previous config"
+        )]
+    );
+}
+
+#[test]
+fn another_config_arriving_during_the_trial_leaves_the_last_known_good_one_to_go_back_to() {
+    let trying = StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
+        ..restarted(
+            received(moved()),
+            [
+                (0, Event::Connected),
+                (10, config_message(moved_elsewhere())),
+                (60_001, Event::Stop),
+            ],
+        )
+    };
+    app::run(&trying).unwrap();
+    let connectors = restarted(trying, []);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(report.config, good());
+}
+
+#[test]
 fn after_a_revert_the_door_runs_the_previous_config_on_the_previous_broker() {
     let connectors = reverted([]);
 
@@ -212,12 +249,8 @@ fn a_revert_from_a_trial_begun_with_no_config_stored_goes_back_to_the_defaults()
 
     let report = app::run(&connectors).unwrap();
 
-    let digests: Vec<String> = reports(&connectors)
-        .into_iter()
-        .map(|report| report.config_digest)
-        .collect();
     assert_eq!(
-        (report.config, digests),
+        (report.config, digests_reported(&connectors)),
         (Config::default(), vec![String::new()])
     );
 }
@@ -398,11 +431,10 @@ fn telemetry_names_the_config_received_by_its_digest() {
 
     app::run(&connectors).unwrap();
 
-    let digests: Vec<String> = reports(&connectors)
-        .into_iter()
-        .map(|report| report.config_digest)
-        .collect();
-    assert_eq!(digests, vec![LONGER_PULSE_DIGEST.to_owned()]);
+    assert_eq!(
+        digests_reported(&connectors),
+        vec![LONGER_PULSE_DIGEST.to_owned()]
+    );
 }
 
 #[test]
@@ -414,9 +446,8 @@ fn telemetry_names_the_config_stored_by_its_digest_from_the_start() {
 
     app::run(&connectors).unwrap();
 
-    let digests: Vec<String> = reports(&connectors)
-        .into_iter()
-        .map(|report| report.config_digest)
-        .collect();
-    assert_eq!(digests, vec![LONGER_PULSE_DIGEST.to_owned()]);
+    assert_eq!(
+        digests_reported(&connectors),
+        vec![LONGER_PULSE_DIGEST.to_owned()]
+    );
 }

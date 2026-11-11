@@ -654,11 +654,13 @@ impl Door {
         if trial::rejected(device, &digest)? {
             return Ok(self);
         }
+        let under_way = self.trial;
         let on_trial = if trial::needed(&self.config, &config) {
-            Some(trial::start(device, &self.config, payload, &digest)?)
+            let trial = trial::start(device, under_way, &self.config, payload, &digest)?;
+            Some(trial)
         } else {
             stored::store_bytes(device.connectors.storage(), stored::CONFIG, payload)?;
-            self.trial
+            under_way
         };
         let level = log_level(&config.log_level);
         if level != log_level(&self.config.log_level) {

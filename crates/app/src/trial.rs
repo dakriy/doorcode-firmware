@@ -5,7 +5,7 @@
 //! A configuration given up that way is ignored when it is sent again,
 //! until another arrives.
 
-use connectors::{BrokerAddress, Level};
+use connectors::{BrokerAddress, Level, Storage};
 use protocol::Config;
 use sha2::{Digest, Sha256};
 
@@ -105,27 +105,32 @@ pub(crate) fn rejected(device: &Device<'_>, digest: &str) -> Result<bool, RunErr
     Ok(false)
 }
 
-/// Stores `payload`, with `digest`, on trial beside the configuration
-/// stored now as the last known good one, `good` as it reads, and restarts
-/// to start the network with it.
+/// Stores `payload`, with `digest`, on trial, and restarts to start the
+/// network with it. The last known good configuration is the one `running`
+/// stored now, unless a trial is `under_way`: then it stays the one that
+/// trial would go back to, and the trial keeps its deadline.
 pub(crate) fn start(
     device: &Device<'_>,
-    good: &Config,
+    under_way: Option<Trial>,
+    running: &Config,
     payload: &[u8],
     digest: &str,
 ) -> Result<Trial, RunError> {
     let storage = device.connectors.storage();
-    match stored::bytes(storage, CONFIG)? {
-        Some(bytes) => stored::store_bytes(storage, CONFIG_GOOD, &bytes)?,
-        None => stored::remove(storage, &[CONFIG_GOOD])?,
-    }
+    let trial = match under_way {
+        Some(trial) => trial,
+        None => {
+            copy(storage, CONFIG, CONFIG_GOOD)?;
+            Trial::after(device, running)
+        }
+    };
     stored::store(storage, CONFIG_TRIAL, digest)?;
     stored::store_bytes(storage, CONFIG, payload)?;
     device.restart(
         Level::Warn,
         &format!("config {digest} changes how the door connects; restarting to try it"),
     );
-    Ok(Trial::after(device, good))
+    Ok(trial)
 }
 
 /// Puts the last known good configuration back in place of the one with
@@ -133,10 +138,7 @@ pub(crate) fn start(
 /// one. The broker moves only once a trial is kept, so it needs no change.
 pub(crate) fn revert(device: &Device<'_>, digest: &str) -> Result<(), RunError> {
     let storage = device.connectors.storage();
-    match stored::bytes(storage, CONFIG_GOOD)? {
-        Some(good) => stored::store_bytes(storage, CONFIG, &good)?,
-        None => stored::remove(storage, &[CONFIG])?,
-    }
+    copy(storage, CONFIG_GOOD, CONFIG)?;
     stored::store(storage, CONFIG_REJECTED, digest)?;
     stored::store(storage, CONFIG_REVERTED, digest)?;
     stored::remove(storage, &[CONFIG_TRIAL, CONFIG_GOOD])?;
@@ -145,6 +147,15 @@ pub(crate) fn revert(device: &Device<'_>, digest: &str) -> Result<(), RunError> 
         &format!("not online in time on config {digest}; restarting with the previous config"),
     );
     Ok(())
+}
+
+/// Stores what is stored under `from` under `to` as well, or nothing
+/// under `to` when nothing is under `from`.
+fn copy(storage: &dyn Storage, from: &str, to: &str) -> Result<(), RunError> {
+    match stored::bytes(storage, from)? {
+        Some(bytes) => stored::store_bytes(storage, to, &bytes),
+        None => stored::remove(storage, &[to]),
+    }
 }
 
 /// Now that door `door_id` has come online: keeps the configuration on

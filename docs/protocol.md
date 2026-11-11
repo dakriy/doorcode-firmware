@@ -140,6 +140,9 @@ The trial mark, the last known good configuration, and the digest of the
 configuration given up are all in storage, so a restart or a power cut
 during the trial neither keeps the new configuration nor loses the old:
 the door starts on trial again, with the whole deadline from that start.
+A configuration to try that arrives while one is still on trial takes its
+place on trial; the last known good configuration stays the one the door
+goes back to.
 
 Once online again after giving one up, the door says `config_reverted`
 (Door events), once. The server's configuration stays retained on the
