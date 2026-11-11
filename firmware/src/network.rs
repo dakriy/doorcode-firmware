@@ -10,6 +10,10 @@
 //! Since the choice is made once, a change of the mesh settings restarts
 //! the device. The stepping-stone image (`migrate`) has no Mesh-Lite and
 //! always runs the plain station.
+//!
+//! `wifi_11b_disabled` keeps the station off the 802.11b rates. ESP-IDF
+//! takes it only while Wi-Fi is stopped, so each station applies it before
+//! starting Wi-Fi, and applies a change the way its `start` says.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -66,6 +70,16 @@ pub(crate) fn power_save_off() -> Result<(), EspError> {
     sys::esp!(unsafe { sys::esp_wifi_set_ps(sys::wifi_ps_type_t_WIFI_PS_NONE) })
 }
 
+/// Turns the 802.11b rates off on the station interface, or back on.
+/// ESP-IDF takes this only after Wi-Fi is initialized and before it starts,
+/// and asks for it to be called only to turn them off, or back on after
+/// that.
+pub(crate) fn set_11b_disabled(disabled: bool) -> Result<(), EspError> {
+    let interface = sys::wifi_interface_t_WIFI_IF_STA;
+    // SAFETY: takes plain values; Wi-Fi is initialized and stopped.
+    sys::esp!(unsafe { sys::esp_wifi_config_11b_rate(interface, disabled) })
+}
+
 /// Whether the station has an IP link, readable from any thread.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Link(Arc<AtomicBool>);
@@ -92,6 +106,8 @@ pub(crate) struct Context {
     pub(crate) time: TimeSync,
     /// The mesh settings the network started with.
     pub(crate) mesh: Option<MeshSettings>,
+    /// Whether the 802.11b rates were off when Wi-Fi last started.
+    pub(crate) disable_11b: bool,
     /// Counts the link's losses while the network runs.
     _losses: EspSubscription<'static, System>,
 }
@@ -174,6 +190,7 @@ impl MeshSettings {
 pub(crate) struct Settings {
     pub(crate) wanted: Credentials,
     pub(crate) roam_rssi: i32,
+    pub(crate) disable_11b: bool,
     pub(crate) ntp_server: String,
     pub(crate) mesh: Option<MeshSettings>,
 }
@@ -193,6 +210,7 @@ impl Settings {
         Self {
             wanted: wanted.unwrap_or_default(),
             roam_rssi: config.wifi_roam_rssi,
+            disable_11b: config.wifi_11b_disabled,
             mesh: MeshSettings::read(&config),
             ntp_server: config.ntp_server,
         }
@@ -254,8 +272,9 @@ impl Memory {
 }
 
 impl Context {
-    /// Opens both namespaces, reads the mesh settings to start with, and
-    /// starts counting the link's losses before Wi-Fi starts.
+    /// Opens both namespaces, reads the mesh settings and the 802.11b
+    /// switch to start with, and starts counting the link's losses before
+    /// Wi-Fi starts.
     fn open(partition: &EspDefaultNvsPartition, time: TimeSync) -> Result<Self, EspError> {
         let storage = NvsStorage::open(partition.clone(), NAMESPACE)?;
         let memory = Memory(NvsStorage::open(partition.clone(), MEMORY_NAMESPACE)?);
@@ -263,8 +282,10 @@ impl Context {
         let link = Link::default();
         let counts = LinkCounts::default();
         let losses = counts.watch(&event_loop, link.clone())?;
+        let settings = Settings::read(&storage);
         Ok(Self {
-            mesh: Settings::read(&storage).mesh,
+            mesh: settings.mesh,
+            disable_11b: settings.disable_11b,
             storage,
             memory,
             link,
@@ -276,14 +297,24 @@ impl Context {
     }
 
     /// Reads the settings, and restarts the device when the mesh settings
-    /// are no longer the ones the network started with.
+    /// are no longer the ones the network started with, or, while the mesh
+    /// runs, the 802.11b switch is not: Mesh-Lite owns Wi-Fi and cannot
+    /// stop it.
     pub(crate) fn settings(&self) -> Settings {
         let settings = Settings::read(&self.storage);
         if settings.mesh != self.mesh {
-            log::warn!("the mesh settings changed; restarting to apply them");
-            // SAFETY: takes no arguments and does not return.
-            unsafe { sys::esp_restart() };
+            restart("the mesh settings changed");
+        }
+        if self.mesh.is_some() && settings.disable_11b != self.disable_11b {
+            restart("the 802.11b switch changed");
         }
         settings
     }
+}
+
+/// Restarts the device to apply a setting the network takes only at start.
+pub(crate) fn restart(changed: &str) {
+    log::warn!("{changed}; restarting to apply it");
+    // SAFETY: takes no arguments and does not return.
+    unsafe { sys::esp_restart() };
 }

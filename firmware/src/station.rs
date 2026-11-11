@@ -4,6 +4,11 @@
 //! it was told, or the network that last associated when that fails. While
 //! the signal is below `wifi_roam_rssi`, it scans at most once a minute and
 //! moves to an access point at least 8 dB stronger.
+//!
+//! With `wifi_11b_disabled` set it starts Wi-Fi with the 802.11b rates off.
+//! When the switch changes, it leaves the access point, restarts Wi-Fi with
+//! the rates off or back on, and joins again; should that fail, it restarts
+//! the device.
 
 use std::time::Duration;
 
@@ -17,8 +22,8 @@ use esp_idf_svc::wifi::{
 
 use crate::clock::now_ms;
 use crate::network::{
-    power_save_off, roam_scan_due, worth_roaming, Context, Credentials, Settings, CHECK_EVERY,
-    STACK_BYTES,
+    power_save_off, restart, roam_scan_due, set_11b_disabled, worth_roaming, Context, Credentials,
+    Settings, CHECK_EVERY, STACK_BYTES,
 };
 use crate::threads;
 
@@ -71,11 +76,39 @@ impl Station {
 
     /// Starts the driver as a station and nothing else. Without a client
     /// configuration first, the driver comes up as an access point with a
-    /// DHCP server, and a station scan fails. Power save goes off once the
-    /// driver runs.
+    /// DHCP server, and a station scan fails. The 802.11b rates go off
+    /// before the driver runs, when the switch says so, and power save once
+    /// it runs.
     fn start(&mut self) -> Result<(), EspError> {
         self.wifi
             .set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
+        if self.context.disable_11b {
+            set_11b_disabled(true)?;
+        }
+        self.wifi.start()?;
+        power_save_off()
+    }
+
+    /// Applies a changed 802.11b switch by restarting Wi-Fi, and restarts
+    /// the device when that fails.
+    fn switch_11b(&mut self, disable_11b: bool) -> Duration {
+        log::info!("restarting Wi-Fi with the 802.11b rates disabled: {disable_11b}");
+        if let Err(error) = self.restart_wifi(disable_11b) {
+            log::error!("restarting Wi-Fi: {error}");
+            restart("Wi-Fi did not restart with the new 802.11b switch");
+        }
+        CHECK_EVERY
+    }
+
+    /// Leaves the access point, stops Wi-Fi, sets the 802.11b rates, and
+    /// starts it again; the next check joins anew.
+    fn restart_wifi(&mut self, disable_11b: bool) -> Result<(), EspError> {
+        self.leave()?;
+        self.tried = None;
+        self.joined = None;
+        self.wifi.stop()?;
+        set_11b_disabled(disable_11b)?;
+        self.context.disable_11b = disable_11b;
         self.wifi.start()?;
         power_save_off()
     }
@@ -84,6 +117,9 @@ impl Station {
     /// look.
     fn check(&mut self) -> Duration {
         let settings = self.context.settings();
+        if settings.disable_11b != self.context.disable_11b {
+            return self.switch_11b(settings.disable_11b);
+        }
         let up = self.wifi.is_up().unwrap_or(false);
         self.context.link.set(up);
         if !up || self.tried.as_ref() != Some(&settings.wanted) {

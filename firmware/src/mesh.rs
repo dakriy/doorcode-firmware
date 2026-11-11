@@ -14,6 +14,13 @@
 //! `wifi_roam_rssi` it scans at most once a minute, and when an access
 //! point of the SSID is at least 8 dB stronger it has Mesh-Lite
 //! join again, which picks the strongest.
+//!
+//! With `wifi_11b_disabled` set, the station interface leaves out the
+//! 802.11b rates. The bridge starts Wi-Fi as it creates its interfaces, so
+//! Wi-Fi is stopped and started again around the setting before Mesh-Lite
+//! starts, and a change restarts the device. The soft-AP keeps the 802.11b
+//! rates: the doors hopping through it are often the ones with a weak
+//! signal, and each door's own switch covers its station.
 
 use std::ffi::{c_char, CString};
 use std::ptr;
@@ -29,8 +36,8 @@ use esp_idf_svc::wifi::WifiEvent;
 
 use crate::clock::now_ms;
 use crate::network::{
-    power_save_off, roam_scan_due, worth_roaming, Context, Credentials, MeshSettings, CHECK_EVERY,
-    STACK_BYTES,
+    power_save_off, roam_scan_due, set_11b_disabled, worth_roaming, Context, Credentials,
+    MeshSettings, CHECK_EVERY, STACK_BYTES,
 };
 use crate::radio::access_point;
 use crate::threads;
@@ -62,7 +69,7 @@ pub(crate) fn start(
 ) -> Result<(), EspError> {
     let (subscription, scans) = subscribe_to_scans(&context.event_loop)?;
     let wanted = context.settings().wanted;
-    bring_up(settings, &wanted)?;
+    bring_up(settings, &wanted, context.disable_11b)?;
     let station = MeshStation {
         _modem: modem,
         _subscription: subscription,
@@ -90,9 +97,14 @@ fn subscribe_to_scans(
 }
 
 /// Creates the bridge's station and soft-AP and starts Mesh-Lite on them,
-/// joining `router`.
-fn bring_up(settings: &MeshSettings, router: &Credentials) -> Result<(), EspError> {
-    start_wifi()?;
+/// joining `router`, with the station's 802.11b rates off when
+/// `disable_11b` says so.
+fn bring_up(
+    settings: &MeshSettings,
+    router: &Credentials,
+    disable_11b: bool,
+) -> Result<(), EspError> {
+    start_wifi(disable_11b)?;
     configure_soft_ap(&settings.network)?;
     initialize(settings)?;
     configure_router(router)?;
@@ -102,13 +114,27 @@ fn bring_up(settings: &MeshSettings, router: &Credentials) -> Result<(), EspErro
 }
 
 /// Creates the bridge's network interfaces, which initializes and starts
-/// Wi-Fi, and turns power save off.
-fn start_wifi() -> Result<(), EspError> {
+/// Wi-Fi, turns the station's 802.11b rates off when `disable_11b` says
+/// so, and turns power save off.
+fn start_wifi(disable_11b: bool) -> Result<(), EspError> {
     // SAFETY: called once, before anything else uses Wi-Fi.
     sys::esp!(unsafe { sys::esp_netif_init() })?;
     // SAFETY: as above, after the network interfaces are initialized.
     unsafe { mesh_lite::esp_bridge_create_all_netif() };
+    if disable_11b {
+        without_11b()?;
+    }
     power_save_off()
+}
+
+/// Stops Wi-Fi, which the bridge started, turns the station's 802.11b
+/// rates off, and starts Wi-Fi again, before Mesh-Lite starts.
+fn without_11b() -> Result<(), EspError> {
+    // SAFETY: takes no arguments; Wi-Fi is initialized.
+    sys::esp!(unsafe { sys::esp_wifi_stop() })?;
+    set_11b_disabled(true)?;
+    // SAFETY: takes no arguments; Wi-Fi is initialized and configured.
+    sys::esp!(unsafe { sys::esp_wifi_start() })
 }
 
 /// Names the bridge's soft-AP and hides it: its beacons leave the name

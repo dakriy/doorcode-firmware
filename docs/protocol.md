@@ -74,6 +74,7 @@ the next. Before the first one it runs with the provisioning file's
 | `wifi_ssid` | empty | The Wi-Fi network to join. Empty keeps the provisioned one. If the network the door was told fails to associate, it falls back to the one that last did. |
 | `wifi_password` | empty | That network's password. |
 | `wifi_roam_rssi` | -70 | While the signal is below this, in dBm, the door scans at most once a minute and moves to an access point of the same network at least 8 dB stronger. |
+| `wifi_11b_disabled` | `false` | When `true`, the door's Wi-Fi station never uses the slow 802.11b rates, 1 to 11 Mbps, and stays on the faster OFDM rates. See below. |
 | `mesh_enabled` | `false` | Whether the door may join or offer the Wi-Fi mesh (`mesh.md`). |
 | `mesh_ssid` | empty | The name of every door's mesh soft-AP; the mesh stays off while it is empty. |
 | `mesh_password` | empty | The mesh soft-AP's password, 8 to 63 characters. |
@@ -85,6 +86,20 @@ the next. Before the first one it runs with the provisioning file's
 The Wi-Fi fields and the mesh fields apply on the ESP32 only; the desktop
 host has no Wi-Fi. The mesh is chosen when the door starts, so a
 configuration that changes any mesh field restarts the door.
+
+`wifi_11b_disabled` stops the door falling back to the 802.11b rates when
+frames are lost. On a crowded 2.4 GHz network a door with a strong signal
+can still lose many frames to collisions, and stepping down to 1 or 2 Mbps
+then makes each frame occupy the air longer and fare worse; with the switch
+on it keeps to the faster rates. A door with a weak signal at the edge of
+coverage needs those slow rates to stay connected, and the switch hurts it.
+Leave it off unless the door's telemetry shows a good signal together with
+many TCP retransmits. ESP-IDF takes the setting only while Wi-Fi is
+stopped: without the mesh, a changed value makes the door leave its access
+point, restart Wi-Fi, and join again; with the mesh it restarts the door.
+It covers the door's station, the link to its access point or parent door;
+a mesh door's soft-AP keeps the 802.11b rates for the doors hopping through
+it, each of which has its own switch.
 
 ### Used by the server only
 

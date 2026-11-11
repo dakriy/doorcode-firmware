@@ -21,7 +21,9 @@ The mesh is configured per door, in the configuration message:
 
 Every door of a site should be given the same mesh settings. The door reads
 them when it starts and chooses its network then, so a configuration that
-changes any of them restarts the door.
+changes any of them restarts the door. Under the mesh a change of
+`wifi_11b_disabled` restarts the door too, and the switch covers only the
+door's station; its soft-AP keeps the 802.11b rates (`protocol.md`).
 
 ## Behavior
 

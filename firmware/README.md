@@ -145,6 +145,18 @@ for size so an image fits.
   (`WIFI_PS_NONE`) instead of ESP-IDF's default modem sleep, which holds
   frames for the station until a later beacon and delays or loses them
   under load. Neither Mesh-Lite nor the IoT bridge changes it afterwards.
+  With `wifi_11b_disabled` set, the station starts with the 802.11b rates
+  off (`esp_wifi_config_11b_rate` on the station interface), so it never
+  falls back to 1-11 Mbps: that helps a door with a strong signal but
+  heavy loss on a crowded 2.4 GHz network and hurts a door with a weak
+  signal, which needs those rates (`docs/protocol.md`). ESP-IDF takes the
+  setting only between initializing and starting Wi-Fi. The plain station
+  applies a change by leaving the access point, stopping Wi-Fi, setting
+  the rates, and starting and joining again, and restarts the device if
+  that fails. Under the mesh the IoT bridge starts Wi-Fi as it creates its
+  interfaces, so the station stops and starts it around the setting before
+  Mesh-Lite starts, and a change restarts the device; the soft-AP keeps
+  the 802.11b rates for the doors hopping through it.
 - **Mesh.** With `mesh_enabled` set and `mesh_ssid` named in the stored
   configuration at start, Mesh-Lite runs Wi-Fi instead, and a door whose
   access point is too weak hops through a neighbouring door
