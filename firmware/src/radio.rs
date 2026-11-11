@@ -1,8 +1,11 @@
 //! Facts about the device: the Wi-Fi signal, the free heap, the station
-//! MAC as the hardware id, and where the door sits in the mesh.
+//! MAC as the hardware id, where the door sits in the mesh, and what the
+//! station counted of its link.
 
-use connectors::{Mesh, Radio, TcpCounters, WifiLink};
+use connectors::{AccessPoint, Mesh, Radio, TcpCounters, WifiLink};
 use esp_idf_svc::sys::{self, EspError};
+
+use crate::link_counts::LinkCounts;
 
 /// Reads where the door sits in the mesh: `mesh::position` while Mesh-Lite
 /// runs the network, `Mesh::default` while the plain station does.
@@ -12,11 +15,12 @@ pub(crate) type Position = fn() -> Mesh;
 pub(crate) struct EspRadio {
     hardware_id: String,
     position: Position,
+    counts: LinkCounts,
 }
 
 impl EspRadio {
     /// Reads the station MAC once; it never changes.
-    pub(crate) fn new(position: Position) -> Result<Self, EspError> {
+    pub(crate) fn new(position: Position, counts: LinkCounts) -> Result<Self, EspError> {
         let mut mac = [0u8; 6];
         // SAFETY: a station MAC is six bytes, the length of `mac`.
         sys::esp!(unsafe {
@@ -26,6 +30,7 @@ impl EspRadio {
         Ok(Self {
             hardware_id,
             position,
+            counts,
         })
     }
 }
@@ -61,8 +66,16 @@ impl Radio for EspRadio {
         None
     }
 
-    /// Not read from the station yet: no drops, roams, or access point.
     fn wifi_link(&self) -> WifiLink {
-        WifiLink::default()
+        let joined = access_point().map(|joined| AccessPoint {
+            bssid: joined.bssid,
+            channel: joined.primary,
+        });
+        WifiLink {
+            drops: self.counts.drops(),
+            roams: self.counts.roams(),
+            last_drop_reason: self.counts.last_drop_reason(),
+            access_point: joined,
+        }
     }
 }

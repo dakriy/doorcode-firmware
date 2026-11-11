@@ -31,7 +31,7 @@ pub(crate) fn start(
     context: Context,
 ) -> Result<(), EspError> {
     let station = Station {
-        wifi: wifi(modem, partition)?,
+        wifi: wifi(modem, partition, context.event_loop.clone())?,
         context,
         tried: None,
         joined: None,
@@ -43,8 +43,8 @@ pub(crate) fn start(
 fn wifi(
     modem: Modem,
     partition: EspDefaultNvsPartition,
+    event_loop: EspSystemEventLoop,
 ) -> Result<BlockingWifi<EspWifi<'static>>, EspError> {
-    let event_loop = EspSystemEventLoop::take()?;
     let wifi = EspWifi::new(modem, event_loop.clone(), Some(partition))?;
     BlockingWifi::wrap(wifi, event_loop)
 }
@@ -158,10 +158,13 @@ impl Station {
     fn roam_to(&mut self, credentials: &Credentials, access_point: &AccessPointInfo) {
         log::info!("roaming to {:02x?}", access_point.bssid);
         let roamed = self.associate(credentials, access_point);
-        if let Err(error) = roamed {
-            log::warn!("roaming: {error}");
-            self.joined = None;
-            self.context.link.set(false);
+        match roamed {
+            Ok(()) => self.context.counts.roamed(),
+            Err(error) => {
+                log::warn!("roaming: {error}");
+                self.joined = None;
+                self.context.link.set(false);
+            }
         }
     }
 
@@ -198,12 +201,18 @@ impl Station {
         self.wifi.wait_netif_up()
     }
 
-    /// Ends the association the station holds, if any.
+    /// Ends the association the station holds, if any, so that the
+    /// disconnect which follows is not counted as a loss.
     fn leave(&mut self) -> Result<(), EspError> {
-        if self.wifi.is_connected()? {
-            self.wifi.disconnect()?;
+        if !self.wifi.is_connected()? {
+            return Ok(());
         }
-        Ok(())
+        self.context.counts.leaving();
+        let left = self.wifi.disconnect();
+        if left.is_err() {
+            self.context.counts.stayed();
+        }
+        left
     }
 }
 

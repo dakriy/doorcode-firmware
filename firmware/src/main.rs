@@ -17,6 +17,7 @@ mod firmware;
 mod inert;
 #[cfg(not(feature = "migrate"))]
 mod keypad;
+mod link_counts;
 mod logger;
 #[cfg(not(feature = "migrate"))]
 mod mesh;
@@ -169,7 +170,7 @@ fn connectors(modem: Modem, inputs: Inputs, strike: GpioStrike) -> EspConnectors
     let partition = EspDefaultNvsPartition::take().expect("the default NVS partition");
     let storage = storage(&partition);
     let clock = EspClock::default();
-    let (link, position) = network::start(modem, partition.clone(), clock.time_sync())
+    let network = network::start(modem, partition.clone(), clock.time_sync())
         .expect("starting the Wi-Fi network");
     let events = EspEvents::default();
     let download_storage = NvsStorage::open(partition, storage_keys::NAMESPACE)
@@ -177,12 +178,12 @@ fn connectors(modem: Modem, inputs: Inputs, strike: GpioStrike) -> EspConnectors
     let (strike, door_sensor) = door(inputs, strike, &events);
     EspConnectors {
         storage,
-        broker: MqttBroker::start(events.sender(), link).expect("starting the MQTT thread"),
+        broker: MqttBroker::start(events.sender(), network.link).expect("starting the MQTT thread"),
         download: EspDownload::new(events.sender(), download_storage),
         door_sensor,
         events,
         clock,
-        radio: EspRadio::new(position).expect("reading the station MAC"),
+        radio: EspRadio::new(network.position, network.counts).expect("reading the station MAC"),
         strike,
         firmware: EspFirmware::new(),
     }

@@ -123,11 +123,18 @@ for size so an image fits.
   told fail to associate. While the signal is below `wifi_roam_rssi`, it
   scans at most once a minute and moves to an access point at least 8 dB
   stronger. A broker connection asked for while Wi-Fi is down fails at once.
+  It counts the times it lost its access point while the link was up,
+  keeping the system's reason for the latest, and the times it roamed; a
+  disconnect it makes itself, to roam or to join other credentials, is not
+  a loss. Telemetry reports these with the joined access point's BSSID and
+  channel.
 - **Mesh.** With `mesh_enabled` set and `mesh_ssid` named in the stored
   configuration at start, Mesh-Lite runs Wi-Fi instead, and a door whose
   access point is too weak hops through a neighbouring door
   (`docs/mesh.md`). The choice is made once at start, so a configuration
-  that changes any mesh setting restarts the door.
+  that changes any mesh setting restarts the door. The counts are kept the
+  same way; a roam is a root rejoining for a stronger access point, and
+  the access point reported is the parent door's soft-AP below the root.
 - **Broker.** Each connection is an esp-mqtt client: MQTT 3.1.1, QoS 1
   for every publication, subscription, and will, clean session, and TLS
   verified against the provisioned CA unless the broker is configured

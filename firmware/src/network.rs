@@ -16,12 +16,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use connectors::{Mesh, Storage};
+use esp_idf_svc::eventloop::{EspSubscription, EspSystemEventLoop, System};
 use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::{self, EspError};
 use protocol::Config;
 
 use crate::clock::{now_ms, TimeSync};
+use crate::link_counts::LinkCounts;
 #[cfg(not(feature = "migrate"))]
 use crate::mesh;
 use crate::nvs_storage::NvsStorage;
@@ -71,35 +73,63 @@ impl Link {
 }
 
 /// What either station needs: the application's storage, read for what it
-/// was told, the credentials that last associated, the link it reports,
-/// and SNTP to follow.
+/// was told, the credentials that last associated, the link it reports
+/// and what it counts of it, the system event loop, and SNTP to follow.
 pub(crate) struct Context {
     pub(crate) storage: NvsStorage,
     pub(crate) memory: Memory,
     pub(crate) link: Link,
+    pub(crate) counts: LinkCounts,
+    pub(crate) event_loop: EspSystemEventLoop,
     pub(crate) time: TimeSync,
     /// The mesh settings the network started with.
     pub(crate) mesh: Option<MeshSettings>,
+    /// Counts the link's losses while the network runs.
+    _losses: EspSubscription<'static, System>,
+}
+
+/// What the network reports from its thread: whether the link is up,
+/// what the station counted of it, and how to read where the door sits in
+/// the mesh.
+pub(crate) struct Started {
+    pub(crate) link: Link,
+    pub(crate) counts: LinkCounts,
+    pub(crate) position: Position,
 }
 
 /// Whether the image has Mesh-Lite.
 const HAS_MESH: bool = cfg!(not(feature = "migrate"));
 
 /// Starts the station the stored configuration asks for, on its own
-/// thread, and returns its link and how to read where the door sits in
-/// the mesh.
+/// thread, and returns what it reports.
 pub(crate) fn start(
     modem: Modem,
     partition: EspDefaultNvsPartition,
     time: TimeSync,
-) -> Result<(Link, Position), EspError> {
+) -> Result<Started, EspError> {
     let context = Context::open(&partition, time)?;
     let link = context.link.clone();
+    let counts = context.counts.clone();
+    let position = run(modem, partition, context)?;
+    Ok(Started {
+        link,
+        counts,
+        position,
+    })
+}
+
+/// Starts Mesh-Lite or the plain station, and returns how to read where
+/// the door sits in the mesh.
+fn run(
+    modem: Modem,
+    partition: EspDefaultNvsPartition,
+    context: Context,
+) -> Result<Position, EspError> {
     #[cfg(not(feature = "migrate"))]
     if let Some(settings) = context.mesh.clone() {
-        return mesh::start(modem, &settings, context).map(|()| (link, mesh::position as Position));
+        return mesh::start(modem, &settings, context).map(|()| mesh::position as Position);
     }
-    station::start(modem, partition, context).map(|()| (link, Mesh::default as Position))
+    station::start(modem, partition, context).map(|()| Mesh::default as Position)
 }
 
 /// The Wi-Fi credentials of one network.
@@ -216,16 +246,24 @@ impl Memory {
 }
 
 impl Context {
-    /// Opens both namespaces, and reads the mesh settings to start with.
+    /// Opens both namespaces, reads the mesh settings to start with, and
+    /// starts counting the link's losses before Wi-Fi starts.
     fn open(partition: &EspDefaultNvsPartition, time: TimeSync) -> Result<Self, EspError> {
         let storage = NvsStorage::open(partition.clone(), NAMESPACE)?;
         let memory = Memory(NvsStorage::open(partition.clone(), MEMORY_NAMESPACE)?);
+        let event_loop = EspSystemEventLoop::take()?;
+        let link = Link::default();
+        let counts = LinkCounts::default();
+        let losses = counts.watch(&event_loop, link.clone())?;
         Ok(Self {
             mesh: Settings::read(&storage).mesh,
             storage,
             memory,
-            link: Link::default(),
+            link,
+            counts,
+            event_loop,
             time,
+            _losses: losses,
         })
     }
 

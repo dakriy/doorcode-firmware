@@ -59,7 +59,7 @@ pub(crate) fn start(
     settings: &MeshSettings,
     context: Context,
 ) -> Result<(), EspError> {
-    let (subscription, scans) = subscribe_to_scans()?;
+    let (subscription, scans) = subscribe_to_scans(&context.event_loop)?;
     let wanted = context.settings().wanted;
     bring_up(settings, &wanted)?;
     let station = MeshStation {
@@ -76,8 +76,9 @@ pub(crate) fn start(
 }
 
 /// Hands the station, through the receiver, what each roaming scan found.
-fn subscribe_to_scans() -> Result<(EspSubscription<'static, System>, Receiver<Found>), EspError> {
-    let event_loop = EspSystemEventLoop::take()?;
+fn subscribe_to_scans(
+    event_loop: &EspSystemEventLoop,
+) -> Result<(EspSubscription<'static, System>, Receiver<Found>), EspError> {
     let (found, scans) = mpsc::sync_channel(1);
     let subscription = event_loop.subscribe::<WifiEvent, _>(move |event| {
         if matches!(event, WifiEvent::ScanDone(_)) {
@@ -298,7 +299,7 @@ impl MeshStation {
         }
         self.told = credentials;
         self.changed_ms = now_ms();
-        rejoin();
+        self.rejoin();
     }
 
     /// Switches between the credentials the station was told and those
@@ -331,7 +332,8 @@ impl MeshStation {
             .filter(|found| worth_roaming(*found, signal));
         if stronger.is_some() {
             log::info!("roaming: an access point of {ssid} is stronger");
-            rejoin();
+            self.rejoin();
+            self.context.counts.roamed();
         }
     }
 
@@ -347,6 +349,23 @@ impl MeshStation {
     fn strongest(&mut self, ssid: &str) -> Option<i32> {
         let matching = self.scan()?.into_iter().filter(|(name, _)| name == ssid);
         matching.map(|(_, signal)| i32::from(signal)).max()
+    }
+
+    /// Has Mesh-Lite leave its parent and join again, choosing anew. The
+    /// disconnect this causes while the link is up is not counted as a
+    /// loss.
+    fn rejoin(&self) {
+        let counts = &self.context.counts;
+        if self.context.link.is_up() {
+            counts.leaving();
+        }
+        // SAFETY: takes no arguments; disconnecting while not connected
+        // only reports an error.
+        if unsafe { mesh_lite::esp_mesh_lite_disconnect() } != sys::ESP_OK {
+            counts.stayed();
+        }
+        // SAFETY: takes no arguments.
+        unsafe { mesh_lite::esp_mesh_lite_connect() };
     }
 
     /// Every access point in reach, on every channel, once the scan ends.
@@ -368,16 +387,6 @@ fn start_scan() -> bool {
         scan_ended();
     }
     started == sys::ESP_OK
-}
-
-/// Has Mesh-Lite leave its parent and join again, choosing anew.
-fn rejoin() {
-    // SAFETY: both take no arguments; disconnecting while not connected
-    // only reports an error.
-    unsafe {
-        mesh_lite::esp_mesh_lite_disconnect();
-        mesh_lite::esp_mesh_lite_connect();
-    }
 }
 
 /// Where the door sits in the mesh: Mesh-Lite's level less one, the
