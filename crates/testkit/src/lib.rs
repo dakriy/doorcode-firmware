@@ -14,7 +14,8 @@ use std::collections::VecDeque;
 
 use connectors::{
     Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Mesh,
-    Radio, Random, Status, StatusReport, Storage, Strike, TcpCounters, WifiLink,
+    Network, NetworkSettings, Radio, Random, Status, StatusReport, Storage, Strike, TcpCounters,
+    WifiLink,
 };
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
@@ -164,6 +165,25 @@ impl Radio for StubRadio {
     }
 }
 
+/// A network that keeps every setting it was told, in order.
+#[derive(Debug, Default)]
+pub struct StubNetwork {
+    told: RefCell<Vec<NetworkSettings>>,
+}
+
+impl StubNetwork {
+    /// Every setting the network was told, in order.
+    pub fn told(&self) -> Vec<NetworkSettings> {
+        self.told.borrow().clone()
+    }
+}
+
+impl Network for StubNetwork {
+    fn configure(&self, settings: &NetworkSettings) {
+        self.told.borrow_mut().push(settings.clone());
+    }
+}
+
 /// A log that keeps every line, and every level it was set to.
 #[derive(Debug, Default)]
 pub struct StubLog {
@@ -244,6 +264,7 @@ pub struct StubConnectors {
     pub broker: StubBroker,
     pub random: StubRandom,
     pub radio: StubRadio,
+    pub network: StubNetwork,
     pub firmware: StubFirmware,
     pub download: StubDownload,
     pub log: StubLog,
@@ -294,6 +315,10 @@ impl Connectors for StubConnectors {
 
     fn radio(&self) -> &dyn Radio {
         &self.radio
+    }
+
+    fn network(&self) -> &dyn Network {
+        &self.network
     }
 
     fn firmware(&self) -> &dyn Firmware {

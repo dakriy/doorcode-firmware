@@ -49,8 +49,8 @@ the operating system's roots instead.
 
 The server publishes the door's whole configuration, retained, on
 `doorcode/doors/<id>/config`. The firmware replaces its stored
-configuration with each one, keeps it in storage, and runs with it until
-the next. Before the first one it runs with the provisioning file's
+configuration with each one (one that is tried, once it is kept), keeps
+it in storage, and runs with it until the next. Before the first one it runs with the provisioning file's
 `door_config`, and with the defaults below for any field that lacks. A
 configuration that changes how the door reaches the server is tried
 first, and given up if the door does not come online with it (see
@@ -83,7 +83,7 @@ Trying a configuration below).
 | `mesh_password` | empty | The mesh soft-AP's password, 8 to 63 characters. |
 | `mesh_min_router_rssi` | -75 | When no access point is at least this strong, in dBm, the door joins a neighbouring door instead. |
 | `mesh_max_layer` | 4 | The most hops from the access point the door may sit at. |
-| `update_connect_timeout_s` | 300 | After installing firmware, the new image boots on trial; if it has not connected as its door within this many seconds, the door goes back to the previous image and reports the update failed with `reverted: could not connect`. A configuration on trial has as long, by this field of the configuration it replaced. |
+| `update_connect_timeout_s` | 300 | After installing firmware, the new image boots on trial; if it has not connected as its door within this many seconds, the door goes back to the previous image and reports the update failed with `reverted: could not connect`. A configuration on trial has as long, by this field of the configuration stored. |
 | `accept_unsigned_firmware` | `false` | When `true`, the door installs an image without a valid signature (`firmware-signing.md`). For bench and development boards only. |
 
 The Wi-Fi fields and the mesh fields apply on the ESP32 only; the desktop
@@ -97,9 +97,8 @@ then makes each frame occupy the air longer and fare worse; with the switch
 on it keeps to the faster rates. A door with a weak signal at the edge of
 coverage needs those slow rates to stay connected, and the switch hurts it.
 Leave it off unless the door's telemetry shows a good signal together with
-many TCP retransmits. ESP-IDF takes the setting only while Wi-Fi is
-stopped: without the mesh, a changed value makes the door leave its access
-point, restart Wi-Fi, and join again; with the mesh it restarts the door.
+many TCP retransmits. A change is tried (below), so the door restarts with
+the new value.
 It covers the door's station, the link to its access point or parent door;
 a mesh door's soft-AP keeps the 802.11b rates for the doors hopping through
 it, each of which has its own switch.
@@ -113,72 +112,57 @@ missing key compares as missing): `broker_host`, `broker_port`,
 `wifi_11b_disabled`, `mesh_enabled`, `mesh_ssid`, `mesh_password`,
 `mesh_min_router_rssi`, and `mesh_max_layer`. A wrong value of any of them
 can leave the door unable to reach the server. A configuration that
-changes only other fields takes effect as the table says, with no trial.
+changes only other fields is stored and takes effect at once as the table
+says, with no trial.
 
-To try one, the door keeps the configuration it ran as the last known
-good one, stores the new one in its place with a mark that it is on
-trial, and restarts, so that Wi-Fi, the mesh, and the broker connection
-all start from the new settings. The broker the new configuration moves
-the door to is used from that start but stored as the broker in use only
-once the trial is kept.
+The configuration the door stores as its own is always one it has been
+online with as its door, or one that differs from that only in fields
+outside the list above. A trial never stores it there. Instead:
 
-- **Kept** as soon as the door comes online as its door again: connected
-  to the broker with its door credentials, subscribed, and its online
-  status published. The trial mark and the last known good configuration
-  are forgotten, and the broker is stored.
-- **Given up** in any of three ways, whichever comes first:
-  - when the door has not come online by the deadline:
-    `update_connect_timeout_s` of the last known good configuration,
-    counted from the start, so that a wrong value of that field in the
-    configuration on trial cannot disable the deadline;
-  - at the third start on trial, at once, before connecting and without
-    waiting for the deadline: the two starts before it both ended without
-    coming online, so a configuration that crashes or resets the door
-    before the deadline is given up too. The restart into the trial is
-    its first start, and every start after it until the trial ends counts,
-    whatever ended the one before: a restart, a crash, a reset, or a power
-    cut. Two power cuts in a row during a trial therefore also give it up;
-  - when a broker refuses the door's credentials as not authorized
-    (CONNACK return code 4 or 5) while a configuration is on trial. With a
-    credential rotation under way the door first tries the other pair, as
-    it always does; when the broker refuses that pair too, the trial is
-    given up. The door keeps its identity and credentials, rather than
-    forgetting them and enrolling again as a refusal outside a trial
-    makes it do.
+1. The door stores the configuration received as the one to try once, and
+   restarts.
+2. The next start takes it up before anything it could break runs: before
+   Wi-Fi, the mesh, or the broker connection starts, it stores the
+   configuration's digest as the one tried, which makes the configuration
+   unusable for any start after, and removes it. That start runs it from
+   memory only: Wi-Fi, the mesh, and the broker it moves the door to all
+   start from its settings.
+3. **Kept** as soon as the door comes online as its door: connected to the
+   broker with its door credentials, subscribed, and its online status
+   published. The door then stores it as its own configuration, stores the
+   broker it moved to as the broker in use, and forgets the digest tried.
+4. **Given up** by any other end of that start, which is a restart onto
+   the configuration stored, with nothing to restore:
+   - the deadline: `update_connect_timeout_s` of the stored configuration,
+     counted from the start, so that a wrong value of that field in the
+     configuration on trial cannot disable the deadline;
+   - a crash, a reset, or a power cut before the door came online;
+   - a broker refusing the door's credentials as not authorized (CONNACK
+     return code 4 or 5). With a credential rotation under way the door
+     first tries the other pair, as it always does; when the broker
+     refuses that pair too, the trial is given up. The door keeps its
+     identity and credentials, rather than forgetting them and enrolling
+     again as a refusal outside a trial makes it do.
 
-  The door puts the last known good configuration back (or removes the
-  configuration when it had none, which starts it from the provisioning
-  file's `door_config` again), remembers the digest of the one it gave
-  up, and restarts. It comes back with the
-  previous Wi-Fi and mesh settings and on the previous broker, which was
-  never replaced in storage.
+A configuration that arrives while the one on trial is not kept yet is
+tried in turn, whatever it changes: the door stores it as the one to try
+and restarts, and the stored configuration stays the one it goes back to.
 
-The trial mark with its count of starts, the last known good
-configuration, and the digest of the configuration given up are all in
-storage, so a restart or a power cut during the trial neither keeps the
-new configuration nor loses the old: the door starts on trial again, with
-the whole deadline from that start and one more start counted. The count
-is forgotten with the trial mark when the trial is kept or given up. A
-configuration to try that arrives while one is still on trial takes its
-place on trial; the last known good configuration stays the one the door
-goes back to, and the starts already counted stay counted, since the door
-has not come online as its door since it left that configuration; the
-restart into the new one counts as one more.
-
-Once online again after giving one up, whichever way, the door says
-`config_reverted` (Door events), once. The server's configuration stays retained on the
-broker, so the door receives the configuration it gave up again: whenever
-a configuration with the digest given up arrives, the door logs and
-ignores it. Any other configuration is taken as usual, whether tried or
-not, and the door forgets the one it gave up, so that one is tried again
-if it is sent after.
+Back on its stored configuration after giving one up, the door says
+`config_reverted` (Door events) each time it starts and comes online, for
+as long as it remembers the digest tried. The server's configuration stays
+retained on the broker, so the door receives the configuration it gave up
+again: whenever a configuration with the digest tried arrives, the door
+logs and ignores it. Any other configuration is taken as usual, whether
+tried or not, and the door forgets the digest tried, so that the
+configuration given up is tried again if it is sent after.
 
 Without the mesh, the Wi-Fi station falls back to the network that last
 associated when the one it was told cannot associate (`wifi_ssid` above),
 so a wrong `wifi_ssid` or `wifi_password` can come online through the old
 network and be kept. When the door's credentials were in fact revoked
-during a trial, the door goes back to the last known good configuration,
-is refused there too, and only then forgets them and enrolls again.
+during a trial, the door restarts onto its stored configuration, is
+refused there too, and only then forgets them and enrolls again.
 
 ### Configuration digest
 
@@ -262,8 +246,8 @@ It publishes `config_reverted` on the same topic once it is online again
 after giving up a configuration on trial (Trying a configuration above),
 right after `started`. It carries `event` and `config_digest`, the digest
 of the configuration given up; telemetry's `config_digest` names the one
-it went back to. It is said once: a door that restarts before it comes
-online says it the first time it does.
+it went back to. It is said once a start, the first time that start comes
+online, until the door receives another configuration.
 
 | Field | Type | Meaning |
 | --- | --- | --- |

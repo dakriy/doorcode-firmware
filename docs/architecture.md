@@ -63,6 +63,7 @@ is the factory: one method per connector, nothing else.
 | `Clock` | monotonic milliseconds, Unix seconds once known | the system clock | `esp_timer` and SNTP |
 | `Random` | random bytes | the operating system | the hardware generator |
 | `Radio` | signal, free bytes, hardware id, mesh position | values the control API sets | Wi-Fi RSSI, free heap, station MAC, Mesh-Lite |
+| `Network` | run Wi-Fi, the mesh, and SNTP with the settings of the configuration in use | nothing; the host reaches the broker through its own network | the network code, started by the first settings it is told |
 | `Strike` | release, lock | nothing; the status report says whether the strike is released | a GPIO |
 | `DoorSensor` | whether the door is open | a flag the control API sets | a GPIO, polled every 100 ms |
 | `Log` | log a line, set the level | standard error | the ESP-IDF log |
@@ -72,11 +73,14 @@ The keypad has no connector of its own: a keypress is an `Events` event.
 On the ESP32 a thread scans the 4 by 3 matrix; on the desktop the control
 API and the web keypad press keys.
 
-Wi-Fi and the mesh are outside the application today: the firmware's
-network code joins the configured network, roams, falls back to the last
-network that worked, and runs Mesh-Lite (`firmware/README.md`, `mesh.md`).
-The application sees their result only as broker connections that succeed
-or fail and as what `Radio` reports.
+The application chooses the configuration each start runs and tells the
+`Network` connector its Wi-Fi, mesh, and SNTP settings before anything
+else connects, and again whenever a configuration changes them without a
+restart. The firmware's network code starts on those first settings,
+joins the network it was told, roams, falls back to the last network that
+worked, and runs Mesh-Lite (`firmware/README.md`, `mesh.md`). The
+application sees the result only as broker connections that succeed or
+fail and as what `Radio` reports.
 
 ## Tests
 

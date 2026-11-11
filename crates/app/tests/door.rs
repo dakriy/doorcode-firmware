@@ -233,8 +233,7 @@ fn a_configuration_with_every_field_is_read_by_the_contract_field_names() {
     let full = hex(
         "b81f617601696c6f675f6c6576656c656465627567696d6573685f7373696465646f6f727369776966695f73736964656c6f6262796a62726f6b65725f746c73f46a6e74705f7365727665727074696d652e6578616d706c652e6f72676b62726f6b65725f686f7374606b62726f6b65725f706f727419075c6b68656c645f6f70656e5f73185a6b6b656570616c6976655f73146c6d6573685f656e61626c6564f56d62726f6b65725f63615f70656d78212d2d2d2d2d424547494e2043455254494649434154452d2d2d2d2d0a6c6f6262796d6d6573685f70617373776f72646b6d6573682d7365637265746d776966695f70617373776f72646c6c6f6262792d7365637265746e6d6573685f6d61785f6c61796572066e776966695f726f616d5f7273736938406f6d61785f636f64655f6c656e677468146f6d696e5f636f64655f6c656e677468056f7265636f6e6e6563745f6d61785f7318786f737472696b655f70756c73655f6d7319138870726174655f6c696d69745f627572737405707265706c795f74696d656f75745f6d731909c471776966695f3131625f64697361626c6564f5746b65797061645f69646c655f636c6561725f6d73194e20746d6573685f6d696e5f726f757465725f72737369384f7474656c656d657472795f696e74657276616c5f73181e75726174655f6c696d69745f7065725f6d696e757465183c7674696d656c696e655f726566726573685f686f7572730378186163636570745f756e7369676e65645f6669726d77617265f5781863726564656e7469616c5f726f746174696f6e5f646179730e78187570646174655f636f6e6e6563745f74696d656f75745f73190258",
     );
-    let connectors =
-        StubConnectors::enrolled(StubEvents::script([(0, door_message(7, "config", full))]));
+    let connectors = restarted_after(door_message(7, "config", full));
 
     let report = app::run(&connectors).unwrap();
 
@@ -243,10 +242,14 @@ fn a_configuration_with_every_field_is_read_by_the_contract_field_names() {
 
 #[test]
 fn a_received_configuration_replaces_the_one_in_effect() {
-    let connectors = StubConnectors::enrolled(StubEvents::script([
-        (0, Event::Connected),
-        (10, config_for(7, &custom_config())),
-    ]));
+    let in_effect = Config {
+        strike_pulse_ms: 3000,
+        ..custom_config()
+    };
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled().with_config(&in_effect),
+        ..StubConnectors::online([(10, config_for(7, &custom_config()))])
+    };
 
     let report = app::run(&connectors).unwrap();
 
@@ -417,16 +420,17 @@ fn a_message_on_another_door_topic_is_logged_at_debug_level() {
 
 /// Door 7 with `storage`, after it received `config` while connected, lost
 /// the connection, and connected again.
+/// Door 7, with `storage`, after it received `config` while online and
+/// came online again after the restart a changed broker brings on.
 fn reconnected_after(storage: StubStorage, config: Event) -> StubConnectors {
-    let connectors = StubConnectors {
+    let first = StubConnectors {
         storage,
-        events: StubEvents::script([
-            (0, Event::Connected),
-            (10, config),
-            (20, Event::Disconnected),
-            (1_500, Event::Connected),
-        ]),
-        ..StubConnectors::default()
+        ..StubConnectors::online([(10, config)])
+    };
+    app::run(&first).unwrap();
+    let connectors = StubConnectors {
+        storage: first.storage,
+        ..StubConnectors::online([])
     };
     app::run(&connectors).unwrap();
     connectors

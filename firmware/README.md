@@ -128,8 +128,11 @@ for size so an image fits.
   waits on the event queue. If the application ever returns, the device
   restarts ten seconds later.
 - **Wi-Fi** runs on its own thread and never blocks the event loop. It
-  joins `wifi_ssid` and `wifi_password` from the stored configuration, or
-  the provisioned network while those are empty. It scans every channel and
+  starts when the application first tells it the settings of the
+  configuration this start runs, which is how a configuration on trial
+  reaches it without being stored, and reads what it was last told from
+  then on. It joins `wifi_ssid` and `wifi_password` of that
+  configuration, or the provisioned network while those are empty. It scans every channel and
   joins the strongest access point of that SSID. The credentials that last
   associated are kept in the `wifi` namespace and used when the ones it was
   told fail to associate. While the signal is below `wifi_roam_rssi`, it
@@ -164,16 +167,16 @@ for size so an image fits.
   that changes any mesh setting restarts the door. The counts are kept the
   same way; a roam is a root rejoining for a stronger access point, and
   the access point reported is the parent door's soft-AP below the root.
-- **Configuration trial.** Wi-Fi and the mesh read their settings from
-  the stored `config` entry only, so the application tries a
-  configuration that changes how the door connects by storing it there
-  and restarting, and gives it up by storing the last known good one
-  back (kept meanwhile in `config_good`, with the trial marked in
-  `config_trial` and its starts counted in `config_trial_starts`) and
-  restarting again (`docs/protocol.md`). The network
-  code needs no part in it: each start reads whichever configuration is
-  stored. The broker entries, `broker_ca` included, change only once a
-  trial is kept, so downloads verify against the CA in use until then.
+- **Configuration trial.** A configuration that changes how the door
+  connects is stored as `config_try` and the door restarts. The next start
+  takes it up before the network starts: it stores the configuration's
+  digest as `config_tried`, which makes it unusable for any later start,
+  removes `config_try`, and tells the network the configuration from
+  memory. Coming online stores it as `config`; any other end of that start
+  is a restart onto `config`, which the trial never wrote
+  (`docs/protocol.md`). The broker entries, `broker_ca` included, change
+  only once a trial is kept, so downloads verify against the CA in use
+  until then.
 - **Broker.** Each connection is an esp-mqtt client: MQTT 3.1.1, QoS 1
   for every publication, subscription, and will, clean session, and TLS
   verified against the provisioned CA unless the broker is configured

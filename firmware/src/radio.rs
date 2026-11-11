@@ -6,6 +6,7 @@ use connectors::{AccessPoint, Mesh, Radio, TcpCounters, WifiLink};
 use esp_idf_svc::sys::{self, EspError};
 
 use crate::link_counts::LinkCounts;
+use crate::network::Placement;
 
 /// Reads where the door sits in the mesh: `mesh::position` while Mesh-Lite
 /// runs the network, `Mesh::default` while the plain station does.
@@ -14,13 +15,13 @@ pub(crate) type Position = fn() -> Mesh;
 #[derive(Debug)]
 pub(crate) struct EspRadio {
     hardware_id: String,
-    position: Position,
+    placement: Placement,
     counts: LinkCounts,
 }
 
 impl EspRadio {
     /// Reads the station MAC once; it never changes.
-    pub(crate) fn new(position: Position, counts: LinkCounts) -> Result<Self, EspError> {
+    pub(crate) fn new(placement: Placement, counts: LinkCounts) -> Result<Self, EspError> {
         let mut mac = [0u8; 6];
         // SAFETY: a station MAC is six bytes, the length of `mac`.
         sys::esp!(unsafe {
@@ -29,7 +30,7 @@ impl EspRadio {
         let hardware_id = mac.iter().map(|byte| format!("{byte:02x}")).collect();
         Ok(Self {
             hardware_id,
-            position,
+            placement,
             counts,
         })
     }
@@ -58,8 +59,11 @@ impl Radio for EspRadio {
         self.hardware_id.clone()
     }
 
+    /// Outside any mesh until the network has started.
     fn mesh(&self) -> Mesh {
-        (self.position)()
+        self.placement
+            .get()
+            .map_or_else(Mesh::default, |position| position())
     }
 
     fn tcp_counters(&self) -> Option<TcpCounters> {

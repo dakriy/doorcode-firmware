@@ -2,8 +2,8 @@
 //! following the configuration and timeline the server sends, obeying its
 //! commands, updating its firmware, handing over to new credentials, and
 //! going back to enrolling when the broker no longer accepts the
-//! credentials, or to the last known good configuration when that happens
-//! on trial.
+//! credentials, or restarting onto its stored configuration when that
+//! happens on trial.
 
 use connectors::{
     BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication, StatusReport,
@@ -16,9 +16,11 @@ use crate::command::{self, Order, PendingRestart};
 use crate::device::Device;
 use crate::rotation::Rotation;
 use crate::telemetry::{self, SinceStart, Tally};
-use crate::trial::{self, Trial};
+use crate::trial::{self, Running, Trial};
 use crate::update::{self, Boot, Install};
-use crate::{enrollment, stored, timeline, ConnectionState, Mode, Phase, RunError, RunReport};
+use crate::{
+    enrollment, network, stored, timeline, ConnectionState, Mode, Phase, RunError, RunReport,
+};
 
 /// CONNACK return codes that say the broker does not accept the
 /// credentials: bad username or password, and not authorized.
@@ -43,6 +45,9 @@ pub(crate) struct Door {
     config_digest: String,
     /// The trial of the configuration in use, while it is on trial.
     trial: Option<Trial>,
+    /// The digest of the configuration given up, until the door has said
+    /// so.
+    given_up: Option<String>,
     timeline: Timeline,
     link: Link,
     /// Connection attempts that failed since the door was last online.
@@ -97,21 +102,26 @@ impl Link {
     }
 }
 
-/// Starts serving as the door with the configuration and timeline stored
-/// from the last time, and connects: to `broker` as that configuration
-/// moves it, and with the new credentials when a hand-over was under way.
-/// `since_start` is what the controller did as a door before, as the door
-/// it was until revoked.
+/// Starts serving as the door with the configuration `running` and the
+/// timeline stored from the last time, and connects: to `broker` as that
+/// configuration moves it, and with the new credentials when a hand-over
+/// was under way. `since_start` is what the controller did as a door
+/// before, as the door it was until revoked.
 pub(crate) fn start(
     device: &Device<'_>,
     credentials: Credentials,
     broker: BrokerAddress,
     since_start: SinceStart,
+    running: Running,
 ) -> Result<Door, RunError> {
     let storage = device.connectors.storage();
-    let trial = trial::boot(device)?;
     let next = stored::next_credentials(storage, credentials.door_id)?;
-    let (config, config_bytes) = restored(device, stored::CONFIG, Config::decode)?;
+    let Running {
+        config,
+        digest,
+        trial,
+        given_up,
+    } = running;
     let (timeline, _) = restored(device, stored::TIMELINE, Timeline::decode)?;
     device
         .connectors
@@ -123,8 +133,9 @@ pub(crate) fn start(
         rotation: next.map(|next| Rotation::to(next).tried()),
         broker: configured_broker(&broker, &config),
         config,
-        config_digest: config_bytes.map_or(String::new(), |bytes| trial::digest(&bytes)),
+        config_digest: digest,
         trial,
+        given_up,
         timeline,
         link: Link::Connecting,
         failures: 0,
@@ -140,7 +151,7 @@ pub(crate) fn start(
 
 /// The value stored under `key` with the bytes it was read from, or the
 /// default and no bytes when nothing usable is.
-fn restored<T: Default>(
+pub(crate) fn restored<T: Default>(
     device: &Device<'_>,
     key: &str,
     decode: fn(&[u8]) -> Result<T, DecodeError>,
@@ -280,7 +291,7 @@ impl Door {
         }
         if device.is_due(self.trial.as_ref().map(Trial::revert_at)) {
             self.trial = None;
-            trial::revert(device, &self.config_digest, "not online in time")?;
+            trial::revert(device, &self.config_digest, "not online in time");
         }
         if device.is_due(self.retry_at()) {
             return Ok(self.hand_over(device));
@@ -440,8 +451,9 @@ impl Door {
         self.tally.say_started(device, self.credentials.door_id);
         std::mem::replace(&mut self.boot, Boot::Settled)
             .online(device, self.credentials.door_id)?;
-        let trial = self.trial.take();
-        trial::online(device, self.credentials.door_id, trial, &self.broker)?;
+        let door_id = self.credentials.door_id;
+        let (trial, given_up) = (self.trial.take(), self.given_up.take());
+        trial::online(device, door_id, trial, given_up, &self.broker)?;
         let door = Door {
             link: Link::Online {
                 report_at: device.now_ms() + telemetry::FIRST_REPORT_AFTER_MS,
@@ -540,8 +552,8 @@ impl Door {
     /// A refusal as not authorized means the credentials are revoked, unless
     /// a hand-over is under way and the other pair was not refused just
     /// before: then the other pair is tried at once. On trial, the
-    /// configuration on trial is given up instead, and the door keeps its
-    /// credentials.
+    /// configuration on trial is given up instead by a restart onto the
+    /// stored one, and the door keeps its credentials.
     fn refused(mut self, device: &Device<'_>, code: u8) -> Result<Phase, RunError> {
         if !REVOKED_CODES.contains(&code) {
             let door = self.pause(device, &format!("refused with code {code}"));
@@ -560,16 +572,17 @@ impl Door {
             return Ok(Phase::Door(Box::new(door.connect(device))));
         }
         if self.trial.take().is_some() {
-            trial::revert(device, &self.config_digest, &refused)?;
+            trial::revert(device, &self.config_digest, &refused);
             return Ok(Phase::Door(Box::new(self)));
         }
         self.revoked(device)
     }
 
-    /// Forgets the door and enrolls again.
+    /// Forgets the door, with its configuration, and enrolls again.
     fn revoked(mut self, device: &Device<'_>) -> Result<Phase, RunError> {
         self.gate.lock(device);
         stored::forget_door(device.connectors.storage())?;
+        network::configure(device, &Config::default());
         device.log(
             Level::Warn,
             &format!(
@@ -647,9 +660,12 @@ impl Door {
         Ok(self)
     }
 
-    /// Runs with a configuration received: on trial when it changes how the
-    /// door reaches the server, and not at all when it is the one last
-    /// given up on trial.
+    /// Runs with a configuration received at once when it changes nothing
+    /// of how the door connects, and stores it. Tries it on the next start
+    /// instead when it does, or when the configuration running is on trial
+    /// and not kept yet: the stored configuration never holds connection
+    /// settings the door has not been online with. Ignores the
+    /// configuration last given up.
     fn receive_config(self, device: &Device<'_>, payload: &[u8]) -> Result<Door, RunError> {
         let config = match Config::decode(payload) {
             Ok(config) => config,
@@ -659,27 +675,35 @@ impl Door {
             }
         };
         let digest = trial::digest(payload);
-        if trial::rejected(device, &digest)? {
+        if trial::given_up(device, &digest)? {
             return Ok(self);
         }
-        let under_way = self.trial;
-        let on_trial = if trial::needed(&self.config, &config) {
-            let trial = trial::start(device, under_way, &self.config, payload, &digest)?;
-            Some(trial)
-        } else {
-            trial::store(device, under_way, payload, &digest)?
-        };
+        if let Some(why) = self.to_try(&config) {
+            trial::start(device, payload, &digest, why)?;
+            return Ok(self);
+        }
+        trial::store(device, payload)?;
+        network::configure(device, &config);
         let level = log_level(&config.log_level);
         if level != log_level(&self.config.log_level) {
             device.connectors.log().set_level(level);
         }
         Ok(Door {
-            broker: configured_broker(&self.broker, &config),
             config,
             config_digest: digest,
-            trial: on_trial,
             ..self
         })
+    }
+
+    /// Why `received` is to be tried rather than run at once, if it is.
+    fn to_try(&self, received: &Config) -> Option<&'static str> {
+        if self.trial.is_some() {
+            return Some("arrived before the config on trial was kept");
+        }
+        if trial::needed(&self.config, received) {
+            return Some("changes how the door connects");
+        }
+        None
     }
 
     fn receive_timeline(self, device: &Device<'_>, payload: &[u8]) -> Result<Door, RunError> {

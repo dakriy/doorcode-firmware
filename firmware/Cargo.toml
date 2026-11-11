@@ -42,7 +42,6 @@ opt-level = "z"
 [dependencies]
 app = { path = "../crates/app" }
 connectors = { path = "../crates/connectors" }
-protocol = { path = "../crates/protocol" }
 log = "0.4"
 esp-idf-svc = { version = "0.51", features = ["critical-section"] }
 

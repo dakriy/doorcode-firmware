@@ -5,12 +5,13 @@
 use std::path::{Path, PathBuf};
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Log, Radio, Random,
-    Status, Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Log, Network, Radio,
+    Random, Status, Storage, Strike,
 };
 use connectors_host::{
     EventSender, FileStorage, FirmwareControl, HostDoorSensor, HostDownload, HostEvents,
-    HostFirmware, HostRadio, HostStrike, LinkControl, MqttBroker, OsRandom, SystemClock, Traffic,
+    HostFirmware, HostNetwork, HostRadio, HostStrike, LinkControl, MqttBroker, OsRandom,
+    SystemClock, Traffic,
 };
 
 use crate::image::{self, Boot};
@@ -140,6 +141,10 @@ impl Connectors for DoorConnectors<'_> {
 
     fn radio(&self) -> &dyn Radio {
         &self.wiring.board.radio
+    }
+
+    fn network(&self) -> &dyn Network {
+        &HostNetwork
     }
 
     fn firmware(&self) -> &dyn Firmware {

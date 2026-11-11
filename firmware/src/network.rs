@@ -1,30 +1,31 @@
 //! The Wi-Fi network and SNTP, on a thread of their own so that scanning
 //! and associating never block the event loop.
 //!
-//! Which station runs is chosen at start from the stored configuration:
-//! with the mesh enabled and named, Mesh-Lite runs it (`mesh.rs`);
-//! otherwise the plain station does (`station.rs`). Either joins the
-//! network it was told: `wifi_ssid` and `wifi_password` from the stored
-//! configuration, or, while those are empty, the provisioned ones, and
-//! falls back to the credentials that last associated when those fail.
-//! Since the choice is made once, a change of the mesh settings restarts
-//! the device. The stepping-stone image (`migrate`) has no Mesh-Lite and
-//! always runs the plain station.
+//! The network starts when the application first tells it its settings,
+//! so it never runs with a configuration the application has not chosen
+//! for this start, and reads what it was last told on every check after.
+//! Which station runs is chosen at start from those settings: with a mesh
+//! named, Mesh-Lite runs it (`mesh.rs`); otherwise the plain station does
+//! (`station.rs`). Either joins the network it was told, and falls back to
+//! the credentials that last associated when those fail. Since the choice
+//! is made once, a change of the mesh settings restarts the device. The
+//! stepping-stone image (`migrate`) has no Mesh-Lite and always runs the
+//! plain station.
 //!
 //! `wifi_11b_disabled` keeps the station off the 802.11b rates. ESP-IDF
 //! takes it only while Wi-Fi is stopped, so each station applies it before
 //! starting Wi-Fi; `station.rs` and `mesh.rs` say how each applies a change.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use connectors::{Mesh, Storage};
+use connectors::{Mesh, Network, NetworkSettings, Storage};
+pub(crate) use connectors::{MeshNetwork as MeshSettings, WifiCredentials as Credentials};
 use esp_idf_svc::eventloop::{EspSubscription, EspSystemEventLoop, System};
 use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::{self, EspError};
-use protocol::Config;
 
 use crate::clock::{now_ms, TimeSync};
 use crate::link_counts::LinkCounts;
@@ -33,7 +34,7 @@ use crate::mesh;
 use crate::nvs_storage::NvsStorage;
 use crate::radio::Position;
 use crate::station;
-use crate::storage_keys::{CONFIG, NAMESPACE, WIFI_PASSWORD, WIFI_SSID};
+use crate::threads;
 
 /// The network's own namespace, and the credentials that last associated.
 const MEMORY_NAMESPACE: &str = "wifi";
@@ -45,7 +46,7 @@ const ROAM_MARGIN_DB: i32 = 8;
 /// A scan interrupts traffic briefly, so a roaming scan waits this long
 /// after the last scan.
 const ROAM_SCAN_EVERY_MS: u64 = 60_000;
-/// How often either station looks at the link and the stored configuration.
+/// How often either station looks at the link and the settings it was told.
 pub(crate) const CHECK_EVERY: Duration = Duration::from_secs(1);
 /// The stack of either station's thread.
 pub(crate) const STACK_BYTES: usize = 12 * 1024;
@@ -94,11 +95,11 @@ impl Link {
     }
 }
 
-/// What either station needs: the application's storage, read for what it
-/// was told, the credentials that last associated, the link it reports
-/// and what it counts of it, the system event loop, and SNTP to follow.
+/// What either station needs: the settings it was told, the credentials
+/// that last associated, the link it reports and what it counts of it, the
+/// system event loop, and SNTP to follow.
 pub(crate) struct Context {
-    pub(crate) storage: NvsStorage,
+    told: Told,
     pub(crate) memory: Memory,
     pub(crate) link: Link,
     pub(crate) counts: LinkCounts,
@@ -112,34 +113,88 @@ pub(crate) struct Context {
     _losses: EspSubscription<'static, System>,
 }
 
-/// What the network reports from its thread: whether the link is up,
-/// what the station counted of it, and how to read where the door sits in
-/// the mesh.
-pub(crate) struct Started {
-    pub(crate) link: Link,
-    pub(crate) counts: LinkCounts,
-    pub(crate) position: Position,
-}
-
 /// Whether the image has Mesh-Lite.
 const HAS_MESH: bool = cfg!(not(feature = "migrate"));
 
-/// Starts the station the stored configuration asks for, on its own
-/// thread, and returns what it reports.
-pub(crate) fn start(
+/// What the application last told the network, readable from any thread.
+#[derive(Debug, Clone, Default)]
+struct Told(Arc<Mutex<NetworkSettings>>);
+
+impl Told {
+    fn set(&self, settings: &NetworkSettings) {
+        settings.clone_into(&mut threads::lock(&self.0));
+    }
+
+    fn get(&self) -> NetworkSettings {
+        threads::lock(&self.0).clone()
+    }
+}
+
+/// How to read where the door sits in the mesh, once the network started.
+pub(crate) type Placement = Arc<OnceLock<Position>>;
+
+/// What starting the network takes, until it has started.
+struct Unstarted {
     modem: Modem,
     partition: EspDefaultNvsPartition,
     time: TimeSync,
-) -> Result<Started, EspError> {
-    let context = Context::open(&partition, time)?;
-    let link = context.link.clone();
-    let counts = context.counts.clone();
-    let position = run(modem, partition, context)?;
-    Ok(Started {
-        link,
-        counts,
-        position,
-    })
+}
+
+/// The network, which starts on the first settings it is told. It reports
+/// whether the link is up, what the station counted of it, and where the
+/// door sits in the mesh.
+pub(crate) struct EspNetwork {
+    told: Told,
+    link: Link,
+    counts: LinkCounts,
+    placement: Placement,
+    unstarted: Mutex<Option<Unstarted>>,
+}
+
+impl EspNetwork {
+    pub(crate) fn new(modem: Modem, partition: EspDefaultNvsPartition, time: TimeSync) -> Self {
+        Self {
+            told: Told::default(),
+            link: Link::default(),
+            counts: LinkCounts::default(),
+            placement: Placement::default(),
+            unstarted: Mutex::new(Some(Unstarted {
+                modem,
+                partition,
+                time,
+            })),
+        }
+    }
+
+    pub(crate) fn link(&self) -> Link {
+        self.link.clone()
+    }
+
+    pub(crate) fn counts(&self) -> LinkCounts {
+        self.counts.clone()
+    }
+
+    pub(crate) fn placement(&self) -> Placement {
+        Arc::clone(&self.placement)
+    }
+
+    /// Starts the station the settings told ask for, on its own thread.
+    fn start(&self, unstarted: Unstarted) -> Result<(), EspError> {
+        let context = Context::open(&unstarted.partition, unstarted.time, self)?;
+        let position = run(unstarted.modem, unstarted.partition, context)?;
+        self.placement.get_or_init(|| position);
+        Ok(())
+    }
+}
+
+impl Network for EspNetwork {
+    fn configure(&self, settings: &NetworkSettings) {
+        self.told.set(settings);
+        let unstarted = threads::lock(&self.unstarted).take();
+        if let Some(unstarted) = unstarted {
+            self.start(unstarted).expect("starting the Wi-Fi network");
+        }
+    }
 }
 
 /// Starts Mesh-Lite or the plain station, and returns how to read where
@@ -156,36 +211,6 @@ fn run(
     station::start(modem, partition, context).map(|()| Mesh::default as Position)
 }
 
-/// The Wi-Fi credentials of one network.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Credentials {
-    pub(crate) ssid: String,
-    pub(crate) password: String,
-}
-
-/// The mesh the door may join or offer: present when the image has
-/// Mesh-Lite, `mesh_enabled` is true, and `mesh_ssid` names one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct MeshSettings {
-    pub(crate) network: Credentials,
-    pub(crate) min_router_rssi: i32,
-    pub(crate) max_layer: u64,
-}
-
-impl MeshSettings {
-    fn read(config: &Config) -> Option<Self> {
-        let named = HAS_MESH && config.mesh_enabled && !config.mesh_ssid.is_empty();
-        named.then(|| Self {
-            network: Credentials {
-                ssid: config.mesh_ssid.clone(),
-                password: config.mesh_password.clone(),
-            },
-            min_router_rssi: config.mesh_min_router_rssi,
-            max_layer: config.mesh_max_layer,
-        })
-    }
-}
-
 /// What the station was told, read anew on every check.
 pub(crate) struct Settings {
     pub(crate) wanted: Credentials,
@@ -196,32 +221,17 @@ pub(crate) struct Settings {
 }
 
 impl Settings {
-    pub(crate) fn read(storage: &dyn Storage) -> Self {
-        let config = stored_config(storage);
-        let configured = Credentials {
-            ssid: config.wifi_ssid.clone(),
-            password: config.wifi_password.clone(),
-        };
-        let wanted = if configured.ssid.is_empty() {
-            stored_credentials(storage, WIFI_SSID, WIFI_PASSWORD)
-        } else {
-            Some(configured)
-        };
+    /// What `told` holds, with no mesh when the image has no Mesh-Lite.
+    fn read(told: &Told) -> Self {
+        let told = told.get();
         Self {
-            wanted: wanted.unwrap_or_default(),
-            roam_rssi: config.wifi_roam_rssi,
-            disable_11b: config.wifi_11b_disabled,
-            mesh: MeshSettings::read(&config),
-            ntp_server: config.ntp_server,
+            wanted: told.wifi,
+            roam_rssi: told.roam_rssi,
+            disable_11b: told.disable_11b,
+            ntp_server: told.ntp_server,
+            mesh: told.mesh.filter(|_| HAS_MESH),
         }
     }
-}
-
-/// The stored configuration message, or the defaults until one is stored.
-fn stored_config(storage: &dyn Storage) -> Config {
-    let bytes = storage.load(CONFIG).ok().flatten();
-    let config = bytes.and_then(|bytes| Config::decode(&bytes).ok());
-    config.unwrap_or_default()
 }
 
 fn stored_credentials(
@@ -272,24 +282,25 @@ impl Memory {
 }
 
 impl Context {
-    /// Opens both namespaces, reads the mesh settings and the 802.11b
-    /// switch to start with, and starts counting the link's losses before
-    /// Wi-Fi starts.
-    fn open(partition: &EspDefaultNvsPartition, time: TimeSync) -> Result<Self, EspError> {
-        let storage = NvsStorage::open(partition.clone(), NAMESPACE)?;
+    /// Opens the network's namespace, reads the mesh settings and the
+    /// 802.11b switch to start with from what `network` was told, and
+    /// starts counting the link's losses before Wi-Fi starts.
+    fn open(
+        partition: &EspDefaultNvsPartition,
+        time: TimeSync,
+        network: &EspNetwork,
+    ) -> Result<Self, EspError> {
         let memory = Memory(NvsStorage::open(partition.clone(), MEMORY_NAMESPACE)?);
         let event_loop = EspSystemEventLoop::take()?;
-        let link = Link::default();
-        let counts = LinkCounts::default();
-        let losses = counts.watch(&event_loop, link.clone())?;
-        let settings = Settings::read(&storage);
+        let losses = network.counts.watch(&event_loop, network.link())?;
+        let settings = Settings::read(&network.told);
         Ok(Self {
             mesh: settings.mesh,
             disable_11b: settings.disable_11b,
-            storage,
+            told: network.told.clone(),
             memory,
-            link,
-            counts,
+            link: network.link(),
+            counts: network.counts(),
             event_loop,
             time,
             _losses: losses,
@@ -301,7 +312,7 @@ impl Context {
     /// runs, the 802.11b switch is not: Mesh-Lite owns Wi-Fi and cannot
     /// stop it.
     pub(crate) fn settings(&self) -> Settings {
-        let settings = Settings::read(&self.storage);
+        let settings = Settings::read(&self.told);
         if settings.mesh != self.mesh {
             restart("the mesh settings changed");
         }

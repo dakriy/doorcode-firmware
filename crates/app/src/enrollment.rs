@@ -9,7 +9,7 @@ use protocol::{Config, Credentials, Enrollment, Timeline};
 
 use crate::device::Device;
 use crate::telemetry::SinceStart;
-use crate::{door, stored, Access, ConnectionState, Counters, Phase, RunError, RunReport};
+use crate::{door, stored, trial, Access, ConnectionState, Counters, Phase, RunError, RunReport};
 
 /// The broker drops the connection after one and a half of these without a packet.
 const KEEP_ALIVE_S: u16 = 30;
@@ -147,7 +147,8 @@ impl Enrolling {
             Level::Info,
             &format!("enrolled as door {}", credentials.door_id),
         );
-        let door = door::start(device, credentials, self.broker, self.since_start)?;
+        let running = trial::stored_running(device)?;
+        let door = door::start(device, credentials, self.broker, self.since_start, running)?;
         Ok(Phase::Door(Box::new(door)))
     }
 }

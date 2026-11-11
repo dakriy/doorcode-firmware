@@ -26,19 +26,15 @@ const NEXT_TOKEN: &str = "next_token";
 /// failure after the new image was rolled back.
 const UPDATE_ID: &str = "update_id";
 const UPDATE_VERSION: &str = "update_version";
+/// The configuration message the door has last been online with, or one
+/// that differs from it only in settings that cannot cut the door off.
 pub(crate) const CONFIG: &str = "config";
-/// The configuration message the door ran before the one on trial; not
-/// stored when it ran with none.
-pub(crate) const CONFIG_GOOD: &str = "config_good";
-/// Present while the configuration stored is on trial: the digest of it.
-pub(crate) const CONFIG_TRIAL: &str = "config_trial";
-/// How many times the door has started on the trial under way.
-pub(crate) const CONFIG_TRIAL_STARTS: &str = "config_trial_starts";
-/// The digest of the configuration last given up for not coming online,
-/// ignored when it is sent again.
-pub(crate) const CONFIG_REJECTED: &str = "config_rejected";
-/// The digest of the configuration given up, until the door has said so.
-pub(crate) const CONFIG_REVERTED: &str = "config_reverted";
+/// A configuration message that changes how the door connects, to be
+/// tried by the next start, which takes it up.
+pub(crate) const CONFIG_TRY: &str = "config_try";
+/// The digest of the configuration last tried and not kept: ignored when
+/// it is sent again, and said once the door is online without it.
+pub(crate) const CONFIG_TRIED: &str = "config_tried";
 pub(crate) const TIMELINE: &str = "timeline";
 
 pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunError> {
@@ -133,11 +129,8 @@ pub(crate) fn forget_door(storage: &dyn Storage) -> Result<(), RunError> {
             NEXT_USERNAME,
             NEXT_TOKEN,
             CONFIG,
-            CONFIG_GOOD,
-            CONFIG_TRIAL,
-            CONFIG_TRIAL_STARTS,
-            CONFIG_REJECTED,
-            CONFIG_REVERTED,
+            CONFIG_TRY,
+            CONFIG_TRIED,
             TIMELINE,
         ],
     )

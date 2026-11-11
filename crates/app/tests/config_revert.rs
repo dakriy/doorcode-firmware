@@ -1,16 +1,15 @@
 //! Entrypoint suite for a configuration that changes how the door reaches
-//! the server: tried after a restart, kept once the door comes online,
-//! given up for the last known good one when it does not in time, when it
-//! has started three times without coming online, or when the broker
-//! refuses the door's credentials, and ignored when it is sent again after
-//! that; and the digest that names the configuration in use.
+//! the server: stored to try and restarted into, taken up by the start
+//! after so no later start runs it, kept once the door comes online, and
+//! given up by any other end of that start; ignored when it is sent again
+//! after that; and the digest that names the configuration in use.
 
-use connectors::{BrokerAddress, Event, Level};
+use connectors::{BrokerAddress, Event, Level, NetworkSettings, WifiCredentials};
 use pretty_assertions::assert_eq;
 use protocol::{Config, DoorEvent};
 use testkit::{
     config_for, door_connection_to, door_message, hex, BrokerCall, FirmwareCall, Message,
-    StubBroker, StubConnectors, StubEvents, StubStorage, DOOR_USERNAME,
+    StubBroker, StubConnectors, StubEvents, StubStorage, DOOR_TOKEN, DOOR_USERNAME,
 };
 
 /// A configuration moving the door to broker2, every other field left to
@@ -27,9 +26,6 @@ fn moved_elsewhere() -> Vec<u8> {
     hex("a26176016b62726f6b65725f686f73747362726f6b6572332e6578616d706c652e6f7267")
 }
 
-/// The first 16 hex digits of the SHA-256 of `moved_elsewhere()`.
-const MOVED_ELSEWHERE_DIGEST: &str = "36c4797cfe0e6962";
-
 /// `moved()` with a `strike_pulse_ms` of 5000 as well.
 fn moved_with_longer_pulse() -> Vec<u8> {
     hex(concat!(
@@ -37,9 +33,6 @@ fn moved_with_longer_pulse() -> Vec<u8> {
         "6f737472696b655f70756c73655f6d73191388"
     ))
 }
-
-/// The first 16 hex digits of the SHA-256 of `moved_with_longer_pulse()`.
-const MOVED_WITH_LONGER_PULSE_DIGEST: &str = "22373fcd8c16804a";
 
 /// The username of the pair a rotation hands door 7 over to.
 const NEXT_USERNAME: &str = "door-7-fedcba987654";
@@ -87,24 +80,44 @@ fn restarted(
     }
 }
 
-/// Door 7 after a start, offline, that `before` left it in, cut short
-/// halfway to the deadline of a trial.
-fn cut_short(before: StubConnectors) -> StubConnectors {
-    let interrupted = restarted(before, [(30_000, Event::Stop)]);
-    app::run(&interrupted).unwrap();
-    interrupted
-}
-
-/// Door 7 after two starts on trial of `moved()` that were cut short.
-fn cut_short_twice() -> StubConnectors {
-    cut_short(cut_short(received(moved())))
-}
-
-/// Door 7 after it gave up `moved()` for `good()`, seeing `events`.
-fn reverted(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
-    let trying = restarted(received(moved()), [(60_001, Event::Stop)]);
+/// Door 7 after the start that tried `moved()` ended at `ended_at`
+/// without coming online, by a restart at the deadline or by a power cut
+/// before.
+fn tried_until(ended_at: u64) -> StubConnectors {
+    let trying = restarted(received(moved()), [(ended_at, Event::Stop)]);
     app::run(&trying).unwrap();
-    restarted(trying, events)
+    trying
+}
+
+/// Door 7 after it gave up `moved()` at the deadline, seeing `events`.
+fn reverted(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
+    restarted(tried_until(60_001), events)
+}
+
+/// Door 7 on trial of `moved()`, connected but not online since its
+/// online status could not be published, seeing `events` after.
+fn on_trial_not_kept(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
+    StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
+        ..restarted(
+            received(moved()),
+            [(0, Event::Connected)].into_iter().chain(events),
+        )
+    }
+}
+
+/// What storage holds of the trial: the door's configuration, the one to
+/// try, and the digest of the one tried.
+fn trial_state(connectors: &StubConnectors) -> (Option<Vec<u8>>, Option<Vec<u8>>, Option<String>) {
+    let storage = &connectors.storage;
+    let tried = storage
+        .stored("config_tried")
+        .map(|digest| String::from_utf8(digest).unwrap());
+    (
+        storage.stored("config"),
+        storage.stored("config_try"),
+        tried,
+    )
 }
 
 /// The broker address of the door's first connection request.
@@ -118,6 +131,10 @@ fn first_address(connectors: &StubConnectors) -> BrokerAddress {
 
 fn broker2() -> BrokerAddress {
     door_connection_to("broker2.example.org").address
+}
+
+fn previous_broker() -> BrokerAddress {
+    door_connection_to("broker.example.org").address
 }
 
 /// The door events published, in order.
@@ -160,25 +177,27 @@ fn published<T>(connectors: &StubConnectors, pick: impl Fn(Message) -> Option<T>
 }
 
 #[test]
-fn a_config_moving_the_broker_is_stored_on_trial_and_restarted_into() {
+fn a_config_moving_the_broker_is_stored_to_try_and_restarted_into() {
     let connectors = received(moved());
 
     assert_eq!(
         (
             connectors.firmware.calls(),
-            connectors.log.lines_at(Level::Warn)
+            connectors.log.lines_at(Level::Warn),
+            trial_state(&connectors)
         ),
         (
             vec![FirmwareCall::Restart],
             vec![format!(
                 "config {MOVED_DIGEST} changes how the door connects; restarting to try it"
-            )]
+            )],
+            (Some(good().encode()), Some(moved()), None)
         )
     );
 }
 
 #[test]
-fn after_the_restart_the_door_connects_with_the_config_on_trial() {
+fn after_the_restart_the_door_connects_with_the_config_to_try() {
     let connectors = restarted(received(moved()), []);
 
     let report = app::run(&connectors).unwrap();
@@ -190,7 +209,58 @@ fn after_the_restart_the_door_connects_with_the_config_on_trial() {
 }
 
 #[test]
-fn the_config_on_trial_is_kept_with_its_broker_once_the_door_comes_online() {
+fn the_start_after_takes_the_config_to_try_up_leaving_the_stored_config_alone() {
+    let connectors = restarted(received(moved()), []);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            trial_state(&connectors),
+            connectors.log.lines_at(Level::Info)
+        ),
+        (
+            (Some(good().encode()), None, Some(MOVED_DIGEST.to_owned())),
+            vec![format!(
+                "trying config {MOVED_DIGEST} until the door comes online"
+            )]
+        )
+    );
+}
+
+#[test]
+fn the_network_starts_with_the_wifi_of_the_config_to_try() {
+    let lobby = Config {
+        wifi_ssid: "lobby".to_owned(),
+        wifi_password: "lobby-secret".to_owned(),
+        ..good()
+    };
+    let first = StubConnectors {
+        storage: StubStorage::enrolled().with_config(&good()),
+        ..StubConnectors::online([(10, config_for(7, &lobby))])
+    };
+    app::run(&first).unwrap();
+    let connectors = restarted(first, []);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.network.told(),
+        vec![NetworkSettings {
+            wifi: WifiCredentials {
+                ssid: "lobby".to_owned(),
+                password: "lobby-secret".to_owned(),
+            },
+            roam_rssi: -70,
+            disable_11b: false,
+            ntp_server: "pool.ntp.org".to_owned(),
+            mesh: None,
+        }]
+    );
+}
+
+#[test]
+fn the_config_on_trial_is_stored_with_its_broker_once_the_door_comes_online() {
     let connectors = restarted(
         received(moved()),
         [(59_999, Event::Connected), (120_000, Event::Stop)],
@@ -200,14 +270,17 @@ fn the_config_on_trial_is_kept_with_its_broker_once_the_door_comes_online() {
 
     assert_eq!(
         (
-            connectors.storage.stored("config"),
+            trial_state(&connectors),
             connectors.storage.stored("broker_host"),
             connectors.log.lines_at(Level::Info)
         ),
         (
-            Some(moved()),
+            (Some(moved()), None, None),
             Some(b"broker2.example.org".to_vec()),
-            vec!["online on the new config; it is kept".to_owned()]
+            vec![
+                format!("trying config {MOVED_DIGEST} until the door comes online"),
+                "online on the new config; it is kept".to_owned()
+            ]
         )
     );
 }
@@ -218,210 +291,139 @@ fn a_config_kept_stays_however_long_the_door_is_offline_after() {
     app::run(&kept).unwrap();
     let offline = restarted(kept, [(400_000, Event::Stop)]);
     app::run(&offline).unwrap();
-    let connectors = restarted(offline, []);
+    let connectors = restarted(offline, [(0, Event::Connected)]);
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.config.broker_host, "broker2.example.org".to_owned());
+    assert_eq!(
+        (report.config.broker_host, reverted_digests(&connectors)),
+        ("broker2.example.org".to_owned(), vec![])
+    );
 }
 
 #[test]
 fn a_config_on_trial_not_online_within_the_previous_connect_timeout_is_given_up() {
-    let connectors = restarted(received(moved()), [(60_001, Event::Stop)]);
-
-    app::run(&connectors).unwrap();
+    let connectors = tried_until(60_001);
 
     assert_eq!(
         (
             connectors.firmware.calls(),
-            connectors.log.lines_at(Level::Error)
+            connectors.log.lines_at(Level::Error),
+            trial_state(&connectors)
         ),
         (
             vec![FirmwareCall::Restart],
             vec![format!(
                 "not online in time on config {MOVED_DIGEST}; restarting with the previous config"
-            )]
+            )],
+            (Some(good().encode()), None, Some(MOVED_DIGEST.to_owned()))
         )
     );
 }
 
 #[test]
-fn a_restart_during_the_trial_does_not_keep_the_config_on_trial() {
-    let connectors = restarted(cut_short(received(moved())), [(60_001, Event::Stop)]);
-
-    app::run(&connectors).unwrap();
-
-    assert_eq!(
-        connectors.log.lines_at(Level::Error),
-        vec![format!(
-            "not online in time on config {MOVED_DIGEST}; restarting with the previous config"
-        )]
-    );
-}
-
-#[test]
-fn another_config_arriving_during_the_trial_leaves_the_last_known_good_one_to_go_back_to() {
-    let trying = StubConnectors {
-        broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
-        ..restarted(
-            received(moved()),
-            [
-                (0, Event::Connected),
-                (10, config_message(moved_elsewhere())),
-                (60_001, Event::Stop),
-            ],
-        )
-    };
-    app::run(&trying).unwrap();
-    let connectors = restarted(trying, []);
+fn after_the_deadline_the_door_runs_the_previous_config_on_the_previous_broker_and_says_so() {
+    let connectors = reverted([(0, Event::Connected)]);
 
     let report = app::run(&connectors).unwrap();
 
-    assert_eq!(report.config, good());
-}
-
-#[test]
-fn the_third_start_on_trial_gives_the_trial_up_at_once() {
-    let connectors = restarted(cut_short_twice(), []);
-
-    app::run(&connectors).unwrap();
-
     assert_eq!(
         (
-            connectors.firmware.calls(),
-            connectors.log.lines_at(Level::Error)
+            report.config,
+            first_address(&connectors),
+            reverted_digests(&connectors)
         ),
+        (good(), previous_broker(), vec![MOVED_DIGEST.to_owned()])
+    );
+}
+
+#[test]
+fn a_power_cut_during_the_trial_gives_the_config_up() {
+    let connectors = restarted(tried_until(30_000), [(0, Event::Connected)]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
         (
-            vec![FirmwareCall::Restart],
-            vec![format!(
-                "not online in 2 starts on config {MOVED_DIGEST}; restarting with the previous config"
-            )]
-        )
+            report.config,
+            first_address(&connectors),
+            reverted_digests(&connectors)
+        ),
+        (good(), previous_broker(), vec![MOVED_DIGEST.to_owned()])
     );
 }
 
 #[test]
-fn after_giving_up_on_the_third_start_the_door_runs_the_previous_config_and_says_so() {
-    let gave_up = restarted(cut_short_twice(), []);
-    app::run(&gave_up).unwrap();
-    let connectors = restarted(gave_up, [(0, Event::Connected)]);
+fn a_start_that_crashes_as_soon_as_it_took_the_config_up_gives_it_up() {
+    let connectors = restarted(tried_until(0), [(0, Event::Connected)]);
 
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.config, reverted_digests(&connectors)),
-        (good(), vec![MOVED_DIGEST.to_owned()])
-    );
-}
-
-#[test]
-fn the_starts_on_trial_count_from_none_again_once_a_trial_is_kept() {
-    let kept = restarted(
-        cut_short(received(moved())),
-        [
-            (0, Event::Connected),
-            (10, config_message(moved_elsewhere())),
-        ],
-    );
-    app::run(&kept).unwrap();
-    let connectors = restarted(cut_short(kept), []);
-
-    let report = app::run(&connectors).unwrap();
-
-    assert_eq!(
-        (first_address(&connectors), report.config.broker_host),
         (
-            door_connection_to("broker3.example.org").address,
-            "broker3.example.org".to_owned()
-        )
+            report.config,
+            first_address(&connectors),
+            reverted_digests(&connectors)
+        ),
+        (good(), previous_broker(), vec![MOVED_DIGEST.to_owned()])
     );
 }
 
 #[test]
-fn the_starts_on_trial_count_from_none_again_once_a_trial_is_given_up() {
-    let gave_up = restarted(cut_short_twice(), []);
-    app::run(&gave_up).unwrap();
-    let tried = restarted(
-        gave_up,
-        [
-            (0, Event::Connected),
-            (10, config_message(moved_elsewhere())),
-        ],
-    );
-    app::run(&tried).unwrap();
-    let connectors = restarted(cut_short(tried), []);
-
-    let report = app::run(&connectors).unwrap();
-
-    assert_eq!(report.config.broker_host, "broker3.example.org".to_owned());
-}
-
-#[test]
-fn a_config_taking_the_place_of_one_on_trial_goes_on_counting_its_starts() {
-    let replaced = StubConnectors {
-        broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
-        ..restarted(
-            received(moved()),
-            [
-                (0, Event::Connected),
-                (10, config_message(moved_elsewhere())),
-            ],
-        )
-    };
-    app::run(&replaced).unwrap();
-    let connectors = restarted(cut_short(replaced), []);
-
-    app::run(&connectors).unwrap();
-
-    assert_eq!(
-        connectors.log.lines_at(Level::Error),
-        vec![format!(
-            "not online in 2 starts on config {MOVED_ELSEWHERE_DIGEST}; restarting with the previous config"
-        )]
-    );
-}
-
-#[test]
-fn a_config_changing_only_other_settings_during_the_trial_is_the_one_given_up() {
-    let changed = StubConnectors {
-        broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
-        ..restarted(
-            received(moved()),
-            [
-                (0, Event::Connected),
-                (10, config_message(moved_with_longer_pulse())),
-            ],
-        )
-    };
-    app::run(&changed).unwrap();
-    let connectors = restarted(cut_short(changed), []);
-
-    app::run(&connectors).unwrap();
-
-    assert_eq!(
-        connectors.log.lines_at(Level::Error),
-        vec![format!(
-            "not online in 2 starts on config {MOVED_WITH_LONGER_PULSE_DIGEST}; restarting with the previous config"
-        )]
-    );
-}
-
-#[test]
-fn starts_left_counted_by_a_trial_whose_end_was_cut_short_do_not_count_on_the_next() {
-    let first = StubConnectors {
+fn a_config_to_try_already_taken_up_by_a_start_cut_short_is_not_tried_again() {
+    let connectors = StubConnectors {
         storage: StubStorage::enrolled()
             .with_config(&good())
-            .with("config_trial_starts", b"2"),
-        ..StubConnectors::online([(10, config_message(moved()))])
+            .with("config_try", &moved())
+            .with("config_tried", MOVED_DIGEST.as_bytes()),
+        ..StubConnectors::online([])
     };
-    app::run(&first).unwrap();
-    let connectors = restarted(first, []);
 
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (first_address(&connectors), report.config.broker_host),
-        (broker2(), "broker2.example.org".to_owned())
+        (
+            report.config,
+            reverted_digests(&connectors),
+            trial_state(&connectors)
+        ),
+        (
+            good(),
+            vec![MOVED_DIGEST.to_owned()],
+            (Some(good().encode()), None, Some(MOVED_DIGEST.to_owned()))
+        )
+    );
+}
+
+#[test]
+fn a_config_to_try_that_does_not_decode_is_dropped_for_the_stored_config() {
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled()
+            .with_config(&good())
+            .with("config_try", b"not cbor"),
+        ..StubConnectors::enrolled(StubEvents::script([]))
+    };
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            report.config,
+            connectors.log.lines_at(Level::Warn),
+            trial_state(&connectors)
+        ),
+        (
+            good(),
+            vec![
+                "config 60f4cc8d340bf3bd to try does not decode: Malformed(\"unexpected type string at position 0: expected map\")"
+                    .to_owned()
+            ],
+            (
+                Some(good().encode()),
+                None,
+                Some("60f4cc8d340bf3bd".to_owned())
+            )
+        )
     );
 }
 
@@ -457,15 +459,17 @@ fn after_a_refusal_on_trial_the_door_keeps_its_identity_and_says_it_went_back() 
 
     assert_eq!(
         (
-            report.door.map(|door| door.door_id),
+            report
+                .door
+                .map(|door| (door.door_id, door.username, door.token)),
             report.config,
             first_address(&connectors),
             reverted_digests(&connectors)
         ),
         (
-            Some(7),
+            Some((7, DOOR_USERNAME.to_owned(), DOOR_TOKEN.to_owned())),
             good(),
-            door_connection_to("broker.example.org").address,
+            previous_broker(),
             vec![MOVED_DIGEST.to_owned()]
         )
     );
@@ -506,14 +510,43 @@ fn both_pairs_of_a_hand_over_refused_on_trial_give_the_trial_up() {
 }
 
 #[test]
-fn after_a_revert_the_door_runs_the_previous_config_on_the_previous_broker() {
-    let connectors = reverted([]);
+fn another_config_arriving_during_the_trial_is_tried_next_leaving_the_stored_one() {
+    let connectors = on_trial_not_kept([(10, config_message(moved_elsewhere()))]);
 
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.config, first_address(&connectors)),
-        (good(), door_connection_to("broker.example.org").address)
+        (
+            report.config.broker_host,
+            connectors.log.lines_at(Level::Warn),
+            trial_state(&connectors)
+        ),
+        (
+            "broker2.example.org".to_owned(),
+            vec![
+                "not connected (broker: queue full); connecting again in 1000 ms".to_owned(),
+                "config 36c4797cfe0e6962 arrived before the config on trial was kept; restarting to try it".to_owned()
+            ],
+            (
+                Some(good().encode()),
+                Some(moved_elsewhere()),
+                Some(MOVED_DIGEST.to_owned())
+            )
+        )
+    );
+}
+
+#[test]
+fn a_config_changing_only_other_settings_during_the_trial_is_tried_too() {
+    let trying = on_trial_not_kept([(10, config_message(moved_with_longer_pulse()))]);
+    app::run(&trying).unwrap();
+    let connectors = restarted(trying, [(0, Event::Connected)]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (report.config.strike_pulse_ms, trial_state(&connectors)),
+        (5000, (Some(moved_with_longer_pulse()), None, None))
     );
 }
 
@@ -528,13 +561,17 @@ fn a_revert_from_a_trial_begun_with_no_config_stored_goes_back_to_the_defaults()
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(
-        (report.config, digests_reported(&connectors)),
-        (Config::default(), vec![String::new()])
+        (
+            report.config,
+            digests_reported(&connectors),
+            connectors.firmware.restarts()
+        ),
+        (Config::default(), vec![String::new()], 0)
     );
 }
 
 #[test]
-fn back_online_after_a_revert_the_door_says_so_once() {
+fn back_online_after_a_revert_the_door_says_so_once_however_often_it_reconnects() {
     let connectors = reverted([
         (0, Event::Connected),
         (10, Event::Disconnected),
@@ -555,6 +592,17 @@ fn back_online_after_a_revert_the_door_says_so_once() {
             ..DoorEvent::default()
         }]
     );
+}
+
+#[test]
+fn every_start_says_it_went_back_until_another_config_arrives() {
+    let said = reverted([(0, Event::Connected)]);
+    app::run(&said).unwrap();
+    let connectors = restarted(said, [(0, Event::Connected)]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(reverted_digests(&connectors), vec![MOVED_DIGEST.to_owned()]);
 }
 
 #[test]
@@ -581,13 +629,17 @@ fn another_config_after_a_revert_is_tried() {
         (10, config_message(moved_elsewhere())),
     ]);
 
-    let report = app::run(&connectors).unwrap();
+    app::run(&connectors).unwrap();
 
     assert_eq!(
-        (connectors.firmware.calls(), report.config.broker_host),
+        (connectors.firmware.calls(), trial_state(&connectors)),
         (
             vec![FirmwareCall::Restart],
-            "broker3.example.org".to_owned()
+            (
+                Some(good().encode()),
+                Some(moved_elsewhere()),
+                Some(MOVED_DIGEST.to_owned())
+            )
         )
     );
 }
@@ -600,13 +652,13 @@ fn the_config_given_up_is_tried_again_once_another_has_arrived() {
         (20, config_message(moved())),
     ]);
 
-    let report = app::run(&connectors).unwrap();
+    app::run(&connectors).unwrap();
 
     assert_eq!(
-        (connectors.firmware.calls(), report.config.broker_host),
+        (connectors.firmware.calls(), trial_state(&connectors)),
         (
             vec![FirmwareCall::Restart],
-            "broker2.example.org".to_owned()
+            (Some(longer_pulse()), Some(moved()), None)
         )
     );
 }
@@ -664,7 +716,7 @@ fn every_setting_that_can_cut_the_door_off_puts_a_config_on_trial() {
         },
     ];
 
-    let restarts: Vec<usize> = changes
+    let tried: Vec<(usize, Option<Vec<u8>>)> = changes
         .iter()
         .map(|change| {
             let connectors = StubConnectors {
@@ -672,11 +724,55 @@ fn every_setting_that_can_cut_the_door_off_puts_a_config_on_trial() {
                 ..StubConnectors::online([(10, config_for(7, change))])
             };
             app::run(&connectors).unwrap();
-            connectors.firmware.restarts()
+            (
+                connectors.firmware.restarts(),
+                connectors.storage.stored("config"),
+            )
         })
         .collect();
 
-    assert_eq!(restarts, vec![1; 12]);
+    assert_eq!(tried, vec![(1, Some(good().encode())); 12]);
+}
+
+#[test]
+fn a_config_changing_only_other_settings_is_stored_and_run_at_once() {
+    let other = Config {
+        strike_pulse_ms: 5000,
+        keepalive_s: 45,
+        wifi_roam_rssi: -65,
+        ntp_server: "time.example.org".to_owned(),
+        ..good()
+    };
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled().with_config(&good()),
+        ..StubConnectors::online([(10, config_for(7, &other))])
+    };
+
+    let report = app::run(&connectors).unwrap();
+
+    let told: Vec<(i32, String)> = connectors
+        .network
+        .told()
+        .into_iter()
+        .map(|settings| (settings.roam_rssi, settings.ntp_server))
+        .collect();
+    assert_eq!(
+        (
+            report.config,
+            told,
+            connectors.firmware.restarts(),
+            trial_state(&connectors)
+        ),
+        (
+            other.clone(),
+            vec![
+                (-70, "pool.ntp.org".to_owned()),
+                (-65, "time.example.org".to_owned())
+            ],
+            0,
+            (Some(other.encode()), None, None)
+        )
+    );
 }
 
 #[test]
@@ -728,4 +824,16 @@ fn telemetry_names_the_config_stored_by_its_digest_from_the_start() {
         digests_reported(&connectors),
         vec![LONGER_PULSE_DIGEST.to_owned()]
     );
+}
+
+#[test]
+fn telemetry_names_the_config_on_trial_by_its_digest() {
+    let connectors = restarted(
+        received(moved()),
+        [(0, Event::Connected), (1001, Event::Stop)],
+    );
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(digests_reported(&connectors), vec![MOVED_DIGEST.to_owned()]);
 }

@@ -1,28 +1,28 @@
-//! Trying a configuration that changes how the door reaches the server:
-//! keeping the configuration it ran before as the last known good one,
-//! restarting into the new one, keeping it once the door has come online,
-//! and going back to the last known good one when it does not in time,
-//! when it has started too many times without coming online, or when the
-//! broker refuses the door's credentials.
-//! A configuration given up that way is ignored when it is sent again,
-//! until another arrives.
+//! Trying a configuration that changes how the door reaches the server,
+//! once. It is stored as the configuration to try and the door restarts.
+//! The next start takes it up before the network starts, making it
+//! unusable for any start after, and runs it from memory only. Coming
+//! online as the door stores it as the door's configuration; any other end
+//! of that start (the deadline, a refused login, a crash, a power cut) is a
+//! restart onto the configuration stored, which never changed.
+//!
+//! The digest of the configuration tried stays stored until the door comes
+//! online with it or another configuration arrives, so that a door back on
+//! its previous configuration says it gave that one up, and ignores it when
+//! it is sent again.
 
 use connectors::{BrokerAddress, Level, Storage};
 use protocol::Config;
 use sha2::{Digest, Sha256};
 
 use crate::device::Device;
-use crate::stored::{
-    self, CONFIG, CONFIG_GOOD, CONFIG_REJECTED, CONFIG_REVERTED, CONFIG_TRIAL, CONFIG_TRIAL_STARTS,
-};
+use crate::door::restored;
+use crate::stored::{self, CONFIG, CONFIG_TRIED, CONFIG_TRY};
 use crate::telemetry::{self, send_door_event};
 use crate::{hex, RunError};
 
 /// How many bytes of the SHA-256 the digest of a configuration keeps.
 const DIGEST_BYTES: usize = 8;
-/// The start on trial that gives the trial up at once: the starts before
-/// it all ended without coming online, by a crash, a reset, or a power cut.
-const GIVE_UP_ON_START: u32 = 3;
 
 /// The digest of the configuration message `payload`: the first eight
 /// bytes of its SHA-256, as 16 lowercase hex digits.
@@ -56,179 +56,171 @@ fn connection(config: &Config) -> impl PartialEq + '_ {
 }
 
 /// Whether `received` changes how the door reaches the server from
-/// `running`, which puts it on trial.
+/// `running`, which means it is tried.
 pub(crate) fn needed(running: &Config, received: &Config) -> bool {
     connection(running) != connection(received)
 }
 
-/// A configuration on trial, given up at `revert_at` unless the door has
-/// come online by then.
+/// The configuration this start runs.
+pub(crate) struct Running {
+    pub(crate) config: Config,
+    /// The digest of its message; empty with none.
+    pub(crate) digest: String,
+    /// The trial it is on, when this start is trying it.
+    pub(crate) trial: Option<Trial>,
+    /// The digest of the configuration last tried and given up, to say
+    /// once this start is online.
+    pub(crate) given_up: Option<String>,
+}
+
+/// A configuration on trial: its message, stored as the door's
+/// configuration once the door comes online, and the time it is given up
+/// at unless it has by then.
 pub(crate) struct Trial {
+    payload: Vec<u8>,
     revert_at: u64,
 }
 
 impl Trial {
-    /// A trial from now on, with the connect timeout of the last known
-    /// good configuration `good`, so a wrong timeout on trial cannot stop
-    /// it ending.
-    fn after(device: &Device<'_>, good: &Config) -> Trial {
-        Trial {
-            revert_at: device.now_ms() + good.update_connect_timeout_s * 1000,
-        }
-    }
-
     pub(crate) fn revert_at(&self) -> u64 {
         self.revert_at
     }
 }
 
-/// The trial this start is in, when the configuration stored is on trial,
-/// counted as one more start on it. The start that would be the third
-/// gives the trial up instead.
-pub(crate) fn boot(device: &Device<'_>) -> Result<Option<Trial>, RunError> {
+/// The configuration this start runs: the one stored to try, taken up, or
+/// otherwise the door's configuration.
+pub(crate) fn boot(device: &Device<'_>) -> Result<Running, RunError> {
+    let settled = stored_running(device)?;
     let storage = device.connectors.storage();
-    let Some(digest) = stored::text(storage, CONFIG_TRIAL)? else {
-        return Ok(None);
+    let Some((payload, digest)) = take(storage, settled.given_up.as_deref())? else {
+        return Ok(settled);
     };
-    let earlier = stored::text(storage, CONFIG_TRIAL_STARTS)?
-        .and_then(|starts| starts.parse::<u32>().ok())
-        .unwrap_or(0);
-    let starts = earlier + 1;
-    if starts >= GIVE_UP_ON_START {
-        let why = format!("not online in {earlier} starts");
-        revert(device, &digest, &why)?;
-        return Ok(None);
-    }
-    stored::store(storage, CONFIG_TRIAL_STARTS, &starts.to_string())?;
-    let good = stored::bytes(storage, CONFIG_GOOD)?
-        .and_then(|bytes| Config::decode(&bytes).ok())
-        .unwrap_or_default();
-    Ok(Some(Trial::after(device, &good)))
-}
-
-/// Whether the configuration with `digest` is the one last given up, which
-/// is then ignored. Any other forgets the one given up.
-pub(crate) fn rejected(device: &Device<'_>, digest: &str) -> Result<bool, RunError> {
-    let storage = device.connectors.storage();
-    let Some(rejected) = stored::text(storage, CONFIG_REJECTED)? else {
-        return Ok(false);
-    };
-    if rejected == digest {
-        device.log(
-            Level::Warn,
-            &format!("ignored config {digest}: it was given up for not coming online"),
-        );
-        return Ok(true);
-    }
-    stored::remove(storage, &[CONFIG_REJECTED])?;
-    Ok(false)
-}
-
-/// Stores `payload`, with `digest`, on trial, and restarts to start the
-/// network with it. The last known good configuration is the one `running`
-/// stored now, unless a trial is `under_way`: then it stays the one that
-/// trial would go back to, and the trial keeps its deadline and its count
-/// of starts. Otherwise the count starts from none, whatever a trial before
-/// left of it when its end was cut short.
-pub(crate) fn start(
-    device: &Device<'_>,
-    under_way: Option<Trial>,
-    running: &Config,
-    payload: &[u8],
-    digest: &str,
-) -> Result<Trial, RunError> {
-    let storage = device.connectors.storage();
-    let trial = match under_way {
-        Some(trial) => trial,
-        None => {
-            copy(storage, CONFIG, CONFIG_GOOD)?;
-            stored::remove(storage, &[CONFIG_TRIAL_STARTS])?;
-            Trial::after(device, running)
+    let config = match Config::decode(&payload) {
+        Ok(config) => config,
+        Err(error) => {
+            device.log(
+                Level::Warn,
+                &format!("config {digest} to try does not decode: {error:?}"),
+            );
+            return Ok(settled);
         }
     };
-    store_on_trial(storage, payload, digest)?;
-    device.restart(
-        Level::Warn,
-        &format!("config {digest} changes how the door connects; restarting to try it"),
+    device.log(
+        Level::Info,
+        &format!("trying config {digest} until the door comes online"),
     );
-    Ok(trial)
+    let deadline_ms = settled.config.update_connect_timeout_s * 1000;
+    Ok(Running {
+        config,
+        digest,
+        trial: Some(Trial {
+            payload,
+            revert_at: device.now_ms() + deadline_ms,
+        }),
+        given_up: None,
+    })
 }
 
-/// Puts the last known good configuration back in place of the one with
-/// `digest`, given up for `why`, remembers that one as given up, and
-/// restarts with the good one. The broker moves only once a trial is
-/// kept, so it needs no change.
-pub(crate) fn revert(device: &Device<'_>, digest: &str, why: &str) -> Result<(), RunError> {
-    let storage = device.connectors.storage();
-    copy(storage, CONFIG_GOOD, CONFIG)?;
-    stored::store(storage, CONFIG_REJECTED, digest)?;
-    stored::store(storage, CONFIG_REVERTED, digest)?;
-    end(storage)?;
+/// The door's configuration as stored, with the digest of the one last
+/// given up.
+pub(crate) fn stored_running(device: &Device<'_>) -> Result<Running, RunError> {
+    let (config, bytes) = restored(device, CONFIG, Config::decode)?;
+    Ok(Running {
+        config,
+        digest: bytes.map_or(String::new(), |bytes| digest(&bytes)),
+        trial: None,
+        given_up: stored::text(device.connectors.storage(), CONFIG_TRIED)?,
+    })
+}
+
+/// Takes up the configuration stored to try, with its digest. Storing its
+/// digest as the one tried makes it unusable for any later start; it is
+/// removed after. One whose digest is already the one `tried` was taken up
+/// by a start cut short between the two, and is only removed.
+fn take(storage: &dyn Storage, tried: Option<&str>) -> Result<Option<(Vec<u8>, String)>, RunError> {
+    let Some(payload) = stored::bytes(storage, CONFIG_TRY)? else {
+        return Ok(None);
+    };
+    let digest = digest(&payload);
+    let taken = tried == Some(digest.as_str());
+    if !taken {
+        stored::store(storage, CONFIG_TRIED, &digest)?;
+    }
+    stored::remove(storage, &[CONFIG_TRY])?;
+    if taken {
+        return Ok(None);
+    }
+    Ok(Some((payload, digest)))
+}
+
+/// Whether the configuration with `digest` is the one last tried and not
+/// kept, which is then ignored.
+pub(crate) fn given_up(device: &Device<'_>, digest: &str) -> Result<bool, RunError> {
+    let tried = stored::text(device.connectors.storage(), CONFIG_TRIED)?;
+    if tried.as_deref() != Some(digest) {
+        return Ok(false);
+    }
+    device.log(
+        Level::Warn,
+        &format!("ignored config {digest}: it was given up for not coming online"),
+    );
+    Ok(true)
+}
+
+/// Stores `payload`, with `digest`, to be tried by the next start, which
+/// `why` calls for, and restarts into it.
+pub(crate) fn start(
+    device: &Device<'_>,
+    payload: &[u8],
+    digest: &str,
+    why: &str,
+) -> Result<(), RunError> {
+    stored::store_bytes(device.connectors.storage(), CONFIG_TRY, payload)?;
     device.restart(
-        Level::Error,
-        &format!("{why} on config {digest}; restarting with the previous config"),
+        Level::Warn,
+        &format!("config {digest} {why}; restarting to try it"),
     );
     Ok(())
 }
 
-/// Stores `payload`, with `digest`, as the configuration that runs on
-/// trial: the trial mark always names the configuration stored with it.
-fn store_on_trial(storage: &dyn Storage, payload: &[u8], digest: &str) -> Result<(), RunError> {
-    stored::store(storage, CONFIG_TRIAL, digest)?;
-    stored::store_bytes(storage, CONFIG, payload)
-}
-
-/// Stores `payload`, with `digest`, as a configuration that changes nothing
-/// of how the door connects. While a trial is `under_way` it is the one on
-/// trial, and that trial goes on.
-pub(crate) fn store(
-    device: &Device<'_>,
-    under_way: Option<Trial>,
-    payload: &[u8],
-    digest: &str,
-) -> Result<Option<Trial>, RunError> {
+/// Stores `payload` as the door's configuration, which changes nothing of
+/// how the door connects, and forgets the one last given up.
+pub(crate) fn store(device: &Device<'_>, payload: &[u8]) -> Result<(), RunError> {
     let storage = device.connectors.storage();
-    match under_way {
-        Some(_) => store_on_trial(storage, payload, digest)?,
-        None => stored::store_bytes(storage, CONFIG, payload)?,
-    }
-    Ok(under_way)
+    stored::store_bytes(storage, CONFIG, payload)?;
+    stored::remove(storage, &[CONFIG_TRIED])
 }
 
-/// Forgets the trial, its mark first: a restart that cuts this short
-/// leaves no trial, only a count of starts that the next trial starts
-/// over and a last known good configuration that it replaces.
-fn end(storage: &dyn Storage) -> Result<(), RunError> {
-    stored::remove(storage, &[CONFIG_TRIAL, CONFIG_TRIAL_STARTS, CONFIG_GOOD])
-}
-
-/// Stores what is stored under `from` under `to` as well, or nothing
-/// under `to` when nothing is under `from`.
-fn copy(storage: &dyn Storage, from: &str, to: &str) -> Result<(), RunError> {
-    match stored::bytes(storage, from)? {
-        Some(bytes) => stored::store_bytes(storage, to, &bytes),
-        None => stored::remove(storage, &[to]),
-    }
+/// Gives up the configuration with `digest` on trial for `why`, by
+/// restarting onto the door's configuration.
+pub(crate) fn revert(device: &Device<'_>, digest: &str, why: &str) {
+    device.restart(
+        Level::Error,
+        &format!("{why} on config {digest}; restarting with the previous config"),
+    );
 }
 
 /// Now that door `door_id` has come online: keeps the configuration on
-/// trial, if any, with the broker it moved to, and says so if the door
-/// went back to its previous configuration.
+/// `trial`, if any, with the `broker` it moved to, and says so when this
+/// start went back from one `given_up`. The digest tried is forgotten
+/// first, so a restart that cuts this short leaves the door on its
+/// previous configuration with nothing given up.
 pub(crate) fn online(
     device: &Device<'_>,
     door_id: u64,
     trial: Option<Trial>,
+    given_up: Option<String>,
     broker: &BrokerAddress,
 ) -> Result<(), RunError> {
     let storage = device.connectors.storage();
-    if trial.is_some() {
-        end(storage)?;
+    if let Some(trial) = trial {
+        stored::remove(storage, &[CONFIG_TRIED])?;
+        stored::store_bytes(storage, CONFIG, &trial.payload)?;
         stored::store_broker(storage, broker)?;
         device.log(Level::Info, "online on the new config; it is kept");
     }
-    if let Some(given_up) = stored::text(storage, CONFIG_REVERTED)? {
+    if let Some(given_up) = given_up {
         send_door_event(device, door_id, &telemetry::config_reverted(given_up));
-        stored::remove(storage, &[CONFIG_REVERTED])?;
     }
     Ok(())
 }

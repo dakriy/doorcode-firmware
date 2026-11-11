@@ -12,6 +12,7 @@ mod device;
 mod door;
 mod enrollment;
 mod entry;
+mod network;
 mod rotation;
 mod signature;
 mod status;
@@ -30,6 +31,7 @@ use device::Device;
 use door::Door;
 use enrollment::Enrolling;
 use telemetry::SinceStart;
+use trial::Running;
 
 /// What the controller ends a run with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,13 +172,14 @@ enum Phase {
 }
 
 impl Phase {
-    /// A door when its credentials are stored, otherwise enrolling.
-    fn start(device: &Device<'_>) -> Result<Phase, RunError> {
+    /// A door running `running` when its credentials are stored, otherwise
+    /// enrolling.
+    fn start(device: &Device<'_>, running: Running) -> Result<Phase, RunError> {
         let broker = device.provisioning.broker.clone();
         let since_start = SinceStart::default();
         let phase = match stored::door_credentials(device.connectors.storage())? {
             Some(credentials) => {
-                let door = door::start(device, credentials, broker, since_start)?;
+                let door = door::start(device, credentials, broker, since_start, running)?;
                 Phase::Door(Box::new(door))
             }
             None => Phase::Enrolling(enrollment::start(device, broker, since_start)),
@@ -217,10 +220,14 @@ impl Phase {
 }
 
 /// Entrypoint. Runs the controller until the events connector says stop.
+/// The configuration this start runs is settled, taking up one stored to
+/// try, before the network starts with it.
 pub fn run(connectors: &dyn Connectors) -> Result<RunReport, RunError> {
     let provisioning = stored::provisioning(connectors.storage())?;
     let device = Device::new(connectors, &provisioning);
-    let mut phase = Phase::start(&device)?;
+    let running = trial::boot(&device)?;
+    network::configure(&device, &running.config);
+    let mut phase = Phase::start(&device, running)?;
     let mut reported = None;
     loop {
         reported = status::report(&device, phase.status(&device), reported);

@@ -228,6 +228,49 @@ pub trait Radio {
     fn wifi_link(&self) -> WifiLink;
 }
 
+/// A Wi-Fi network's name and password.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WifiCredentials {
+    pub ssid: String,
+    pub password: String,
+}
+
+/// The Wi-Fi mesh of doors the device may join or offer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MeshNetwork {
+    /// The name and password of every door's mesh soft-AP.
+    pub network: WifiCredentials,
+    /// Below this signal from every access point, in dBm, the device joins
+    /// a neighbouring door instead.
+    pub min_router_rssi: i32,
+    /// The most hops from the access point the device may sit at.
+    pub max_layer: u64,
+}
+
+/// What the device joins its network with.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NetworkSettings {
+    /// The Wi-Fi network to join.
+    pub wifi: WifiCredentials,
+    /// Below this signal, in dBm, the station looks for a stronger access
+    /// point of the same network.
+    pub roam_rssi: i32,
+    /// Whether the station keeps off the 802.11b rates.
+    pub disable_11b: bool,
+    /// Where the clock synchronizes.
+    pub ntp_server: String,
+    /// The mesh, when the device runs one.
+    pub mesh: Option<MeshNetwork>,
+}
+
+/// The device's network link: Wi-Fi, the mesh, and the clock's
+/// synchronization.
+pub trait Network {
+    /// Runs the network with `settings` from now on. The first call starts
+    /// it; nothing joins a network before.
+    fn configure(&self, settings: &NetworkSettings);
+}
+
 /// HTTPS downloads. Calls start work; progress arrives through `Events` as
 /// `Event::Download`.
 pub trait Download {
@@ -404,6 +447,7 @@ pub trait Connectors {
     fn clock(&self) -> &dyn Clock;
     fn random(&self) -> &dyn Random;
     fn radio(&self) -> &dyn Radio;
+    fn network(&self) -> &dyn Network;
     fn firmware(&self) -> &dyn Firmware;
     fn download(&self) -> &dyn Download;
     fn log(&self) -> &dyn Log;

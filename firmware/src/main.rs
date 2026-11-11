@@ -40,8 +40,8 @@ use std::thread;
 use std::time::Duration;
 
 use connectors::{
-    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, Log, Radio, Random, Status,
-    Storage, Strike,
+    Broker, Clock, Connectors, DoorSensor, Download, Events, Firmware, Log, Network, Radio, Random,
+    Status, Storage, Strike,
 };
 use esp_idf_svc::hal::modem::Modem;
 use esp_idf_svc::hal::peripherals::Peripherals;
@@ -54,6 +54,7 @@ use events::EspEvents;
 use firmware::EspFirmware;
 use logger::{EspLog, LogStatus};
 use mqtt::MqttBroker;
+use network::EspNetwork;
 use nvs_storage::NvsStorage;
 use pins::Inputs;
 use radio::EspRadio;
@@ -69,6 +70,7 @@ struct EspConnectors {
     broker: MqttBroker,
     clock: EspClock,
     radio: EspRadio,
+    network: EspNetwork,
     download: EspDownload,
     strike: Box<dyn Strike>,
     door_sensor: Box<dyn DoorSensor>,
@@ -98,6 +100,10 @@ impl Connectors for EspConnectors {
 
     fn radio(&self) -> &dyn Radio {
         &self.radio
+    }
+
+    fn network(&self) -> &dyn Network {
+        &self.network
     }
 
     fn firmware(&self) -> &dyn Firmware {
@@ -164,26 +170,30 @@ fn door(
 }
 
 /// Builds the connectors around the already locked `strike`, with the
-/// Wi-Fi station, the broker's clients, each download, and the door's
-/// `inputs` running on threads of their own.
+/// broker's clients, each download, and the door's `inputs` running on
+/// threads of their own. The Wi-Fi network starts on a thread of its own
+/// once the application tells it the settings of the configuration this
+/// start runs.
 fn connectors(modem: Modem, inputs: Inputs, strike: GpioStrike) -> EspConnectors {
     let partition = EspDefaultNvsPartition::take().expect("the default NVS partition");
     let storage = storage(&partition);
     let clock = EspClock::default();
-    let network = network::start(modem, partition.clone(), clock.time_sync())
-        .expect("starting the Wi-Fi network");
+    let network = EspNetwork::new(modem, partition.clone(), clock.time_sync());
     let events = EspEvents::default();
     let download_storage = NvsStorage::open(partition, storage_keys::NAMESPACE)
         .expect("opening the application's NVS namespace");
     let (strike, door_sensor) = door(inputs, strike, &events);
     EspConnectors {
         storage,
-        broker: MqttBroker::start(events.sender(), network.link).expect("starting the MQTT thread"),
+        broker: MqttBroker::start(events.sender(), network.link())
+            .expect("starting the MQTT thread"),
         download: EspDownload::new(events.sender(), download_storage),
         door_sensor,
         events,
         clock,
-        radio: EspRadio::new(network.position, network.counts).expect("reading the station MAC"),
+        radio: EspRadio::new(network.placement(), network.counts())
+            .expect("reading the station MAC"),
+        network,
         strike,
         firmware: EspFirmware::new(),
     }
