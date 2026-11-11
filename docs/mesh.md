@@ -51,9 +51,9 @@ With the mesh on:
 - **Roaming.** A root whose signal has been below `wifi_roam_rssi` for
   five readings in a row, a second apart, scans at most once a minute; when
   an access point of the same SSID is at least 8 dB stronger than the
-  average of those readings, it leaves and joins again, picking the strongest access point,
-  or a neighbouring door if none is strong enough. Doors hopping through it
-  find their way back on their own.
+  average of those readings, it leaves and joins again, picking the
+  strongest access point, or a neighbouring door if none is strong enough.
+  Doors hopping through it find their way back on their own.
 
 Mesh-Lite recovers on its own when a parent door goes away: the doors below
 it look for another parent or, if their access point is strong enough
