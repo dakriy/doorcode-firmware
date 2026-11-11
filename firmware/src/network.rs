@@ -13,7 +13,7 @@
 //!
 //! `wifi_11b_disabled` keeps the station off the 802.11b rates. ESP-IDF
 //! takes it only while Wi-Fi is stopped, so each station applies it before
-//! starting Wi-Fi, and applies a change the way its `start` says.
+//! starting Wi-Fi; `station.rs` and `mesh.rs` say how each applies a change.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -313,8 +313,8 @@ impl Context {
 }
 
 /// Restarts the device to apply a setting the network takes only at start.
-pub(crate) fn restart(changed: &str) {
+pub(crate) fn restart(changed: &str) -> ! {
     log::warn!("{changed}; restarting to apply it");
     // SAFETY: takes no arguments and does not return.
-    unsafe { sys::esp_restart() };
+    unsafe { sys::esp_restart() }
 }

@@ -76,15 +76,22 @@ impl Station {
 
     /// Starts the driver as a station and nothing else. Without a client
     /// configuration first, the driver comes up as an access point with a
-    /// DHCP server, and a station scan fails. The 802.11b rates go off
-    /// before the driver runs, when the switch says so, and power save once
-    /// it runs.
+    /// DHCP server, and a station scan fails.
     fn start(&mut self) -> Result<(), EspError> {
         self.wifi
             .set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
-        if self.context.disable_11b {
-            set_11b_disabled(true)?;
+        self.start_driver(self.context.disable_11b)
+    }
+
+    /// Sets the 802.11b rates and starts the stopped driver, then turns
+    /// power save off. ESP-IDF asks for the rates to be set only to turn
+    /// them off, or back on after that, so while they are on and were on
+    /// they are left alone.
+    fn start_driver(&mut self, disable_11b: bool) -> Result<(), EspError> {
+        if disable_11b || self.context.disable_11b {
+            set_11b_disabled(disable_11b)?;
         }
+        self.context.disable_11b = disable_11b;
         self.wifi.start()?;
         power_save_off()
     }
@@ -107,10 +114,7 @@ impl Station {
         self.tried = None;
         self.joined = None;
         self.wifi.stop()?;
-        set_11b_disabled(disable_11b)?;
-        self.context.disable_11b = disable_11b;
-        self.wifi.start()?;
-        power_save_off()
+        self.start_driver(disable_11b)
     }
 
     /// Looks at the link once, and returns how long to wait before the next
