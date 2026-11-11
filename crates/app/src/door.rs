@@ -665,7 +665,7 @@ impl Door {
     /// instead when it does, or when the configuration running is on trial
     /// and not kept yet: the stored configuration never holds connection
     /// settings the door has not been online with. Ignores the
-    /// configuration last given up.
+    /// configuration last given up, and the one on trial arriving again.
     fn receive_config(self, device: &Device<'_>, payload: &[u8]) -> Result<Door, RunError> {
         let config = match Config::decode(payload) {
             Ok(config) => config,
@@ -675,6 +675,13 @@ impl Door {
             }
         };
         let digest = trial::digest(payload);
+        if self.trial.is_some() && digest == self.config_digest {
+            device.log(
+                Level::Debug,
+                &format!("config {digest} on trial arrived again"),
+            );
+            return Ok(self);
+        }
         if trial::given_up(device, &digest)? {
             return Ok(self);
         }

@@ -33,8 +33,10 @@ pub(crate) const CONFIG: &str = "config";
 /// tried by the next start, which takes it up.
 pub(crate) const CONFIG_TRY: &str = "config_try";
 /// The digest of the configuration last tried and not kept: ignored when
-/// it is sent again, and said once the door is online without it.
+/// it is sent again, and said once the door is online without it. Once
+/// said, the digest is followed by `SAID`.
 pub(crate) const CONFIG_TRIED: &str = "config_tried";
+const SAID: &str = " said";
 pub(crate) const TIMELINE: &str = "timeline";
 
 pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunError> {
@@ -141,6 +143,42 @@ pub(crate) fn remove(storage: &dyn Storage, keys: &[&str]) -> Result<(), RunErro
         storage.remove(key).map_err(RunError::Storage)?;
     }
     Ok(())
+}
+
+/// The configuration last tried and not kept.
+pub(crate) struct Tried {
+    pub(crate) digest: String,
+    /// Whether the door has said it gave the configuration up.
+    pub(crate) said: bool,
+}
+
+/// The configuration last tried and not kept, if any.
+pub(crate) fn tried(storage: &dyn Storage) -> Result<Option<Tried>, RunError> {
+    let Some(value) = text(storage, CONFIG_TRIED)? else {
+        return Ok(None);
+    };
+    let tried = match value.strip_suffix(SAID) {
+        Some(digest) => Tried {
+            digest: digest.to_owned(),
+            said: true,
+        },
+        None => Tried {
+            digest: value,
+            said: false,
+        },
+    };
+    Ok(Some(tried))
+}
+
+/// Remembers the configuration with `digest` as the one tried, not said yet.
+pub(crate) fn store_tried(storage: &dyn Storage, digest: &str) -> Result<(), RunError> {
+    store(storage, CONFIG_TRIED, digest)
+}
+
+/// Remembers that the door has said it gave up the configuration with
+/// `digest`, which stays the one tried.
+pub(crate) fn store_said(storage: &dyn Storage, digest: &str) -> Result<(), RunError> {
+    store(storage, CONFIG_TRIED, &format!("{digest}{SAID}"))
 }
 
 /// The command id and version of the update under way, when one is.

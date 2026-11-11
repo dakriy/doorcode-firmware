@@ -390,13 +390,17 @@ fn a_config_to_try_already_taken_up_by_a_start_cut_short_is_not_tried_again() {
         (
             good(),
             vec![MOVED_DIGEST.to_owned()],
-            (Some(good().encode()), None, Some(MOVED_DIGEST.to_owned()))
+            (
+                Some(good().encode()),
+                None,
+                Some(format!("{MOVED_DIGEST} said"))
+            )
         )
     );
 }
 
 #[test]
-fn a_config_to_try_that_does_not_decode_is_dropped_for_the_stored_config() {
+fn a_config_to_try_that_does_not_decode_is_dropped_for_the_stored_config_untried() {
     let connectors = StubConnectors {
         storage: StubStorage::enrolled()
             .with_config(&good())
@@ -418,11 +422,7 @@ fn a_config_to_try_that_does_not_decode_is_dropped_for_the_stored_config() {
                 "config 60f4cc8d340bf3bd to try does not decode: Malformed(\"unexpected type string at position 0: expected map\")"
                     .to_owned()
             ],
-            (
-                Some(good().encode()),
-                None,
-                Some("60f4cc8d340bf3bd".to_owned())
-            )
+            (Some(good().encode()), None, None)
         )
     );
 }
@@ -537,6 +537,28 @@ fn another_config_arriving_during_the_trial_is_tried_next_leaving_the_stored_one
 }
 
 #[test]
+fn the_config_on_trial_arriving_again_before_it_is_kept_leaves_the_trial_running() {
+    let connectors = on_trial_not_kept([(10, config_message(moved())), (60_001, Event::Stop)]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            report.config.broker_host,
+            connectors.log.lines_at(Level::Error),
+            trial_state(&connectors)
+        ),
+        (
+            "broker2.example.org".to_owned(),
+            vec![format!(
+                "not online in time on config {MOVED_DIGEST}; restarting with the previous config"
+            )],
+            (Some(good().encode()), None, Some(MOVED_DIGEST.to_owned()))
+        )
+    );
+}
+
+#[test]
 fn a_config_changing_only_other_settings_during_the_trial_is_tried_too() {
     let trying = on_trial_not_kept([(10, config_message(moved_with_longer_pulse()))]);
     app::run(&trying).unwrap();
@@ -595,14 +617,54 @@ fn back_online_after_a_revert_the_door_says_so_once_however_often_it_reconnects(
 }
 
 #[test]
-fn every_start_says_it_went_back_until_another_config_arrives() {
+fn the_door_says_it_went_back_in_the_first_start_online_after_the_revert_only() {
     let said = reverted([(0, Event::Connected)]);
     app::run(&said).unwrap();
     let connectors = restarted(said, [(0, Event::Connected)]);
 
     app::run(&connectors).unwrap();
 
+    assert_eq!(
+        (reverted_digests(&connectors), trial_state(&connectors)),
+        (
+            vec![],
+            (
+                Some(good().encode()),
+                None,
+                Some(format!("{MOVED_DIGEST} said"))
+            )
+        )
+    );
+}
+
+#[test]
+fn a_start_that_did_not_come_online_after_the_revert_leaves_it_to_say() {
+    let offline = reverted([(10_000, Event::Stop)]);
+    app::run(&offline).unwrap();
+    let connectors = restarted(offline, [(0, Event::Connected)]);
+
+    app::run(&connectors).unwrap();
+
     assert_eq!(reverted_digests(&connectors), vec![MOVED_DIGEST.to_owned()]);
+}
+
+#[test]
+fn the_config_given_up_is_still_ignored_in_starts_after_the_door_said_so() {
+    let said = reverted([(0, Event::Connected)]);
+    app::run(&said).unwrap();
+    let connectors = restarted(said, [(0, Event::Connected), (10, config_message(moved()))]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (report.config, connectors.log.lines_at(Level::Warn)),
+        (
+            good(),
+            vec![format!(
+                "ignored config {MOVED_DIGEST}: it was given up for not coming online"
+            )]
+        )
+    );
 }
 
 #[test]
@@ -638,7 +700,7 @@ fn another_config_after_a_revert_is_tried() {
             (
                 Some(good().encode()),
                 Some(moved_elsewhere()),
-                Some(MOVED_DIGEST.to_owned())
+                Some(format!("{MOVED_DIGEST} said"))
             )
         )
     );

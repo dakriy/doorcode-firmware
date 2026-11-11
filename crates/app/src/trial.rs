@@ -8,10 +8,10 @@
 //!
 //! The digest of the configuration tried stays stored until the door comes
 //! online with it or another configuration arrives, so that a door back on
-//! its previous configuration says it gave that one up, and ignores it when
-//! it is sent again.
+//! its previous configuration says once that it gave that one up, and
+//! ignores it when it is sent again.
 
-use connectors::{BrokerAddress, Level, Storage};
+use connectors::{BrokerAddress, Level};
 use protocol::Config;
 use sha2::{Digest, Sha256};
 
@@ -68,8 +68,8 @@ pub(crate) struct Running {
     pub(crate) digest: String,
     /// The trial it is on, when this start is trying it.
     pub(crate) trial: Option<Trial>,
-    /// The digest of the configuration last tried and given up, to say
-    /// once this start is online.
+    /// The digest of the configuration last tried and given up, while the
+    /// door has not said so, to say once this start is online.
     pub(crate) given_up: Option<String>,
 }
 
@@ -91,19 +91,8 @@ impl Trial {
 /// otherwise the door's configuration.
 pub(crate) fn boot(device: &Device<'_>) -> Result<Running, RunError> {
     let settled = stored_running(device)?;
-    let storage = device.connectors.storage();
-    let Some((payload, digest)) = take(storage, settled.given_up.as_deref())? else {
+    let Some((config, payload, digest)) = take(device)? else {
         return Ok(settled);
-    };
-    let config = match Config::decode(&payload) {
-        Ok(config) => config,
-        Err(error) => {
-            device.log(
-                Level::Warn,
-                &format!("config {digest} to try does not decode: {error:?}"),
-            );
-            return Ok(settled);
-        }
     };
     device.log(
         Level::Info,
@@ -122,42 +111,59 @@ pub(crate) fn boot(device: &Device<'_>) -> Result<Running, RunError> {
 }
 
 /// The door's configuration as stored, with the digest of the one last
-/// given up.
+/// given up while the door has not said so.
 pub(crate) fn stored_running(device: &Device<'_>) -> Result<Running, RunError> {
     let (config, bytes) = restored(device, CONFIG, Config::decode)?;
+    let tried = stored::tried(device.connectors.storage())?;
     Ok(Running {
         config,
         digest: bytes.map_or(String::new(), |bytes| digest(&bytes)),
         trial: None,
-        given_up: stored::text(device.connectors.storage(), CONFIG_TRIED)?,
+        given_up: tried.filter(|tried| !tried.said).map(|tried| tried.digest),
     })
 }
 
-/// Takes up the configuration stored to try, with its digest. Storing its
-/// digest as the one tried makes it unusable for any later start; it is
-/// removed after. One whose digest is already the one `tried` was taken up
-/// by a start cut short between the two, and is only removed.
-fn take(storage: &dyn Storage, tried: Option<&str>) -> Result<Option<(Vec<u8>, String)>, RunError> {
+/// Takes up the configuration stored to try, with its message and digest.
+/// Storing its digest as the one tried makes it unusable for any later
+/// start; it is removed after. One that is not `usable` is only removed.
+fn take(device: &Device<'_>) -> Result<Option<(Config, Vec<u8>, String)>, RunError> {
+    let storage = device.connectors.storage();
     let Some(payload) = stored::bytes(storage, CONFIG_TRY)? else {
         return Ok(None);
     };
     let digest = digest(&payload);
-    let taken = tried == Some(digest.as_str());
-    if !taken {
-        stored::store(storage, CONFIG_TRIED, &digest)?;
+    let config = usable(device, &payload, &digest)?;
+    if config.is_some() {
+        stored::store_tried(storage, &digest)?;
     }
     stored::remove(storage, &[CONFIG_TRY])?;
-    if taken {
+    Ok(config.map(|config| (config, payload, digest)))
+}
+
+/// The configuration stored to try, unless a start cut short already took
+/// it up, which left its `digest` as the one tried, or it does not decode.
+fn usable(device: &Device<'_>, payload: &[u8], digest: &str) -> Result<Option<Config>, RunError> {
+    let tried = stored::tried(device.connectors.storage())?;
+    if tried.is_some_and(|tried| tried.digest == digest) {
         return Ok(None);
     }
-    Ok(Some((payload, digest)))
+    match Config::decode(payload) {
+        Ok(config) => Ok(Some(config)),
+        Err(error) => {
+            device.log(
+                Level::Warn,
+                &format!("config {digest} to try does not decode: {error:?}"),
+            );
+            Ok(None)
+        }
+    }
 }
 
 /// Whether the configuration with `digest` is the one last tried and not
 /// kept, which is then ignored.
 pub(crate) fn given_up(device: &Device<'_>, digest: &str) -> Result<bool, RunError> {
-    let tried = stored::text(device.connectors.storage(), CONFIG_TRIED)?;
-    if tried.as_deref() != Some(digest) {
+    let tried = stored::tried(device.connectors.storage())?;
+    if !tried.is_some_and(|tried| tried.digest == digest) {
         return Ok(false);
     }
     device.log(
@@ -201,10 +207,11 @@ pub(crate) fn revert(device: &Device<'_>, digest: &str, why: &str) {
 }
 
 /// Now that door `door_id` has come online: keeps the configuration on
-/// `trial`, if any, with the `broker` it moved to, and says so when this
-/// start went back from one `given_up`. The digest tried is forgotten
+/// `trial`, if any, with the `broker` it moved to, or says once that the
+/// door went back from one `given_up`. The digest tried is forgotten
 /// first, so a restart that cuts this short leaves the door on its
-/// previous configuration with nothing given up.
+/// previous configuration with nothing given up. It is marked said after
+/// saying it, so a restart between the two says it again.
 pub(crate) fn online(
     device: &Device<'_>,
     door_id: u64,
@@ -220,7 +227,12 @@ pub(crate) fn online(
         device.log(Level::Info, "online on the new config; it is kept");
     }
     if let Some(given_up) = given_up {
-        send_door_event(device, door_id, &telemetry::config_reverted(given_up));
+        send_door_event(
+            device,
+            door_id,
+            &telemetry::config_reverted(given_up.clone()),
+        );
+        stored::store_said(storage, &given_up)?;
     }
     Ok(())
 }

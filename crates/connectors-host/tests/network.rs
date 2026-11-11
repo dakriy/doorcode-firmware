@@ -1,8 +1,7 @@
-//! Connector suite for the network, against the host implementation and
-//! the stub.
+//! Connector suite for the network stub. The host network does nothing,
+//! since the host runs no Wi-Fi, so it has nothing to test.
 
 use connectors::{Network, NetworkSettings, WifiCredentials};
-use connectors_host::HostNetwork;
 use pretty_assertions::assert_eq;
 use testkit::StubNetwork;
 
@@ -15,16 +14,6 @@ fn lobby(roam_rssi: i32) -> NetworkSettings {
         roam_rssi,
         ..NetworkSettings::default()
     }
-}
-
-#[test]
-fn the_host_network_takes_any_settings_since_the_host_runs_no_wifi() {
-    let network = HostNetwork;
-
-    network.configure(&lobby(-70));
-    network.configure(&lobby(-65));
-
-    assert_eq!(format!("{network:?}"), "HostNetwork");
 }
 
 #[test]

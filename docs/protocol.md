@@ -147,10 +147,13 @@ outside the list above. A trial never stores it there. Instead:
 A configuration that arrives while the one on trial is not kept yet is
 tried in turn, whatever it changes: the door stores it as the one to try
 and restarts, and the stored configuration stays the one it goes back to.
+The configuration on trial arriving again is the exception: it changes
+nothing, and the trial goes on.
 
 Back on its stored configuration after giving one up, the door says
-`config_reverted` (Door events) each time it starts and comes online, for
-as long as it remembers the digest tried. The server's configuration stays
+`config_reverted` (Door events) the first time it comes online, once, and
+remembers that it did; only a restart between saying it and remembering
+makes it say it again. The server's configuration stays
 retained on the broker, so the door receives the configuration it gave up
 again: whenever a configuration with the digest tried arrives, the door
 logs and ignores it. Any other configuration is taken as usual, whether
@@ -246,8 +249,8 @@ It publishes `config_reverted` on the same topic once it is online again
 after giving up a configuration on trial (Trying a configuration above),
 right after `started`. It carries `event` and `config_digest`, the digest
 of the configuration given up; telemetry's `config_digest` names the one
-it went back to. It is said once a start, the first time that start comes
-online, until the door receives another configuration.
+it went back to. It is said once: a door that restarts before it comes
+online says it the first time it does.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
