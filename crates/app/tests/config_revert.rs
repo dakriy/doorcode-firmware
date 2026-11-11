@@ -601,13 +601,17 @@ fn after_a_withdrawn_trial_the_door_stays_on_the_stored_config_however_long_it_i
         (
             report.config,
             first_address(&connectors),
-            reverted_digests(&connectors),
+            door_events(&connectors),
             trial_state(&connectors)
         ),
         (
             good(),
             previous_broker(),
-            vec![],
+            vec![DoorEvent {
+                event: "started".to_owned(),
+                reason: Some("power_on".to_owned()),
+                ..DoorEvent::default()
+            }],
             (Some(good().encode()), None, None)
         )
     );

@@ -70,8 +70,6 @@ skip() { echo "SKIP $1: $2"; }
 
 # --- HTTP -----------------------------------------------------------------
 
-bench_env_write_auth "$WORK/auth" "$TOKEN"
-
 # api METHOD PATH [JSON]: calls the server's API. The answer is in
 # $WORK/answer and its status in $STATUS.
 STATUS=""
@@ -145,6 +143,8 @@ remove() {
 }
 
 cleanup() {
+    # A second interrupt while tidying still removes the token's header file.
+    trap 'rm -rf "$WORK"; exit 130' INT TERM
     stop_host
     if $KEEP; then
         echo "kept: door ${DOOR_ID:-none}, user ${USER_ID:-none}, zone ${ZONE_ID:-none}," \
@@ -164,6 +164,9 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+
+# Written once the traps are set, so that every exit removes it.
+bench_env_write_auth "$WORK/auth" "$TOKEN"
 
 # abort STEP REASON: a step everything after it needs failed.
 abort() {

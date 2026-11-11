@@ -120,8 +120,6 @@ skip() { echo "SKIP $1: $2"; }
 
 # --- HTTP -----------------------------------------------------------------
 
-bench_env_write_auth "$WORK/auth" "$DOORCODE_TOKEN"
-
 # api METHOD PATH [JSON]: calls the server's API. The answer is in
 # $WORK/answer and its status in $STATUS.
 STATUS=""
@@ -228,6 +226,8 @@ stop_watch() {
 }
 
 cleanup() {
+    # A second interrupt while tidying still removes the token's header file.
+    trap 'rm -rf "$WORK"; exit 130' INT TERM
     stop_watch
     if $CHANGED && ! set_overrides "$OVERRIDES_BEFORE"; then
         echo "cleanup: putting door $DOOR_ID's overrides back to $OVERRIDES_BEFORE $(reason)" >&2
@@ -236,6 +236,9 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+
+# Written once the traps are set, so that every exit removes it.
+bench_env_write_auth "$WORK/auth" "$DOORCODE_TOKEN"
 
 # abort STEP REASON: a step everything after it needs failed.
 abort() {

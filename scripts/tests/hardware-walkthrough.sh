@@ -147,8 +147,6 @@ saw() {
 
 # --- HTTP -----------------------------------------------------------------
 
-bench_env_write_auth "$WORK/auth" "$DOORCODE_TOKEN"
-
 # api METHOD PATH [JSON]: calls the server's API. The answer is in
 # $WORK/answer and its status in $STATUS.
 STATUS=""
@@ -381,6 +379,8 @@ remove() {
 }
 
 cleanup() {
+    # A second interrupt while tidying still removes the token's header file.
+    trap 'rm -rf "$WORK"; exit 130' INT TERM
     end_our_overrides || echo "cleanup: ending the run's overrides on door $DOOR_ID $(reason)" >&2
     restore_overrides || echo "cleanup: putting door $DOOR_ID's overrides back to $OVERRIDES_BEFORE $(reason)" >&2
     if $KEEP; then
@@ -399,6 +399,9 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+
+# Written once the traps are set, so that every exit removes it.
+bench_env_write_auth "$WORK/auth" "$DOORCODE_TOKEN"
 
 # abort STEP REASON: a step everything after it needs failed.
 abort() {
