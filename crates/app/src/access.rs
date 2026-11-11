@@ -45,34 +45,37 @@ impl Gate {
     }
 
     /// Forgets an idle entry, stops waiting for a late reply, and locks
-    /// the strike, each once its time is up.
-    pub(crate) fn expire(&mut self, device: &Device<'_>, config: &Config) {
+    /// the strike, each once its time is up. Returns whether a check went
+    /// without its reply.
+    pub(crate) fn expire(&mut self, device: &Device<'_>, config: &Config) -> bool {
         if device.is_due(self.entry.clear_at(config)) {
             self.entry.clear();
         }
-        if device.is_due(self.check.as_ref().map(|check| check.deadline)) {
+        let lost = device.is_due(self.check.as_ref().map(|check| check.deadline));
+        if lost {
             device.log(Level::Info, "no reply to the check in time; denied");
             self.check = None;
         }
         if device.is_due(self.latch.relock_at()) {
             self.latch.lock(device);
         }
+        lost
     }
 
     /// Inside an open span any key releases the strike; otherwise the key
     /// goes to the entry, and a submitted entry is checked while online
-    /// and denied offline.
-    pub(crate) fn press(&mut self, device: &Device<'_>, key: char, door: &Situation<'_>) {
+    /// and denied offline. Returns whether a check was sent.
+    pub(crate) fn press(&mut self, device: &Device<'_>, key: char, door: &Situation<'_>) -> bool {
         if door.mode == Mode::Open {
             self.latch.release(device, door.config.strike_pulse_ms);
-            return;
+            return false;
         }
         let Some(digits) = self.entry.press(key, device.now_ms(), door.config) else {
-            return;
+            return false;
         };
         if !door.online {
             device.log(Level::Info, "an entry was denied: not connected");
-            return;
+            return false;
         }
         let timeout = door.config.reply_timeout_ms;
         let check = check::send(device, door.door_id, digits, timeout);
@@ -82,7 +85,9 @@ impl Gate {
                 digits: sent.check.digits.clone(),
             });
         }
+        let sent = check.is_some();
         self.check = check;
+        sent
     }
 
     /// Releases the strike for the reply to the outstanding check when it

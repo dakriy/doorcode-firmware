@@ -561,6 +561,8 @@ fn reconnects_count_on_after_the_door_is_revoked_and_enrolls_again() {
             opens: 0,
             reconnects: 2,
             latency_ms: 0,
+            checks_sent: 0,
+            checks_lost: 0,
         }
     );
 }

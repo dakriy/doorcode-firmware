@@ -312,6 +312,10 @@ pub struct Telemetry {
     pub mesh_parent: String,
     /// Doors hopping through this one.
     pub mesh_children: u64,
+    /// Code checks sent to the server since the last report.
+    pub checks_sent: u64,
+    /// Checks since the last report whose reply did not come in time.
+    pub checks_lost: u64,
 }
 
 message! {
@@ -327,6 +331,8 @@ message! {
         mesh_layer: always,
         mesh_parent: always,
         mesh_children: always,
+        checks_sent: always,
+        checks_lost: always,
     }
 }
 

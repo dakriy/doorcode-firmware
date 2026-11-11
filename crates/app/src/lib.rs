@@ -72,6 +72,10 @@ pub struct Counters {
     pub reconnects: u64,
     /// The round trip of the last check that was answered; 0 until one is.
     pub latency_ms: u64,
+    /// Checks sent since the last report.
+    pub checks_sent: u64,
+    /// Checks since the last report whose reply did not come in time.
+    pub checks_lost: u64,
 }
 
 /// Whether the strike holds the door.

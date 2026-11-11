@@ -81,6 +81,8 @@ fn quiet_report(uptime_s: u64) -> Telemetry {
         mesh_layer: 0,
         mesh_parent: String::new(),
         mesh_children: 0,
+        checks_sent: 0,
+        checks_lost: 0,
     }
 }
 
@@ -153,6 +155,33 @@ fn open_for(strike_ms: u64) -> Event {
     command_for(7, &command)
 }
 
+/// The checks sent and lost that each report counted, in order.
+fn checks_counted(connectors: &StubConnectors) -> Vec<(u64, u64)> {
+    reports(connectors)
+        .iter()
+        .map(|report| (report.checks_sent, report.checks_lost))
+        .collect()
+}
+
+/// The server allowing the request the stub random bytes name.
+fn allowed() -> Event {
+    let reply = Reply {
+        request_id: "0000000000000000".to_owned(),
+        allow: true,
+        strike_ms: 0,
+    };
+    reply_for(7, &reply)
+}
+
+/// The server waiting at most `reply_timeout_ms` for each reply.
+fn replies_within(reply_timeout_ms: u64) -> Event {
+    let config = Config {
+        reply_timeout_ms,
+        ..Config::default()
+    };
+    config_for(7, &config)
+}
+
 fn reporting_every(telemetry_interval_s: u64) -> Event {
     let config = Config {
         telemetry_interval_s,
@@ -202,7 +231,7 @@ fn the_report_is_encoded_with_the_contract_field_names() {
     assert_eq!(
         connectors.broker.published_payloads().last(),
         Some(&hex(concat!(
-            "ac",
+            "ae",
             "617601",
             "656f70656e7300",
             "667369676e616c383c",
@@ -212,6 +241,8 @@ fn the_report_is_encoded_with_the_contract_field_names() {
             "6a6c6174656e63795f6d7300",
             "6a6d6573685f6c6179657200",
             "6a7265636f6e6e6563747300",
+            "6b636865636b735f6c6f737400",
+            "6b636865636b735f73656e7400",
             "6b6d6573685f706172656e7460",
             "6d6d6573685f6368696c6472656e00",
             "706669726d776172655f76657273696f6e65322e302e30"
@@ -338,6 +369,87 @@ fn opens_counts_the_door_opening_since_the_last_report_and_starts_over() {
             report.counters.opens
         ),
         (vec![2, 1], 0)
+    );
+}
+
+#[test]
+fn a_check_answered_in_time_is_counted_sent_and_not_lost() {
+    let mut events = typed(200, "1234#");
+    events.push((300, allowed()));
+    let connectors = online_until(1001, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(checks_counted(&connectors), vec![(1, 0)]);
+}
+
+#[test]
+fn a_check_with_no_reply_in_time_is_counted_lost() {
+    let mut events = vec![(0, replies_within(500))];
+    events.extend(typed(200, "1234#"));
+    let connectors = online_until(1001, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(checks_counted(&connectors), vec![(1, 1)]);
+}
+
+#[test]
+fn a_check_replaced_by_a_newer_entry_before_its_deadline_is_not_lost() {
+    let mut events = vec![(0, replies_within(500))];
+    events.extend(typed(200, "1234#"));
+    events.extend(typed(400, "5678#"));
+    events.push((450, allowed()));
+    let connectors = online_until(1001, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(checks_counted(&connectors), vec![(2, 0)]);
+}
+
+#[test]
+fn a_check_the_broker_does_not_take_is_not_counted_sent() {
+    let connectors = StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/check", "queue full"),
+        ..online_until(1001, typed(200, "1234#"))
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(checks_counted(&connectors), vec![(0, 0)]);
+}
+
+#[test]
+fn checks_sent_and_lost_count_from_zero_after_each_report() {
+    // Sent at 200 and reported at 1000, the check is lost at 3200.
+    let connectors = online_until(61_001, typed(200, "1234#"));
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            checks_counted(&connectors),
+            report.counters.checks_sent,
+            report.counters.checks_lost
+        ),
+        (vec![(1, 0), (0, 1)], 0, 0)
+    );
+}
+
+#[test]
+fn a_report_the_broker_does_not_take_keeps_its_checks() {
+    let mut events = vec![(0, replies_within(500))];
+    events.extend(typed(200, "1234#"));
+    let connectors = StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/telemetry", "queue full"),
+        ..online_until(1001, events)
+    };
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (report.counters.checks_sent, report.counters.checks_lost),
+        (1, 1)
     );
 }
 
@@ -678,6 +790,8 @@ fn nothing_from_while_disconnected_is_sent_later_and_the_reconnect_is_counted() 
                 opens: 0,
                 reconnects: 1,
                 latency_ms: 0,
+                checks_sent: 0,
+                checks_lost: 0,
             }
         )
     );

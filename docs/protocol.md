@@ -98,7 +98,9 @@ and to limit its checks.
 
 Published on `doorcode/doors/<id>/telemetry` every `telemetry_interval_s`
 while connected, the first about a second after the door comes online.
-Every field is always sent. Nothing is kept to send later.
+Every field is always sent. Nothing is kept to send later. Counts since the
+last report start from zero once a report is sent; the first report counts
+since the door started.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -113,6 +115,8 @@ Every field is always sent. Nothing is kept to send later.
 | `mesh_layer` | uint | Hops to the access point: 0 when joined to it directly, and without the mesh. |
 | `mesh_parent` | text | The hardware id of the door this one hops through, 12 lowercase hex digits; empty when joined to the access point directly. |
 | `mesh_children` | uint | Doors joined to this door's soft-AP; 0 without the mesh. |
+| `checks_sent` | uint | Code checks sent to the server since the last report. |
+| `checks_lost` | uint | Checks since the last report whose reply did not come within `reply_timeout_ms`. A check replaced by a newer entry before then is not lost. |
 
 ## Door events
 

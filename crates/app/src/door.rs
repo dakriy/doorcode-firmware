@@ -248,7 +248,9 @@ impl Door {
     /// reboot has waited long enough or a new image has not come online in
     /// time, and tries new credentials again.
     fn when_due(mut self, device: &Device<'_>) -> Door {
-        self.gate.expire(device, &self.config);
+        if self.gate.expire(device, &self.config) {
+            self.tally.check_lost();
+        }
         if device.is_due(self.link.report_at()) {
             self.report_telemetry(device);
         }
@@ -328,7 +330,9 @@ impl Door {
             mode: self.mode(device),
             online: self.is_online(),
         };
-        self.gate.press(device, key, &situation);
+        if self.gate.press(device, key, &situation) {
+            self.tally.check_sent();
+        }
     }
 
     /// Locks the strike when the door opens, counts the opening, and says

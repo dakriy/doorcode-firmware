@@ -25,6 +25,10 @@ pub(crate) struct Tally {
     since_start: SinceStart,
     /// Times the door opened since the last report.
     opens: u64,
+    /// Checks sent since the last report.
+    checks_sent: u64,
+    /// Checks since the last report whose reply did not come in time.
+    checks_lost: u64,
 }
 
 impl Tally {
@@ -34,6 +38,8 @@ impl Tally {
         Tally {
             since_start,
             opens: 0,
+            checks_sent: 0,
+            checks_lost: 0,
         }
     }
 
@@ -63,15 +69,26 @@ impl Tally {
         }
     }
 
+    pub(crate) fn check_sent(&mut self) {
+        self.checks_sent += 1;
+    }
+
+    pub(crate) fn check_lost(&mut self) {
+        self.checks_lost += 1;
+    }
+
     pub(crate) fn counters(&self, latency_ms: u64) -> Counters {
         Counters {
             opens: self.opens,
             reconnects: self.since_start.connections.saturating_sub(1),
             latency_ms,
+            checks_sent: self.checks_sent,
+            checks_lost: self.checks_lost,
         }
     }
 
-    /// Publishes a report; the opens count from zero again once it is sent.
+    /// Publishes a report; the opens and checks count from zero again once
+    /// it is sent.
     pub(crate) fn report(&mut self, device: &Device<'_>, door_id: u64, latency_ms: u64) {
         let counters = self.counters(latency_ms);
         let mesh = device.connectors.radio().mesh();
@@ -87,9 +104,15 @@ impl Tally {
             mesh_layer: mesh.layer.into(),
             mesh_parent: mesh.parent,
             mesh_children: mesh.children.into(),
+            checks_sent: counters.checks_sent,
+            checks_lost: counters.checks_lost,
         };
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
-            Ok(_) => self.opens = 0,
+            Ok(_) => {
+                self.opens = 0;
+                self.checks_sent = 0;
+                self.checks_lost = 0;
+            }
             Err(error) => device.log(Level::Warn, &format!("telemetry was not sent: {error}")),
         }
     }
