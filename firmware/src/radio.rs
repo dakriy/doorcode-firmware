@@ -1,6 +1,6 @@
 //! Facts about the device: the Wi-Fi signal, the free heap, the station
 //! MAC as the hardware id, where the door sits in the mesh, and what the
-//! station counted of its link.
+//! station counted of its link, and lwIP's TCP counters.
 
 use connectors::{AccessPoint, Mesh, Radio, TcpCounters, WifiLink};
 use esp_idf_svc::sys::{self, EspError};
@@ -63,7 +63,17 @@ impl Radio for EspRadio {
     }
 
     fn tcp_counters(&self) -> Option<TcpCounters> {
-        None
+        let stats = core::ptr::addr_of!(sys::lwip_stats);
+        // SAFETY: `lwip_stats` lives for the program, and lwIP's task only
+        // ever adds to these counters, each a single aligned word that a
+        // read sees whole, before or after an increment.
+        unsafe {
+            Some(TcpCounters {
+                segments_sent: core::ptr::addr_of!((*stats).mib2.tcpoutsegs).read_volatile(),
+                retransmits: core::ptr::addr_of!((*stats).mib2.tcpretranssegs).read_volatile(),
+                drops: u32::from(core::ptr::addr_of!((*stats).tcp.drop).read_volatile()),
+            })
+        }
     }
 
     fn wifi_link(&self) -> WifiLink {

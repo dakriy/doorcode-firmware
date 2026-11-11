@@ -33,6 +33,18 @@ generated from `src/mesh_lite.h`. The IoT bridge patches lwIP's DHCP server
 and NAT in the ESP-IDF checkout itself (in the `esp-rs-espressif` volume)
 when it is configured, so that checkout is no longer pristine afterwards.
 
+lwIP's statistics are on (`CONFIG_LWIP_STATS` in `sdkconfig.defaults`),
+and `components/lwip_mib2`, an extra component listed the same way, adds
+its SNMP MIB2 counters, which ESP-IDF's configuration has no option for:
+it defines `MIB2_STATS=1` publicly on the lwip library, so lwIP, every
+component using it, and the Rust bindings all see the same
+`struct stats_`. Its header joins the bindings and stops them generating
+unless they see `MIB2_STATS`. esp-idf-sys does not watch the component's
+`CMakeLists.txt`, so after changing it touch `sdkconfig.defaults` to
+rebuild ESP-IDF; and a build cache whose generated `sdkconfig` predates
+`CONFIG_LWIP_STATS` fails at that header until the generated file is
+deleted.
+
 Everything in this directory is connector code or production wiring. It is
 excluded from coverage and mutation and is verified by `make firmware-build`,
 `make firmware-check`, and by running on a board.
@@ -163,7 +175,11 @@ for size so an image fits.
   digits. The mesh layer is Mesh-Lite's level less one, the parent is the
   soft-AP joined less one as 12 hex digits (an ESP32's soft-AP MAC is its
   station MAC plus one) below the root, and the children are the stations
-  on the soft-AP; without the mesh they are 0, empty, and 0.
+  on the soft-AP; without the mesh they are 0, empty, and 0. The TCP
+  counters are lwIP's: segments sent is its MIB2 `tcpoutsegs` (segments
+  sent for the first time, retransmissions and bare acknowledgements
+  left out), retransmits its MIB2 `tcpretranssegs`, and drops its
+  `tcp.drop` (received segments it discarded), a 16-bit count that wraps.
 - **Watchdog.** The main task subscribes to the ESP-IDF task watchdog
   (30 seconds, panic, and a panic reboots). The event queue feeds it on
   every call of `Events::next`, and every five seconds while it waits, so

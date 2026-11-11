@@ -65,3 +65,9 @@ cognitive_complexity = "deny"
 remote_component = { name = "espressif/mesh_lite", version = "1.0.2" }
 bindings_header = "src/mesh_lite.h"
 bindings_module = "mesh_lite"
+
+# lwIP's MIB2 counters, for the TCP retransmit count: defined for lwIP and
+# for the bindings alike, which refuse to generate without them.
+[[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["components/lwip_mib2"]
+bindings_header = "components/lwip_mib2/lwip_mib2.h"

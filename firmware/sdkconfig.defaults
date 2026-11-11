@@ -45,3 +45,7 @@ CONFIG_MESH_LITE_ENABLE=y
 CONFIG_BRIDGE_EXTERNAL_NETIF_STATION=y
 CONFIG_BRIDGE_DATA_FORWARDING_NETIF_SOFTAP=y
 # CONFIG_BRIDGE_ETHERNET_NETIF_ENABLE is not set
+
+# lwIP keeps protocol statistics; telemetry reports its TCP counters.
+# components/lwip_mib2 adds the MIB2 counters, which hold retransmits.
+CONFIG_LWIP_STATS=y

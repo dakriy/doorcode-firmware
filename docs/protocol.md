@@ -120,7 +120,7 @@ it has counted since.
 | `mesh_children` | uint | Doors joined to this door's soft-AP; 0 without the mesh. |
 | `checks_sent` | uint | Code checks sent to the server since the last report. |
 | `checks_lost` | uint | Checks since the last report whose reply did not come within `reply_timeout_ms`. A check replaced by a newer entry before then is not lost. |
-| `tcp_sent` | uint | TCP segments the door's network stack sent since the last report. |
+| `tcp_sent` | uint | TCP segments the door's network stack sent for the first time since the last report: those carrying data or opening or closing a connection. Bare acknowledgements, resets, and segments sent again are not counted. |
 | `tcp_retransmits` | uint | TCP segments it sent again since the last report. |
 | `tcp_drops` | uint | TCP segments it dropped since the last report. |
 | `wifi_drops` | uint | Times the Wi-Fi station lost its access point since the last report. |
