@@ -316,6 +316,12 @@ pub struct Telemetry {
     pub checks_sent: u64,
     /// Checks since the last report whose reply did not come in time.
     pub checks_lost: u64,
+    /// TCP segments sent since the last report.
+    pub tcp_sent: u64,
+    /// TCP segments sent again since the last report.
+    pub tcp_retransmits: u64,
+    /// TCP segments dropped since the last report.
+    pub tcp_drops: u64,
 }
 
 message! {
@@ -333,6 +339,9 @@ message! {
         mesh_children: always,
         checks_sent: always,
         checks_lost: always,
+        tcp_sent: always,
+        tcp_retransmits: always,
+        tcp_drops: always,
     }
 }
 

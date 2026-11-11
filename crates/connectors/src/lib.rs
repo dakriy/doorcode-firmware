@@ -176,6 +176,18 @@ pub struct Mesh {
     pub children: u32,
 }
 
+/// What the network stack counted of TCP since it started, as it keeps the
+/// counts: each may wrap around or start again from zero.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TcpCounters {
+    /// Segments sent.
+    pub segments_sent: u32,
+    /// Segments sent again.
+    pub retransmits: u32,
+    /// Segments dropped.
+    pub drops: u32,
+}
+
 /// Facts about the device and its network link.
 pub trait Radio {
     /// Signal strength in dBm, or `None` when there is no radio link.
@@ -186,6 +198,8 @@ pub trait Radio {
     fn hardware_id(&self) -> String;
     /// Where the device sits in the mesh.
     fn mesh(&self) -> Mesh;
+    /// The network stack's TCP counters, or `None` when it keeps none.
+    fn tcp_counters(&self) -> Option<TcpCounters>;
 }
 
 /// HTTPS downloads. Calls start work; progress arrives through `Events` as

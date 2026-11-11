@@ -231,7 +231,7 @@ impl Door {
 
     pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
         let connection = self.link.connection();
-        let counters = self.tally.counters(self.gate.latency_ms());
+        let counters = self.tally.counters(device, self.gate.latency_ms());
         RunReport::new(
             device,
             Some(self.credentials),

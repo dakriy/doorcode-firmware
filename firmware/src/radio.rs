@@ -1,7 +1,7 @@
 //! Facts about the device: the Wi-Fi signal, the free heap, the station
 //! MAC as the hardware id, and where the door sits in the mesh.
 
-use connectors::{Mesh, Radio};
+use connectors::{Mesh, Radio, TcpCounters};
 use esp_idf_svc::sys::{self, EspError};
 
 /// Reads where the door sits in the mesh: `mesh::position` while Mesh-Lite
@@ -55,5 +55,9 @@ impl Radio for EspRadio {
 
     fn mesh(&self) -> Mesh {
         (self.position)()
+    }
+
+    fn tcp_counters(&self) -> Option<TcpCounters> {
+        None
     }
 }

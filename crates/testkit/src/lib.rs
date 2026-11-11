@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 
 use connectors::{
     Broker, Clock, Connectors, DoorSensor, Download, Event, Events, Firmware, Level, Log, Mesh,
-    Radio, Random, Status, StatusReport, Storage, Strike,
+    Radio, Random, Status, StatusReport, Storage, Strike, TcpCounters,
 };
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
@@ -82,6 +82,42 @@ pub struct StubRadio {
     pub free_bytes: u32,
     pub hardware_id: String,
     pub mesh: Mesh,
+    pub tcp_counters: TcpReadings,
+}
+
+/// The TCP counters a stub radio reports, one reading after another, where
+/// `None` is a reading without counters; the last repeats, and with no
+/// readings at all the radio keeps no counters.
+#[derive(Debug, Default)]
+pub struct TcpReadings {
+    queued: RefCell<VecDeque<Option<TcpCounters>>>,
+}
+
+impl TcpReadings {
+    /// Readings of `segments_sent`, `retransmits`, and `drops`, in order.
+    pub fn of(readings: impl IntoIterator<Item = Option<(u32, u32, u32)>>) -> Self {
+        let queued = readings
+            .into_iter()
+            .map(|reading| {
+                reading.map(|(segments_sent, retransmits, drops)| TcpCounters {
+                    segments_sent,
+                    retransmits,
+                    drops,
+                })
+            })
+            .collect();
+        Self {
+            queued: RefCell::new(queued),
+        }
+    }
+
+    fn next(&self) -> Option<TcpCounters> {
+        let mut queued = self.queued.borrow_mut();
+        if queued.len() > 1 {
+            return queued.pop_front().flatten();
+        }
+        queued.front().copied().flatten()
+    }
 }
 
 impl Default for StubRadio {
@@ -91,6 +127,7 @@ impl Default for StubRadio {
             free_bytes: 180_000,
             hardware_id: "a1b2c3d4e5f6".to_owned(),
             mesh: Mesh::default(),
+            tcp_counters: TcpReadings::default(),
         }
     }
 }
@@ -110,6 +147,10 @@ impl Radio for StubRadio {
 
     fn mesh(&self) -> Mesh {
         self.mesh.clone()
+    }
+
+    fn tcp_counters(&self) -> Option<TcpCounters> {
+        self.tcp_counters.next()
     }
 }
 

@@ -2,7 +2,7 @@
 //! at the configured interval, once that it started, and each time it opens
 //! or closes. Nothing is kept to send later.
 
-use connectors::{Level, StartReason};
+use connectors::{Level, StartReason, TcpCounters};
 use protocol::{DoorEvent, Telemetry};
 
 use crate::device::Device;
@@ -19,6 +19,9 @@ pub(crate) struct SinceStart {
     connections: u64,
     /// Whether the door has said that it started.
     started_said: bool,
+    /// The network stack's TCP counters as the last report sent read them;
+    /// zero before the first.
+    tcp_reported: TcpCounters,
 }
 
 /// What the door counted since the last report, all from zero again once
@@ -82,20 +85,33 @@ impl Tally {
         self.since_report.checks_lost += 1;
     }
 
-    pub(crate) fn counters(&self, latency_ms: u64) -> Counters {
+    /// What a report would count now, with the latest round trip
+    /// `latency_ms`.
+    pub(crate) fn counters(&self, device: &Device<'_>, latency_ms: u64) -> Counters {
+        self.counted(latency_ms, device.connectors.radio().tcp_counters())
+    }
+
+    /// What a report counts with the latest round trip `latency_ms` and the
+    /// TCP counters reading `tcp`.
+    fn counted(&self, latency_ms: u64, tcp: Option<TcpCounters>) -> Counters {
+        let tcp_since = tcp_since(self.since_start.tcp_reported, tcp);
         Counters {
             opens: self.since_report.opens,
             reconnects: self.since_start.connections.saturating_sub(1),
             latency_ms,
             checks_sent: self.since_report.checks_sent,
             checks_lost: self.since_report.checks_lost,
+            tcp_sent: tcp_since.segments_sent,
+            tcp_retransmits: tcp_since.retransmits,
+            tcp_drops: tcp_since.drops,
         }
     }
 
     /// Publishes a report; what was counted since the last report counts
     /// from zero again once it is sent.
     pub(crate) fn report(&mut self, device: &Device<'_>, door_id: u64, latency_ms: u64) {
-        let counters = self.counters(latency_ms);
+        let tcp = device.connectors.radio().tcp_counters();
+        let counters = self.counted(latency_ms, tcp);
         let mesh = device.connectors.radio().mesh();
         let telemetry = Telemetry {
             signal: device.signal_dbm(),
@@ -111,12 +127,51 @@ impl Tally {
             mesh_children: mesh.children.into(),
             checks_sent: counters.checks_sent,
             checks_lost: counters.checks_lost,
+            tcp_sent: counters.tcp_sent,
+            tcp_retransmits: counters.tcp_retransmits,
+            tcp_drops: counters.tcp_drops,
         };
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
-            Ok(_) => self.since_report = SinceReport::default(),
+            Ok(_) => {
+                self.since_report = SinceReport::default();
+                self.since_start.tcp_reported = tcp.unwrap_or(self.since_start.tcp_reported);
+            }
             Err(error) => device.log(Level::Warn, &format!("telemetry was not sent: {error}")),
         }
     }
+}
+
+/// What the TCP counters counted from `reported` to `now`, as counts that
+/// fit a report; all zero when the network stack keeps no counters.
+struct TcpSince {
+    segments_sent: u64,
+    retransmits: u64,
+    drops: u64,
+}
+
+fn tcp_since(reported: TcpCounters, now: Option<TcpCounters>) -> TcpSince {
+    let Some(now) = now else {
+        return TcpSince {
+            segments_sent: 0,
+            retransmits: 0,
+            drops: 0,
+        };
+    };
+    TcpSince {
+        segments_sent: count_since(reported.segments_sent, now.segments_sent),
+        retransmits: count_since(reported.retransmits, now.retransmits),
+        drops: count_since(reported.drops, now.drops),
+    }
+}
+
+/// How far a cumulative count rose from `reported` to `now`. A count below
+/// the one reported wrapped around or started again from zero, so all of it
+/// is new.
+fn count_since(reported: u32, now: u32) -> u64 {
+    if now < reported {
+        return now.into();
+    }
+    (now - reported).into()
 }
 
 /// The door saying it started, and why.

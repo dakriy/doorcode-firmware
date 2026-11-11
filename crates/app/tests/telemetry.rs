@@ -9,7 +9,7 @@ use protocol::{Command, Config, DoorEvent, Reply, Span, Telemetry, Timeline};
 use testkit::{
     command_for, config_for, door_online_status, door_started, hex, reply_for, timeline_for, typed,
     BrokerCall, Message, Sent, StubBroker, StubConnectors, StubDoorSensor, StubEvents,
-    StubFirmware, StubRadio,
+    StubFirmware, StubRadio, TcpReadings,
 };
 
 /// A time inside the open span of `open_span`.
@@ -83,6 +83,9 @@ fn quiet_report(uptime_s: u64) -> Telemetry {
         mesh_children: 0,
         checks_sent: 0,
         checks_lost: 0,
+        tcp_sent: 0,
+        tcp_retransmits: 0,
+        tcp_drops: 0,
     }
 }
 
@@ -163,6 +166,27 @@ fn checks_counted(connectors: &StubConnectors) -> Vec<(u64, u64)> {
         .collect()
 }
 
+/// The TCP segments sent, retransmitted, and dropped that each report
+/// counted, in order.
+fn tcp_counted(connectors: &StubConnectors) -> Vec<(u64, u64, u64)> {
+    reports(connectors)
+        .iter()
+        .map(|report| (report.tcp_sent, report.tcp_retransmits, report.tcp_drops))
+        .collect()
+}
+
+/// A door reporting every 30 seconds whose radio reads `readings` of the
+/// TCP counters in turn, until `stop_ms`.
+fn reading_tcp(stop_ms: u64, readings: TcpReadings) -> StubConnectors {
+    StubConnectors {
+        radio: StubRadio {
+            tcp_counters: readings,
+            ..StubRadio::default()
+        },
+        ..online_until(stop_ms, [(0, reporting_every(30))])
+    }
+}
+
 /// The server allowing the request the stub random bytes name.
 fn allowed() -> Event {
     let reply = Reply {
@@ -231,12 +255,14 @@ fn the_report_is_encoded_with_the_contract_field_names() {
     assert_eq!(
         connectors.broker.published_payloads().last(),
         Some(&hex(concat!(
-            "ae",
+            "b1",
             "617601",
             "656f70656e7300",
             "667369676e616c383c",
+            "687463705f73656e7400",
             "68757074696d655f7301",
             "69646f6f725f6f70656ef4",
+            "697463705f64726f707300",
             "6a667265655f62797465731a0002bf20",
             "6a6c6174656e63795f6d7300",
             "6a6d6573685f6c6179657200",
@@ -245,6 +271,7 @@ fn the_report_is_encoded_with_the_contract_field_names() {
             "6b636865636b735f73656e7400",
             "6b6d6573685f706172656e7460",
             "6d6d6573685f6368696c6472656e00",
+            "6f7463705f72657472616e736d69747300",
             "706669726d776172655f76657273696f6e65322e302e30"
         )))
     );
@@ -451,6 +478,88 @@ fn a_report_the_broker_does_not_take_keeps_its_checks() {
         (report.counters.checks_sent, report.counters.checks_lost),
         (1, 1)
     );
+}
+
+/// The TCP counts a run report says the next telemetry would carry.
+fn tcp_to_report(report: &app::RunReport) -> (u64, u64, u64) {
+    let counters = report.counters;
+    (
+        counters.tcp_sent,
+        counters.tcp_retransmits,
+        counters.tcp_drops,
+    )
+}
+
+#[test]
+fn the_first_report_counts_the_tcp_segments_since_the_door_started_and_starts_over() {
+    let connectors = reading_tcp(1001, TcpReadings::of([Some((100, 4, 1))]));
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (tcp_counted(&connectors), tcp_to_report(&report)),
+        (vec![(100, 4, 1)], (0, 0, 0))
+    );
+}
+
+#[test]
+fn each_report_counts_the_tcp_segments_since_the_report_before() {
+    let readings = TcpReadings::of([Some((100, 4, 1)), Some((250, 9, 1)), Some((250, 9, 1))]);
+    let connectors = reading_tcp(61_001, readings);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        tcp_counted(&connectors),
+        vec![(100, 4, 1), (150, 5, 0), (0, 0, 0)]
+    );
+}
+
+#[test]
+fn a_tcp_counter_below_its_last_report_counts_all_of_its_reading() {
+    let readings = TcpReadings::of([Some((65_000, 300, 20)), Some((120, 302, 3))]);
+    let connectors = reading_tcp(31_001, readings);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        tcp_counted(&connectors),
+        vec![(65_000, 300, 20), (120, 2, 3)]
+    );
+}
+
+#[test]
+fn a_radio_without_tcp_counters_reports_zero_tcp_segments() {
+    let connectors = reading_tcp(31_001, TcpReadings::of([None]));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(tcp_counted(&connectors), vec![(0, 0, 0), (0, 0, 0)]);
+}
+
+#[test]
+fn tcp_counts_resume_from_the_last_report_after_a_reading_without_counters() {
+    let readings = TcpReadings::of([Some((100, 4, 1)), None, Some((130, 6, 2))]);
+    let connectors = reading_tcp(61_001, readings);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        tcp_counted(&connectors),
+        vec![(100, 4, 1), (0, 0, 0), (30, 2, 1)]
+    );
+}
+
+#[test]
+fn a_report_the_broker_does_not_take_keeps_its_tcp_counts() {
+    let connectors = StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/telemetry", "queue full"),
+        ..reading_tcp(1001, TcpReadings::of([Some((100, 4, 1))]))
+    };
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(tcp_to_report(&report), (100, 4, 1));
 }
 
 #[test]
@@ -792,6 +901,9 @@ fn nothing_from_while_disconnected_is_sent_later_and_the_reconnect_is_counted() 
                 latency_ms: 0,
                 checks_sent: 0,
                 checks_lost: 0,
+                tcp_sent: 0,
+                tcp_retransmits: 0,
+                tcp_drops: 0,
             }
         )
     );

@@ -100,7 +100,9 @@ Published on `doorcode/doors/<id>/telemetry` every `telemetry_interval_s`
 while connected, the first about a second after the door comes online.
 Every field is always sent. Nothing is kept to send later. Counts since the
 last report start from zero once a report is sent; the first report counts
-since the door started.
+since the door started. The three TCP counts are 0 on a door whose network
+stack keeps no TCP counters; when the stack's own count wraps around or
+starts again, the report counts what it has counted since.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -117,6 +119,9 @@ since the door started.
 | `mesh_children` | uint | Doors joined to this door's soft-AP; 0 without the mesh. |
 | `checks_sent` | uint | Code checks sent to the server since the last report. |
 | `checks_lost` | uint | Checks since the last report whose reply did not come within `reply_timeout_ms`. A check replaced by a newer entry before then is not lost. |
+| `tcp_sent` | uint | TCP segments the door's network stack sent since the last report. |
+| `tcp_retransmits` | uint | TCP segments it sent again since the last report. |
+| `tcp_drops` | uint | TCP segments it dropped since the last report. |
 
 ## Door events
 
