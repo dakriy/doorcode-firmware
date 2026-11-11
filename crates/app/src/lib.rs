@@ -19,6 +19,7 @@ mod stored;
 mod strike;
 mod telemetry;
 mod timeline;
+mod trial;
 mod update;
 
 use connectors::{BrokerAddress, Connectors, Event, StatusReport, StorageError};

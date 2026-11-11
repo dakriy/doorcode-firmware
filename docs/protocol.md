@@ -51,7 +51,10 @@ The server publishes the door's whole configuration, retained, on
 `doorcode/doors/<id>/config`. The firmware replaces its stored
 configuration with each one, keeps it in storage, and runs with it until
 the next. Before the first one it runs with the provisioning file's
-`door_config`, and with the defaults below for any field that lacks.
+`door_config`, and with the defaults below for any field that lacks. A
+configuration that changes how the door reaches the server is tried
+first, and given up if the door does not come online with it (see
+Trying a configuration below).
 
 ### Honored by the firmware
 
@@ -65,10 +68,10 @@ the next. Before the first one it runs with the provisioning file's
 | `telemetry_interval_s` | 60 | How often telemetry is published while connected. |
 | `ntp_server` | `pool.ntp.org` | Where the ESP32 synchronizes its clock. The timeline is in Unix seconds, so until the first synchronization the door stays in normal mode whatever the timeline says. |
 | `log_level` | `info` | `error`, `warn`, `info`, or `debug`: how much the door logs. Takes effect at once. |
-| `broker_host` | empty | The broker to connect to from the next connection on. Empty keeps the host in use. |
-| `broker_port` | 8883 | The broker's port from the next connection on. A missing key or 0 keeps the port in use. |
-| `broker_tls` | `true` | Whether to connect over TLS from the next connection on. A missing key keeps the setting in use. `false` is for development brokers only. |
-| `broker_ca_pem` | empty | The CA to verify the broker and downloads against (see above). Empty keeps the CA in use. |
+| `broker_host` | empty | The broker to connect to. Empty keeps the host in use. A change is tried (below). |
+| `broker_port` | 8883 | The broker's port. A missing key or 0 keeps the port in use. A change is tried. |
+| `broker_tls` | `true` | Whether to connect over TLS. A missing key keeps the setting in use. `false` is for development brokers only. A change is tried. |
+| `broker_ca_pem` | empty | The CA to verify the broker and downloads against (see above). Empty keeps the CA in use. A change is tried, and downloads use the new CA once it is kept. |
 | `keepalive_s` | 30 | The MQTT keep-alive interval, from the next connection on. |
 | `reconnect_max_s` | 60 | The longest pause between attempts to connect again. The door backs off 1, 2, 4 seconds and so on up to this, each pause plus up to a quarter more at random so doors that lost the broker together do not return together. |
 | `wifi_ssid` | empty | The Wi-Fi network to join. Empty keeps the provisioned one. If the network the door was told fails to associate, it falls back to the one that last did. |
@@ -80,7 +83,7 @@ the next. Before the first one it runs with the provisioning file's
 | `mesh_password` | empty | The mesh soft-AP's password, 8 to 63 characters. |
 | `mesh_min_router_rssi` | -75 | When no access point is at least this strong, in dBm, the door joins a neighbouring door instead. |
 | `mesh_max_layer` | 4 | The most hops from the access point the door may sit at. |
-| `update_connect_timeout_s` | 300 | After installing firmware, the new image boots on trial; if it has not connected as its door within this many seconds, the door goes back to the previous image and reports the update failed with `reverted: could not connect`. |
+| `update_connect_timeout_s` | 300 | After installing firmware, the new image boots on trial; if it has not connected as its door within this many seconds, the door goes back to the previous image and reports the update failed with `reverted: could not connect`. A configuration on trial has as long, by this field of the configuration it replaced. |
 | `accept_unsigned_firmware` | `false` | When `true`, the door installs an image without a valid signature (`firmware-signing.md`). For bench and development boards only. |
 
 The Wi-Fi fields and the mesh fields apply on the ESP32 only; the desktop
@@ -100,6 +103,78 @@ point, restart Wi-Fi, and join again; with the mesh it restarts the door.
 It covers the door's station, the link to its access point or parent door;
 a mesh door's soft-AP keeps the 802.11b rates for the doors hopping through
 it, each of which has its own switch.
+
+### Trying a configuration
+
+A configuration is tried when it changes any of these fields from the
+configuration the door runs, compared field by field as received (a
+missing key compares as missing): `broker_host`, `broker_port`,
+`broker_tls`, `broker_ca_pem`, `wifi_ssid`, `wifi_password`,
+`wifi_11b_disabled`, `mesh_enabled`, `mesh_ssid`, `mesh_password`,
+`mesh_min_router_rssi`, and `mesh_max_layer`. A wrong value of any of them
+can leave the door unable to reach the server. A configuration that
+changes only other fields takes effect as the table says, with no trial.
+
+To try one, the door keeps the configuration it ran as the last known
+good one, stores the new one in its place with a mark that it is on
+trial, and restarts, so that Wi-Fi, the mesh, and the broker connection
+all start from the new settings. The broker the new configuration moves
+the door to is used from that start but stored as the broker in use only
+once the trial is kept.
+
+- **Kept** as soon as the door comes online as its door again: connected
+  to the broker with its door credentials, subscribed, and its online
+  status published. The trial mark and the last known good configuration
+  are forgotten, and the broker is stored.
+- **Given up** when the door has not come online by the deadline:
+  `update_connect_timeout_s` of the last known good configuration, counted
+  from the start, so that a wrong value of that field in the configuration
+  on trial cannot disable the deadline. The door puts the last known good
+  configuration back (or removes the configuration when it had none, which
+  starts it from the provisioning file's `door_config` again), remembers
+  the digest of the one it gave up, and restarts. It comes back with the
+  previous Wi-Fi and mesh settings and on the previous broker, which was
+  never replaced in storage.
+
+The trial mark, the last known good configuration, and the digest of the
+configuration given up are all in storage, so a restart or a power cut
+during the trial neither keeps the new configuration nor loses the old:
+the door starts on trial again, with the whole deadline from that start.
+
+Once online again after giving one up, the door says `config_reverted`
+(Door events), once. The server's configuration stays retained on the
+broker, so the door receives the configuration it gave up again: whenever
+a configuration with the digest given up arrives, the door logs and
+ignores it. Any other configuration is taken as usual, whether tried or
+not, and the door forgets the one it gave up, so that one is tried again
+if it is sent after.
+
+Without the mesh, the Wi-Fi station falls back to the network that last
+associated when the one it was told cannot associate (`wifi_ssid` above),
+so a wrong `wifi_ssid` or `wifi_password` can come online through the old
+network and be kept. A broker on trial that refuses the door's
+credentials as not authorized revokes them as any broker would; the trial
+guards against a broker the door cannot reach or cannot verify.
+
+### Configuration digest
+
+Telemetry names the configuration the door runs by `config_digest`: the
+SHA-256 of the configuration message's payload exactly as the door
+received it on `doorcode/doors/<id>/config`, the whole CBOR map with `v`,
+of which the first 8 bytes are written as 16 lowercase hex digits. The
+door stores the payload as received, so the digest stays the same across
+restarts. The server encodes the configuration deterministically (RFC 8949
+core deterministic encoding), so it gets the same digest over the payload
+it published. While the door runs with the defaults, with no configuration
+stored or one that does not decode, the digest is empty; a configuration
+seeded from the provisioning file is digested the same way as one
+received, and matches no configuration the server sent.
+
+The digest rides in telemetry rather than in the online status because a
+configuration that changes no field above takes effect without a
+reconnect: the online status is published only when the door connects,
+so it would go on naming the configuration before, while telemetry names
+the one in use within one interval.
 
 ### Used by the server only
 
@@ -143,6 +218,7 @@ it has counted since.
 | `roams` | uint | Times the Wi-Fi station moved to another access point by its own choice since the last report. |
 | `bssid` | text | The access point joined now, 12 lowercase hex digits; empty with no link. |
 | `channel` | uint | The Wi-Fi channel of the access point joined now; 0 with no link. |
+| `config_digest` | text | The digest of the configuration in use, 16 lowercase hex digits (Configuration digest above); empty while the door runs with the defaults. |
 
 ## Door events
 
@@ -158,12 +234,20 @@ reconnects, hands over to new credentials, or is revoked and enrolled
 again. `started` carries `event` and `reason`, so the server can log
 restarts and why they happened.
 
+It publishes `config_reverted` on the same topic once it is online again
+after giving up a configuration on trial (Trying a configuration above),
+right after `started`. It carries `event` and `config_digest`, the digest
+of the configuration given up; telemetry's `config_digest` names the one
+it went back to. It is said once: a door that restarts before it comes
+online says it the first time it does.
+
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `event` | text | `started`, `opened`, or `closed`. |
-| `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Always true during an open span, when the door is meant to be opened. Left out of `closed` and `started`. |
-| `open_ms` | uint | On `closed` only: how long the door was open, in milliseconds on the door's own monotonic clock, from the sensor seeing it open to seeing it closed. Sent whenever the door saw the opening itself since it started, whether or not it was connected then, and whether it opened or closed in an open span or outside one. Left out when the door was already open when it started. Never on `opened` or `started`. |
-| `reason` | text | On `started` only, always: why the door started. `power_on` (power was applied), `software` (a restart the firmware asked for: a reboot command, an update, or a revert), `panic` (the firmware crashed), `watchdog` (any of the watchdogs reset it), `brownout` (the supply voltage dropped too low), `external` (the reset pin), or `unknown` for anything else. A door run on a desktop always says `power_on`. Left out of `opened` and `closed`. |
+| `event` | text | `started`, `opened`, `closed`, or `config_reverted`. |
+| `unlocked` | bool | On `opened` only: whether the door was unlocked as it opened, meaning the strike was released then or had locked again no longer than 500 ms before. Always true during an open span, when the door is meant to be opened. Left out of the others. |
+| `open_ms` | uint | On `closed` only: how long the door was open, in milliseconds on the door's own monotonic clock, from the sensor seeing it open to seeing it closed. Sent whenever the door saw the opening itself since it started, whether or not it was connected then, and whether it opened or closed in an open span or outside one. Left out when the door was already open when it started. Never on the others. |
+| `reason` | text | On `started` only, always: why the door started. `power_on` (power was applied), `software` (a restart the firmware asked for: a reboot command, an update, a configuration tried or given up, or a revert), `panic` (the firmware crashed), `watchdog` (any of the watchdogs reset it), `brownout` (the supply voltage dropped too low), `external` (the reset pin), or `unknown` for anything else. A door run on a desktop always says `power_on`. Left out of the others. |
+| `config_digest` | text | On `config_reverted` only, always: the digest of the configuration given up, 16 lowercase hex digits. Left out of the others. |
 
 The door reports the fact only; whether an opening while locked is an
 alarm is the server's decision. A server that does not know `unlocked`

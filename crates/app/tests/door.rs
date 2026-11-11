@@ -297,10 +297,13 @@ fn a_configuration_with_keys_this_version_does_not_know_is_taken() {
 #[test]
 fn a_configuration_of_another_protocol_version_is_logged_and_ignored() {
     let version_two = hex("a26176026f737472696b655f70756c73655f6d73191388");
-    let connectors = StubConnectors::enrolled(StubEvents::script([
-        (0, config_for(7, &custom_config())),
-        (10, door_message(7, "config", version_two)),
-    ]));
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled().with_config(&custom_config()),
+        ..StubConnectors::enrolled(StubEvents::script([(
+            10,
+            door_message(7, "config", version_two),
+        )]))
+    };
 
     let report = app::run(&connectors).unwrap();
 
@@ -421,7 +424,7 @@ fn reconnected_after(storage: StubStorage, config: Event) -> StubConnectors {
             (0, Event::Connected),
             (10, config),
             (20, Event::Disconnected),
-            (2_000, Event::Stop),
+            (1_500, Event::Connected),
         ]),
         ..StubConnectors::default()
     };
@@ -431,10 +434,12 @@ fn reconnected_after(storage: StubStorage, config: Event) -> StubConnectors {
 
 /// The broker address of the door's last connection request.
 fn last_address(connectors: &StubConnectors) -> BrokerAddress {
-    let Some(BrokerCall::Connect(connection)) = connectors.broker.last_call() else {
-        panic!("{:?}", connectors.broker.calls());
-    };
-    connection.address
+    let calls = connectors.broker.calls();
+    let connection = calls.iter().rev().find_map(|call| match call {
+        BrokerCall::Connect(connection) => Some(connection.clone()),
+        _ => None,
+    });
+    connection.expect("a connection request").address
 }
 
 /// The address door 7 is provisioned with.
@@ -460,13 +465,11 @@ fn a_broker_host_in_the_configuration_is_used_from_the_next_connection_on() {
 
     assert_eq!(
         (
-            connectors.broker.last_call(),
+            last_address(&connectors),
             connectors.storage.stored("broker_host")
         ),
         (
-            Some(BrokerCall::Connect(door_connection_to(
-                "broker2.example.org"
-            ))),
+            door_connection_to("broker2.example.org").address,
             Some(b"broker2.example.org".to_vec())
         )
     );

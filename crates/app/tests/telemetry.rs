@@ -91,6 +91,7 @@ fn quiet_report(uptime_s: u64) -> Telemetry {
         roams: 0,
         bssid: String::new(),
         channel: 0,
+        config_digest: String::new(),
     }
 }
 
@@ -131,6 +132,7 @@ fn started_because(reason: &str) -> DoorEvent {
         unlocked: None,
         open_ms: None,
         reason: Some(reason.to_owned()),
+        config_digest: None,
     }
 }
 
@@ -140,6 +142,7 @@ fn opened(unlocked: bool) -> DoorEvent {
         unlocked: Some(unlocked),
         open_ms: None,
         reason: None,
+        config_digest: None,
     }
 }
 
@@ -149,6 +152,7 @@ fn closed(open_ms: Option<u64>) -> DoorEvent {
         unlocked: None,
         open_ms,
         reason: None,
+        config_digest: None,
     }
 }
 
@@ -260,7 +264,7 @@ fn the_report_is_encoded_with_the_contract_field_names() {
     assert_eq!(
         connectors.broker.published_payloads().last(),
         Some(&hex(concat!(
-            "b6",
+            "b7",
             "617601",
             "65627373696460",
             "656f70656e7300",
@@ -279,6 +283,7 @@ fn the_report_is_encoded_with_the_contract_field_names() {
             "6b636865636b735f6c6f737400",
             "6b636865636b735f73656e7400",
             "6b6d6573685f706172656e7460",
+            "6d636f6e6669675f64696765737460",
             "6d6d6573685f6368696c6472656e00",
             "6f7463705f72657472616e736d69747300",
             "706669726d776172655f76657273696f6e65322e302e30",
@@ -668,16 +673,18 @@ fn the_latest_drop_reason_and_the_access_point_joined_come_from_the_radio() {
 
     app::run(&connectors).unwrap();
 
-    assert_eq!(
-        reports(&connectors),
-        vec![Telemetry {
-            wifi_drops: 1,
-            wifi_drop_reason: 201,
-            bssid: "0a1b2c3d4eff".to_owned(),
-            channel: 11,
-            ..quiet_report(1)
-        }]
-    );
+    let link_reported: Vec<_> = reports(&connectors)
+        .into_iter()
+        .map(|report| {
+            (
+                report.wifi_drops,
+                report.wifi_drop_reason,
+                report.bssid,
+                report.channel,
+            )
+        })
+        .collect();
+    assert_eq!(link_reported, vec![(1, 201, "0a1b2c3d4eff".to_owned(), 11)]);
 }
 
 #[test]

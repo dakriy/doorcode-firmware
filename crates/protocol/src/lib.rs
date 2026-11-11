@@ -339,6 +339,10 @@ pub struct Telemetry {
     pub bssid: String,
     /// The Wi-Fi channel of the access point joined now; 0 with no link.
     pub channel: u64,
+    /// The first 16 lowercase hex digits of the SHA-256 of the configuration
+    /// message in use, as it was received; empty while the door runs with
+    /// the defaults.
+    pub config_digest: String,
 }
 
 message! {
@@ -364,6 +368,7 @@ message! {
         roams: always,
         bssid: always,
         channel: always,
+        config_digest: always,
     }
 }
 
@@ -373,8 +378,11 @@ pub const EVENT_STARTED: &str = "started";
 pub const EVENT_OPENED: &str = "opened";
 /// The door saying it closed.
 pub const EVENT_CLOSED: &str = "closed";
+/// The door saying it went back to its previous configuration.
+pub const EVENT_CONFIG_REVERTED: &str = "config_reverted";
 
-/// Something that happened to a door: `started`, `opened`, or `closed`.
+/// Something that happened to a door: `started`, `opened`, `closed`, or
+/// `config_reverted`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DoorEvent {
     pub event: String,
@@ -384,6 +392,8 @@ pub struct DoorEvent {
     pub open_ms: Option<u64>,
     /// On `started`: why the door started.
     pub reason: Option<String>,
+    /// On `config_reverted`: the digest of the configuration given up.
+    pub config_digest: Option<String>,
 }
 
 message! {
@@ -392,6 +402,7 @@ message! {
         unlocked: unless_none,
         open_ms: unless_none,
         reason: unless_none,
+        config_digest: unless_none,
     }
 }
 

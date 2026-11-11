@@ -15,6 +15,7 @@ use crate::command::{self, Order, PendingRestart};
 use crate::device::Device;
 use crate::rotation::Rotation;
 use crate::telemetry::{self, SinceStart, Tally};
+use crate::trial::{self, Trial};
 use crate::update::{self, Boot, Install};
 use crate::{enrollment, stored, timeline, ConnectionState, Mode, Phase, RunError, RunReport};
 
@@ -37,6 +38,10 @@ pub(crate) struct Door {
     /// The broker to connect to; the configuration can move it.
     broker: BrokerAddress,
     config: Config,
+    /// The digest of the configuration message in use; empty with none.
+    config_digest: String,
+    /// The trial of the configuration in use, while it is on trial.
+    trial: Option<Trial>,
     timeline: Timeline,
     link: Link,
     /// Connection attempts that failed since the door was last online.
@@ -92,9 +97,10 @@ impl Link {
 }
 
 /// Starts serving as the door with the configuration and timeline stored
-/// from the last time, and connects: with the new credentials when a
-/// hand-over was under way. `since_start` is what the controller did as a
-/// door before, as the door it was until revoked.
+/// from the last time, and connects: to `broker` as that configuration
+/// moves it, and with the new credentials when a hand-over was under way.
+/// `since_start` is what the controller did as a door before, as the door
+/// it was until revoked.
 pub(crate) fn start(
     device: &Device<'_>,
     credentials: Credentials,
@@ -103,8 +109,8 @@ pub(crate) fn start(
 ) -> Result<Door, RunError> {
     let storage = device.connectors.storage();
     let next = stored::next_credentials(storage, credentials.door_id)?;
-    let config = restored(device, stored::CONFIG, Config::decode)?;
-    let timeline = restored(device, stored::TIMELINE, Timeline::decode)?;
+    let (config, config_bytes) = restored(device, stored::CONFIG, Config::decode)?;
+    let (timeline, _) = restored(device, stored::TIMELINE, Timeline::decode)?;
     device
         .connectors
         .log()
@@ -113,8 +119,10 @@ pub(crate) fn start(
     let door = Door {
         credentials,
         rotation: next.map(|next| Rotation::to(next).tried()),
-        broker,
+        broker: configured_broker(&broker, &config),
         config,
+        config_digest: config_bytes.map_or(String::new(), |bytes| trial::digest(&bytes)),
+        trial: trial::boot(device)?,
         timeline,
         link: Link::Connecting,
         failures: 0,
@@ -128,23 +136,24 @@ pub(crate) fn start(
     Ok(door.connect(device))
 }
 
-/// The value stored under `key`, or the default when nothing usable is.
+/// The value stored under `key` with the bytes it was read from, or the
+/// default and no bytes when nothing usable is.
 fn restored<T: Default>(
     device: &Device<'_>,
     key: &str,
     decode: fn(&[u8]) -> Result<T, DecodeError>,
-) -> Result<T, RunError> {
+) -> Result<(T, Option<Vec<u8>>), RunError> {
     let Some(bytes) = stored::bytes(device.connectors.storage(), key)? else {
-        return Ok(T::default());
+        return Ok((T::default(), None));
     };
     match decode(&bytes) {
-        Ok(value) => Ok(value),
+        Ok(value) => Ok((value, Some(bytes))),
         Err(error) => {
             device.log(
                 Level::Warn,
                 &format!("stored {key} does not decode, using defaults: {error:?}"),
             );
-            Ok(T::default())
+            Ok((T::default(), None))
         }
     }
 }
@@ -169,6 +178,7 @@ impl Door {
             self.retry_at(),
             self.restart_at(),
             self.boot.revert_at(),
+            self.trial.as_ref().map(Trial::revert_at),
         ];
         let soonest = due_at.into_iter().flatten().min()?;
         Some(soonest.saturating_sub(device.now_ms()))
@@ -207,7 +217,7 @@ impl Door {
         device: &Device<'_>,
         event: Option<Event>,
     ) -> Result<Phase, RunError> {
-        let mut door = self.when_due(device);
+        let mut door = self.when_due(device)?;
         let door = match event {
             Some(Event::Connected) => door.come_online(device)?,
             Some(Event::Disconnected) => door.pause(device, "connection lost"),
@@ -245,9 +255,9 @@ impl Door {
 
     /// Connects again once the pause is over, reports telemetry when it is
     /// time, lets the keypad side catch up with the time, restarts once a
-    /// reboot has waited long enough or a new image has not come online in
-    /// time, and tries new credentials again.
-    fn when_due(mut self, device: &Device<'_>) -> Door {
+    /// reboot has waited long enough or a new image or configuration has
+    /// not come online in time, and tries new credentials again.
+    fn when_due(mut self, device: &Device<'_>) -> Result<Door, RunError> {
         if self.gate.expire(device, &self.config) {
             self.tally.check_lost();
         }
@@ -266,13 +276,17 @@ impl Door {
             self.boot = Boot::Settled;
             Boot::revert(device);
         }
+        if device.is_due(self.trial.as_ref().map(Trial::revert_at)) {
+            self.trial = None;
+            trial::revert(device, &self.config_digest)?;
+        }
         if device.is_due(self.retry_at()) {
-            return self.hand_over(device);
+            return Ok(self.hand_over(device));
         }
         if device.is_due(self.link.reconnect_at()) {
-            return self.connect(device);
+            return Ok(self.connect(device));
         }
-        self
+        Ok(self)
     }
 
     /// When the new credentials are tried again, while the old ones serve.
@@ -316,7 +330,9 @@ impl Door {
     /// Reports telemetry, and the next report one interval later.
     fn report_telemetry(&mut self, device: &Device<'_>) {
         let door_id = self.credentials.door_id;
-        self.tally.report(device, door_id, self.gate.latency_ms());
+        let latency_ms = self.gate.latency_ms();
+        self.tally
+            .report(device, door_id, latency_ms, &self.config_digest);
         let interval_ms = self.config.telemetry_interval_s.max(1) * 1000;
         self.link = Link::Online {
             report_at: device.now_ms() + interval_ms,
@@ -422,6 +438,8 @@ impl Door {
         self.tally.say_started(device, self.credentials.door_id);
         std::mem::replace(&mut self.boot, Boot::Settled)
             .online(device, self.credentials.door_id)?;
+        let trial = self.trial.take();
+        trial::online(device, self.credentials.door_id, trial, &self.broker)?;
         let door = Door {
             link: Link::Online {
                 report_at: device.now_ms() + telemetry::FIRST_REPORT_AFTER_MS,
@@ -621,6 +639,9 @@ impl Door {
         Ok(self)
     }
 
+    /// Runs with a configuration received: on trial when it changes how the
+    /// door reaches the server, and not at all when it is the one last
+    /// given up on trial.
     fn receive_config(self, device: &Device<'_>, payload: &[u8]) -> Result<Door, RunError> {
         let config = match Config::decode(payload) {
             Ok(config) => config,
@@ -629,19 +650,25 @@ impl Door {
                 return Ok(self);
             }
         };
-        let storage = device.connectors.storage();
-        stored::store_bytes(storage, stored::CONFIG, payload)?;
-        let broker = configured_broker(&self.broker, &config);
-        if broker != self.broker {
-            stored::store_broker(storage, &broker)?;
+        let digest = trial::digest(payload);
+        if trial::rejected(device, &digest)? {
+            return Ok(self);
         }
+        let on_trial = if trial::needed(&self.config, &config) {
+            Some(trial::start(device, &self.config, payload, &digest)?)
+        } else {
+            stored::store_bytes(device.connectors.storage(), stored::CONFIG, payload)?;
+            self.trial
+        };
         let level = log_level(&config.log_level);
         if level != log_level(&self.config.log_level) {
             device.connectors.log().set_level(level);
         }
         Ok(Door {
-            broker,
+            broker: configured_broker(&self.broker, &config),
             config,
+            config_digest: digest,
+            trial: on_trial,
             ..self
         })
     }

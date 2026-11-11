@@ -164,6 +164,15 @@ for size so an image fits.
   that changes any mesh setting restarts the door. The counts are kept the
   same way; a roam is a root rejoining for a stronger access point, and
   the access point reported is the parent door's soft-AP below the root.
+- **Configuration trial.** Wi-Fi and the mesh read their settings from
+  the stored `config` entry only, so the application tries a
+  configuration that changes how the door connects by storing it there
+  and restarting, and gives it up by storing the last known good one
+  back (kept meanwhile in `config_good`, with the trial marked in
+  `config_trial`) and restarting again (`docs/protocol.md`). The network
+  code needs no part in it: each start reads whichever configuration is
+  stored. The broker entries, `broker_ca` included, change only once a
+  trial is kept, so downloads verify against the CA in use until then.
 - **Broker.** Each connection is an esp-mqtt client: MQTT 3.1.1, QoS 1
   for every publication, subscription, and will, clean session, and TLS
   verified against the provisioned CA unless the broker is configured

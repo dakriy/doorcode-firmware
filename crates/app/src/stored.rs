@@ -27,6 +27,16 @@ const NEXT_TOKEN: &str = "next_token";
 const UPDATE_ID: &str = "update_id";
 const UPDATE_VERSION: &str = "update_version";
 pub(crate) const CONFIG: &str = "config";
+/// The configuration message the door ran before the one on trial; not
+/// stored when it ran with none.
+pub(crate) const CONFIG_GOOD: &str = "config_good";
+/// Present while the configuration stored is on trial: the digest of it.
+pub(crate) const CONFIG_TRIAL: &str = "config_trial";
+/// The digest of the configuration last given up for not coming online,
+/// ignored when it is sent again.
+pub(crate) const CONFIG_REJECTED: &str = "config_rejected";
+/// The digest of the configuration given up, until the door has said so.
+pub(crate) const CONFIG_REVERTED: &str = "config_reverted";
 pub(crate) const TIMELINE: &str = "timeline";
 
 pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunError> {
@@ -121,12 +131,16 @@ pub(crate) fn forget_door(storage: &dyn Storage) -> Result<(), RunError> {
             NEXT_USERNAME,
             NEXT_TOKEN,
             CONFIG,
+            CONFIG_GOOD,
+            CONFIG_TRIAL,
+            CONFIG_REJECTED,
+            CONFIG_REVERTED,
             TIMELINE,
         ],
     )
 }
 
-fn remove(storage: &dyn Storage, keys: &[&str]) -> Result<(), RunError> {
+pub(crate) fn remove(storage: &dyn Storage, keys: &[&str]) -> Result<(), RunError> {
     for key in keys {
         storage.remove(key).map_err(RunError::Storage)?;
     }
@@ -176,11 +190,11 @@ pub(crate) fn store_bytes(storage: &dyn Storage, key: &str, value: &[u8]) -> Res
     storage.store(key, value).map_err(RunError::Storage)
 }
 
-fn store(storage: &dyn Storage, key: &str, value: &str) -> Result<(), RunError> {
+pub(crate) fn store(storage: &dyn Storage, key: &str, value: &str) -> Result<(), RunError> {
     store_bytes(storage, key, value.as_bytes())
 }
 
-fn text(storage: &dyn Storage, key: &'static str) -> Result<Option<String>, RunError> {
+pub(crate) fn text(storage: &dyn Storage, key: &'static str) -> Result<Option<String>, RunError> {
     let Some(bytes) = bytes(storage, key)? else {
         return Ok(None);
     };

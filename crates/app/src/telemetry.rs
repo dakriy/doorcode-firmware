@@ -146,9 +146,16 @@ impl Tally {
         }
     }
 
-    /// Publishes a report; what was counted since the last report counts
-    /// from zero again once it is sent.
-    pub(crate) fn report(&mut self, device: &Device<'_>, door_id: u64, latency_ms: u64) {
+    /// Publishes a report, naming the configuration in use by its digest
+    /// `config_digest`; what was counted since the last report counts from
+    /// zero again once it is sent.
+    pub(crate) fn report(
+        &mut self,
+        device: &Device<'_>,
+        door_id: u64,
+        latency_ms: u64,
+        config_digest: &str,
+    ) {
         let reading = Reading::of(device);
         let counters = self.counted(latency_ms, &reading);
         let access_point = reading.wifi.access_point;
@@ -175,6 +182,7 @@ impl Tally {
             roams: counters.roams,
             bssid: access_point.map_or(String::new(), |joined| hex(&joined.bssid)),
             channel: access_point.map_or(0, |joined| joined.channel.into()),
+            config_digest: config_digest.to_owned(),
         };
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
             Ok(_) => {
@@ -203,6 +211,7 @@ fn started(reason: StartReason) -> DoorEvent {
         unlocked: None,
         open_ms: None,
         reason: Some(start_reason_text(reason).to_owned()),
+        config_digest: None,
     }
 }
 
@@ -226,6 +235,7 @@ pub(crate) fn opened(unlocked: bool) -> DoorEvent {
         unlocked: Some(unlocked),
         open_ms: None,
         reason: None,
+        config_digest: None,
     }
 }
 
@@ -236,10 +246,24 @@ pub(crate) fn closed(open_ms: Option<u64>) -> DoorEvent {
         unlocked: None,
         open_ms,
         reason: None,
+        config_digest: None,
     }
 }
 
-/// Says that the door started, opened, or closed.
+/// The door saying it went back to its previous configuration, giving up
+/// the one with digest `given_up`.
+pub(crate) fn config_reverted(given_up: String) -> DoorEvent {
+    DoorEvent {
+        event: protocol::EVENT_CONFIG_REVERTED.to_owned(),
+        unlocked: None,
+        open_ms: None,
+        reason: None,
+        config_digest: Some(given_up),
+    }
+}
+
+/// Says that the door started, opened, closed, or went back to its
+/// previous configuration.
 pub(crate) fn send_door_event(device: &Device<'_>, door_id: u64, message: &DoorEvent) {
     if let Err(error) = device.publish(door_id, protocol::LEAF_EVENT, message.encode()) {
         device.log(
