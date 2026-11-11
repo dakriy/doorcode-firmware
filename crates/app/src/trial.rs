@@ -1,7 +1,9 @@
 //! Trying a configuration that changes how the door reaches the server:
 //! keeping the configuration it ran before as the last known good one,
 //! restarting into the new one, keeping it once the door has come online,
-//! and going back to the last known good one when it does not in time.
+//! and going back to the last known good one when it does not in time,
+//! when it has started too many times without coming online, or when the
+//! broker refuses the door's credentials.
 //! A configuration given up that way is ignored when it is sent again,
 //! until another arrives.
 
@@ -10,12 +12,17 @@ use protocol::Config;
 use sha2::{Digest, Sha256};
 
 use crate::device::Device;
-use crate::stored::{self, CONFIG, CONFIG_GOOD, CONFIG_REJECTED, CONFIG_REVERTED, CONFIG_TRIAL};
+use crate::stored::{
+    self, CONFIG, CONFIG_GOOD, CONFIG_REJECTED, CONFIG_REVERTED, CONFIG_TRIAL, CONFIG_TRIAL_STARTS,
+};
 use crate::telemetry::{self, send_door_event};
 use crate::{hex, RunError};
 
 /// How many bytes of the SHA-256 the digest of a configuration keeps.
 const DIGEST_BYTES: usize = 8;
+/// The start on trial that gives the trial up at once: the starts before
+/// it all ended without coming online, by a crash, a reset, or a power cut.
+const GIVE_UP_ON_START: u32 = 3;
 
 /// The digest of the configuration message `payload`: the first eight
 /// bytes of its SHA-256, as 16 lowercase hex digits.
@@ -75,12 +82,24 @@ impl Trial {
     }
 }
 
-/// The trial this start is in, when the configuration stored is on trial.
+/// The trial this start is in, when the configuration stored is on trial,
+/// counted as one more start on it. The start that would be the third
+/// gives the trial up instead.
 pub(crate) fn boot(device: &Device<'_>) -> Result<Option<Trial>, RunError> {
     let storage = device.connectors.storage();
-    if stored::bytes(storage, CONFIG_TRIAL)?.is_none() {
+    let Some(digest) = stored::text(storage, CONFIG_TRIAL)? else {
+        return Ok(None);
+    };
+    let earlier = stored::text(storage, CONFIG_TRIAL_STARTS)?
+        .and_then(|starts| starts.parse::<u32>().ok())
+        .unwrap_or(0);
+    let starts = earlier + 1;
+    if starts >= GIVE_UP_ON_START {
+        let why = format!("not online in {earlier} starts");
+        revert(device, &digest, &why)?;
         return Ok(None);
     }
+    stored::store(storage, CONFIG_TRIAL_STARTS, &starts.to_string())?;
     let good = stored::bytes(storage, CONFIG_GOOD)?
         .and_then(|bytes| Config::decode(&bytes).ok())
         .unwrap_or_default();
@@ -108,7 +127,8 @@ pub(crate) fn rejected(device: &Device<'_>, digest: &str) -> Result<bool, RunErr
 /// Stores `payload`, with `digest`, on trial, and restarts to start the
 /// network with it. The last known good configuration is the one `running`
 /// stored now, unless a trial is `under_way`: then it stays the one that
-/// trial would go back to, and the trial keeps its deadline.
+/// trial would go back to, and the trial keeps its deadline and its count
+/// of starts.
 pub(crate) fn start(
     device: &Device<'_>,
     under_way: Option<Trial>,
@@ -134,17 +154,18 @@ pub(crate) fn start(
 }
 
 /// Puts the last known good configuration back in place of the one with
-/// `digest`, remembers that one as given up, and restarts with the good
-/// one. The broker moves only once a trial is kept, so it needs no change.
-pub(crate) fn revert(device: &Device<'_>, digest: &str) -> Result<(), RunError> {
+/// `digest`, given up for `why`, remembers that one as given up, and
+/// restarts with the good one. The broker moves only once a trial is
+/// kept, so it needs no change.
+pub(crate) fn revert(device: &Device<'_>, digest: &str, why: &str) -> Result<(), RunError> {
     let storage = device.connectors.storage();
     copy(storage, CONFIG_GOOD, CONFIG)?;
     stored::store(storage, CONFIG_REJECTED, digest)?;
     stored::store(storage, CONFIG_REVERTED, digest)?;
-    stored::remove(storage, &[CONFIG_TRIAL, CONFIG_GOOD])?;
+    stored::remove(storage, &[CONFIG_TRIAL, CONFIG_TRIAL_STARTS, CONFIG_GOOD])?;
     device.restart(
         Level::Error,
-        &format!("not online in time on config {digest}; restarting with the previous config"),
+        &format!("{why} on config {digest}; restarting with the previous config"),
     );
     Ok(())
 }
@@ -169,7 +190,7 @@ pub(crate) fn online(
 ) -> Result<(), RunError> {
     let storage = device.connectors.storage();
     if trial.is_some() {
-        stored::remove(storage, &[CONFIG_TRIAL, CONFIG_GOOD])?;
+        stored::remove(storage, &[CONFIG_TRIAL, CONFIG_TRIAL_STARTS, CONFIG_GOOD])?;
         stored::store_broker(storage, broker)?;
         device.log(Level::Info, "online on the new config; it is kept");
     }

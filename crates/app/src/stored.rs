@@ -32,6 +32,8 @@ pub(crate) const CONFIG: &str = "config";
 pub(crate) const CONFIG_GOOD: &str = "config_good";
 /// Present while the configuration stored is on trial: the digest of it.
 pub(crate) const CONFIG_TRIAL: &str = "config_trial";
+/// How many times the door has started on the trial under way.
+pub(crate) const CONFIG_TRIAL_STARTS: &str = "config_trial_starts";
 /// The digest of the configuration last given up for not coming online,
 /// ignored when it is sent again.
 pub(crate) const CONFIG_REJECTED: &str = "config_rejected";
@@ -133,6 +135,7 @@ pub(crate) fn forget_door(storage: &dyn Storage) -> Result<(), RunError> {
             CONFIG,
             CONFIG_GOOD,
             CONFIG_TRIAL,
+            CONFIG_TRIAL_STARTS,
             CONFIG_REJECTED,
             CONFIG_REVERTED,
             TIMELINE,

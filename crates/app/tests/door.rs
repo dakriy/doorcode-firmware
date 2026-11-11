@@ -897,11 +897,13 @@ fn a_refusal_for_another_reason_is_waited_out_with_the_credentials_kept() {
 
 #[test]
 fn a_door_refused_as_not_authorized_forgets_its_credentials_config_and_timeline_and_enrolls() {
-    let connectors = StubConnectors::enrolled(StubEvents::script([
-        (0, config_for(7, &custom_config())),
-        (1, timeline_for(7, &contract_timeline())),
-        (2, Event::Refused { code: 5 }),
-    ]));
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled().with_config(&custom_config()),
+        ..StubConnectors::enrolled(StubEvents::script([
+            (1, timeline_for(7, &contract_timeline())),
+            (2, Event::Refused { code: 5 }),
+        ]))
+    };
 
     let report = app::run(&connectors).unwrap();
 
@@ -958,10 +960,10 @@ fn a_door_moved_to_another_broker_and_then_revoked_enrolls_at_the_new_broker() {
         broker_host: "broker2.example.org".to_owned(),
         ..Config::default()
     };
-    let connectors = StubConnectors::enrolled(StubEvents::script([
-        (0, config_for(7, &moved)),
-        (10, Event::Refused { code: 5 }),
-    ]));
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled().with_config(&moved),
+        ..StubConnectors::enrolled(StubEvents::script([(10, Event::Refused { code: 5 })]))
+    };
 
     app::run(&connectors).unwrap();
 

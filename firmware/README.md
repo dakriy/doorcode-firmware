@@ -169,7 +169,8 @@ for size so an image fits.
   configuration that changes how the door connects by storing it there
   and restarting, and gives it up by storing the last known good one
   back (kept meanwhile in `config_good`, with the trial marked in
-  `config_trial`) and restarting again (`docs/protocol.md`). The network
+  `config_trial` and its starts counted in `config_trial_starts`) and
+  restarting again (`docs/protocol.md`). The network
   code needs no part in it: each start reads whichever configuration is
   stored. The broker entries, `broker_ca` included, change only once a
   trial is kept, so downloads verify against the CA in use until then.

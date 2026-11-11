@@ -1,15 +1,16 @@
 //! Entrypoint suite for a configuration that changes how the door reaches
 //! the server: tried after a restart, kept once the door comes online,
-//! given up for the last known good one when it does not in time, and
-//! ignored when it is sent again after that; and the digest that names the
-//! configuration in use.
+//! given up for the last known good one when it does not in time, when it
+//! has started three times without coming online, or when the broker
+//! refuses the door's credentials, and ignored when it is sent again after
+//! that; and the digest that names the configuration in use.
 
 use connectors::{BrokerAddress, Event, Level};
 use pretty_assertions::assert_eq;
 use protocol::{Config, DoorEvent};
 use testkit::{
     config_for, door_connection_to, door_message, hex, BrokerCall, FirmwareCall, Message,
-    StubBroker, StubConnectors, StubEvents, StubStorage,
+    StubBroker, StubConnectors, StubEvents, StubStorage, DOOR_USERNAME,
 };
 
 /// A configuration moving the door to broker2, every other field left to
@@ -25,6 +26,12 @@ const MOVED_DIGEST: &str = "3528629ef69fee59";
 fn moved_elsewhere() -> Vec<u8> {
     hex("a26176016b62726f6b65725f686f73747362726f6b6572332e6578616d706c652e6f7267")
 }
+
+/// The first 16 hex digits of the SHA-256 of `moved_elsewhere()`.
+const MOVED_ELSEWHERE_DIGEST: &str = "36c4797cfe0e6962";
+
+/// The username of the pair a rotation hands door 7 over to.
+const NEXT_USERNAME: &str = "door-7-fedcba987654";
 
 /// A configuration giving only `strike_pulse_ms`, of 5000.
 fn longer_pulse() -> Vec<u8> {
@@ -69,6 +76,19 @@ fn restarted(
     }
 }
 
+/// Door 7 after a start, offline, that `before` left it in, cut short
+/// halfway to the deadline of a trial.
+fn cut_short(before: StubConnectors) -> StubConnectors {
+    let interrupted = restarted(before, [(30_000, Event::Stop)]);
+    app::run(&interrupted).unwrap();
+    interrupted
+}
+
+/// Door 7 after two starts on trial of `moved()` that were cut short.
+fn cut_short_twice() -> StubConnectors {
+    cut_short(cut_short(received(moved())))
+}
+
 /// Door 7 after it gave up `moved()` for `good()`, seeing `events`.
 fn reverted(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
     let trying = restarted(received(moved()), [(60_001, Event::Stop)]);
@@ -95,6 +115,17 @@ fn door_events(connectors: &StubConnectors) -> Vec<DoorEvent> {
         Message::DoorEvent(event) => Some(event),
         _ => None,
     })
+}
+
+/// The digests the `config_reverted` door events named, in order.
+fn reverted_digests(connectors: &StubConnectors) -> Vec<String> {
+    door_events(connectors)
+        .into_iter()
+        .filter_map(|event| match event.event.as_str() {
+            "config_reverted" => event.config_digest,
+            _ => None,
+        })
+        .collect()
 }
 
 /// The config digests the telemetry reports named, in order.
@@ -192,9 +223,7 @@ fn a_config_on_trial_not_online_within_the_previous_connect_timeout_is_given_up(
 
 #[test]
 fn a_restart_during_the_trial_does_not_keep_the_config_on_trial() {
-    let interrupted = restarted(received(moved()), [(30_000, Event::Stop)]);
-    app::run(&interrupted).unwrap();
-    let connectors = restarted(interrupted, [(60_001, Event::Stop)]);
+    let connectors = restarted(cut_short(received(moved())), [(60_001, Event::Stop)]);
 
     app::run(&connectors).unwrap();
 
@@ -225,6 +254,187 @@ fn another_config_arriving_during_the_trial_leaves_the_last_known_good_one_to_go
     let report = app::run(&connectors).unwrap();
 
     assert_eq!(report.config, good());
+}
+
+#[test]
+fn the_third_start_on_trial_gives_the_trial_up_at_once() {
+    let connectors = restarted(cut_short_twice(), []);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            connectors.firmware.calls(),
+            connectors.log.lines_at(Level::Error)
+        ),
+        (
+            vec![FirmwareCall::Restart],
+            vec![format!(
+                "not online in 2 starts on config {MOVED_DIGEST}; restarting with the previous config"
+            )]
+        )
+    );
+}
+
+#[test]
+fn after_giving_up_on_the_third_start_the_door_runs_the_previous_config_and_says_so() {
+    let gave_up = restarted(cut_short_twice(), []);
+    app::run(&gave_up).unwrap();
+    let connectors = restarted(gave_up, [(0, Event::Connected)]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (report.config, reverted_digests(&connectors)),
+        (good(), vec![MOVED_DIGEST.to_owned()])
+    );
+}
+
+#[test]
+fn the_starts_on_trial_count_from_none_again_once_a_trial_is_kept() {
+    let kept = restarted(
+        cut_short(received(moved())),
+        [
+            (0, Event::Connected),
+            (10, config_message(moved_elsewhere())),
+        ],
+    );
+    app::run(&kept).unwrap();
+    let connectors = restarted(cut_short(kept), []);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (first_address(&connectors), report.config.broker_host),
+        (
+            door_connection_to("broker3.example.org").address,
+            "broker3.example.org".to_owned()
+        )
+    );
+}
+
+#[test]
+fn the_starts_on_trial_count_from_none_again_once_a_trial_is_given_up() {
+    let gave_up = restarted(cut_short_twice(), []);
+    app::run(&gave_up).unwrap();
+    let tried = restarted(
+        gave_up,
+        [
+            (0, Event::Connected),
+            (10, config_message(moved_elsewhere())),
+        ],
+    );
+    app::run(&tried).unwrap();
+    let connectors = restarted(cut_short(tried), []);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(report.config.broker_host, "broker3.example.org".to_owned());
+}
+
+#[test]
+fn a_config_taking_the_place_of_one_on_trial_goes_on_counting_its_starts() {
+    let replaced = StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/online", "queue full"),
+        ..restarted(
+            received(moved()),
+            [
+                (0, Event::Connected),
+                (10, config_message(moved_elsewhere())),
+            ],
+        )
+    };
+    app::run(&replaced).unwrap();
+    let connectors = restarted(cut_short(replaced), []);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.log.lines_at(Level::Error),
+        vec![format!(
+            "not online in 2 starts on config {MOVED_ELSEWHERE_DIGEST}; restarting with the previous config"
+        )]
+    );
+}
+
+#[test]
+fn a_broker_refusing_the_credentials_on_trial_gives_the_trial_up() {
+    let connectors = restarted(received(moved()), [(0, Event::Refused { code: 5 })]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            report.door.map(|door| door.username),
+            connectors.firmware.calls(),
+            connectors.log.lines_at(Level::Error)
+        ),
+        (
+            Some(DOOR_USERNAME.to_owned()),
+            vec![FirmwareCall::Restart],
+            vec![format!(
+                "the broker refused the credentials of {DOOR_USERNAME} on config {MOVED_DIGEST}; restarting with the previous config"
+            )]
+        )
+    );
+}
+
+#[test]
+fn after_a_refusal_on_trial_the_door_keeps_its_identity_and_says_it_went_back() {
+    let refused = restarted(received(moved()), [(0, Event::Refused { code: 4 })]);
+    app::run(&refused).unwrap();
+    let connectors = restarted(refused, [(0, Event::Connected)]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            report.door.map(|door| door.door_id),
+            report.config,
+            first_address(&connectors),
+            reverted_digests(&connectors)
+        ),
+        (
+            Some(7),
+            good(),
+            door_connection_to("broker.example.org").address,
+            vec![MOVED_DIGEST.to_owned()]
+        )
+    );
+}
+
+#[test]
+fn both_pairs_of_a_hand_over_refused_on_trial_give_the_trial_up() {
+    let trying = received(moved());
+    let connectors = StubConnectors {
+        storage: trying
+            .storage
+            .with("next_username", NEXT_USERNAME.as_bytes())
+            .with("next_token", b"bmV3LXRva2VuLWZvci1kb29yLTc"),
+        ..StubConnectors::enrolled(StubEvents::script([
+            (0, Event::Refused { code: 5 }),
+            (10, Event::Refused { code: 5 }),
+        ]))
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            connectors.log.lines_at(Level::Warn),
+            connectors.log.lines_at(Level::Error),
+            connectors.storage.stored("next_username")
+        ),
+        (
+            vec![format!(
+                "the broker refused the credentials of {NEXT_USERNAME}; trying the other ones"
+            )],
+            vec![format!(
+                "the broker refused the credentials of {DOOR_USERNAME} on config {MOVED_DIGEST}; restarting with the previous config"
+            )],
+            Some(NEXT_USERNAME.as_bytes().to_vec())
+        )
+    );
 }
 
 #[test]

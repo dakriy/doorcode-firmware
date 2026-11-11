@@ -126,26 +126,47 @@ once the trial is kept.
   to the broker with its door credentials, subscribed, and its online
   status published. The trial mark and the last known good configuration
   are forgotten, and the broker is stored.
-- **Given up** when the door has not come online by the deadline:
-  `update_connect_timeout_s` of the last known good configuration, counted
-  from the start, so that a wrong value of that field in the configuration
-  on trial cannot disable the deadline. The door puts the last known good
-  configuration back (or removes the configuration when it had none, which
-  starts it from the provisioning file's `door_config` again), remembers
-  the digest of the one it gave up, and restarts. It comes back with the
+- **Given up** in any of three ways, whichever comes first:
+  - when the door has not come online by the deadline:
+    `update_connect_timeout_s` of the last known good configuration,
+    counted from the start, so that a wrong value of that field in the
+    configuration on trial cannot disable the deadline;
+  - at the third start on trial, at once, before connecting and without
+    waiting for the deadline: the two starts before it both ended without
+    coming online, so a configuration that crashes or resets the door
+    before the deadline is given up too. The restart into the trial is
+    its first start, and every start after it until the trial ends counts,
+    whatever ended the one before: a restart, a crash, a reset, or a power
+    cut. Two power cuts in a row during a trial therefore also give it up;
+  - when a broker refuses the door's credentials as not authorized
+    (CONNACK return code 4 or 5) while a configuration is on trial. With a
+    credential rotation under way the door first tries the other pair, as
+    it always does; when the broker refuses that pair too, the trial is
+    given up. The door keeps its identity and credentials, rather than
+    forgetting them and enrolling again as a refusal outside a trial
+    makes it do.
+
+  The door puts the last known good configuration back (or removes the
+  configuration when it had none, which starts it from the provisioning
+  file's `door_config` again), remembers the digest of the one it gave
+  up, and restarts. It comes back with the
   previous Wi-Fi and mesh settings and on the previous broker, which was
   never replaced in storage.
 
-The trial mark, the last known good configuration, and the digest of the
-configuration given up are all in storage, so a restart or a power cut
-during the trial neither keeps the new configuration nor loses the old:
-the door starts on trial again, with the whole deadline from that start.
-A configuration to try that arrives while one is still on trial takes its
+The trial mark with its count of starts, the last known good
+configuration, and the digest of the configuration given up are all in
+storage, so a restart or a power cut during the trial neither keeps the
+new configuration nor loses the old: the door starts on trial again, with
+the whole deadline from that start and one more start counted. The count
+is forgotten with the trial mark when the trial is kept or given up. A
+configuration to try that arrives while one is still on trial takes its
 place on trial; the last known good configuration stays the one the door
-goes back to.
+goes back to, and the starts already counted stay counted, since the door
+has not come online as its door since it left that configuration; the
+restart into the new one counts as one more.
 
-Once online again after giving one up, the door says `config_reverted`
-(Door events), once. The server's configuration stays retained on the
+Once online again after giving one up, whichever way, the door says
+`config_reverted` (Door events), once. The server's configuration stays retained on the
 broker, so the door receives the configuration it gave up again: whenever
 a configuration with the digest given up arrives, the door logs and
 ignores it. Any other configuration is taken as usual, whether tried or
@@ -155,9 +176,9 @@ if it is sent after.
 Without the mesh, the Wi-Fi station falls back to the network that last
 associated when the one it was told cannot associate (`wifi_ssid` above),
 so a wrong `wifi_ssid` or `wifi_password` can come online through the old
-network and be kept. A broker on trial that refuses the door's
-credentials as not authorized revokes them as any broker would; the trial
-guards against a broker the door cannot reach or cannot verify.
+network and be kept. When the door's credentials were in fact revoked
+during a trial, the door goes back to the last known good configuration,
+is refused there too, and only then forgets them and enrolls again.
 
 ### Configuration digest
 

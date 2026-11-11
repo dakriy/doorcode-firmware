@@ -2,7 +2,8 @@
 //! following the configuration and timeline the server sends, obeying its
 //! commands, updating its firmware, handing over to new credentials, and
 //! going back to enrolling when the broker no longer accepts the
-//! credentials.
+//! credentials, or to the last known good configuration when that happens
+//! on trial.
 
 use connectors::{
     BrokerAddress, BrokerError, ConnectOptions, Event, Incoming, Level, Publication, StatusReport,
@@ -108,6 +109,7 @@ pub(crate) fn start(
     since_start: SinceStart,
 ) -> Result<Door, RunError> {
     let storage = device.connectors.storage();
+    let trial = trial::boot(device)?;
     let next = stored::next_credentials(storage, credentials.door_id)?;
     let (config, config_bytes) = restored(device, stored::CONFIG, Config::decode)?;
     let (timeline, _) = restored(device, stored::TIMELINE, Timeline::decode)?;
@@ -122,7 +124,7 @@ pub(crate) fn start(
         broker: configured_broker(&broker, &config),
         config,
         config_digest: config_bytes.map_or(String::new(), |bytes| trial::digest(&bytes)),
-        trial: trial::boot(device)?,
+        trial,
         timeline,
         link: Link::Connecting,
         failures: 0,
@@ -278,7 +280,7 @@ impl Door {
         }
         if device.is_due(self.trial.as_ref().map(Trial::revert_at)) {
             self.trial = None;
-            trial::revert(device, &self.config_digest)?;
+            trial::revert(device, &self.config_digest, "not online in time")?;
         }
         if device.is_due(self.retry_at()) {
             return Ok(self.hand_over(device));
@@ -537,7 +539,9 @@ impl Door {
 
     /// A refusal as not authorized means the credentials are revoked, unless
     /// a hand-over is under way and the other pair was not refused just
-    /// before: then the other pair is tried at once.
+    /// before: then the other pair is tried at once. On trial, the
+    /// configuration on trial is given up instead, and the door keeps its
+    /// credentials.
     fn refused(mut self, device: &Device<'_>, code: u8) -> Result<Phase, RunError> {
         if !REVOKED_CODES.contains(&code) {
             let door = self.pause(device, &format!("refused with code {code}"));
@@ -554,6 +558,10 @@ impl Door {
                 ..self
             };
             return Ok(Phase::Door(Box::new(door.connect(device))));
+        }
+        if self.trial.take().is_some() {
+            trial::revert(device, &self.config_digest, &refused)?;
+            return Ok(Phase::Door(Box::new(self)));
         }
         self.revoked(device)
     }
