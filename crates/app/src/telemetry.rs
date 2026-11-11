@@ -21,14 +21,21 @@ pub(crate) struct SinceStart {
     started_said: bool,
 }
 
+/// What the door counted since the last report, all from zero again once
+/// a report is sent.
+#[derive(Debug, Clone, Copy, Default)]
+struct SinceReport {
+    /// Times the door opened.
+    opens: u64,
+    /// Checks sent.
+    checks_sent: u64,
+    /// Checks whose reply did not come in time.
+    checks_lost: u64,
+}
+
 pub(crate) struct Tally {
     since_start: SinceStart,
-    /// Times the door opened since the last report.
-    opens: u64,
-    /// Checks sent since the last report.
-    checks_sent: u64,
-    /// Checks since the last report whose reply did not come in time.
-    checks_lost: u64,
+    since_report: SinceReport,
 }
 
 impl Tally {
@@ -37,9 +44,7 @@ impl Tally {
     pub(crate) fn after(since_start: SinceStart) -> Tally {
         Tally {
             since_start,
-            opens: 0,
-            checks_sent: 0,
-            checks_lost: 0,
+            since_report: SinceReport::default(),
         }
     }
 
@@ -65,30 +70,30 @@ impl Tally {
 
     pub(crate) fn door_moved(&mut self, open: bool) {
         if open {
-            self.opens += 1;
+            self.since_report.opens += 1;
         }
     }
 
     pub(crate) fn check_sent(&mut self) {
-        self.checks_sent += 1;
+        self.since_report.checks_sent += 1;
     }
 
     pub(crate) fn check_lost(&mut self) {
-        self.checks_lost += 1;
+        self.since_report.checks_lost += 1;
     }
 
     pub(crate) fn counters(&self, latency_ms: u64) -> Counters {
         Counters {
-            opens: self.opens,
+            opens: self.since_report.opens,
             reconnects: self.since_start.connections.saturating_sub(1),
             latency_ms,
-            checks_sent: self.checks_sent,
-            checks_lost: self.checks_lost,
+            checks_sent: self.since_report.checks_sent,
+            checks_lost: self.since_report.checks_lost,
         }
     }
 
-    /// Publishes a report; the opens and checks count from zero again once
-    /// it is sent.
+    /// Publishes a report; what was counted since the last report counts
+    /// from zero again once it is sent.
     pub(crate) fn report(&mut self, device: &Device<'_>, door_id: u64, latency_ms: u64) {
         let counters = self.counters(latency_ms);
         let mesh = device.connectors.radio().mesh();
@@ -108,11 +113,7 @@ impl Tally {
             checks_lost: counters.checks_lost,
         };
         match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
-            Ok(_) => {
-                self.opens = 0;
-                self.checks_sent = 0;
-                self.checks_lost = 0;
-            }
+            Ok(_) => self.since_report = SinceReport::default(),
             Err(error) => device.log(Level::Warn, &format!("telemetry was not sent: {error}")),
         }
     }
