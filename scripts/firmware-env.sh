@@ -3,9 +3,20 @@
 # firmware/: where they are, in one place.
 
 # ESP-IDF and its Python environment, which holds esptool, espsecure, and
-# nvs_partition_gen.
-idf_path=$(ls -d /root/.espressif/esp-idf/v* | tail -n 1)
-idf_python=$(ls /root/.espressif/python_env/idf*_env/bin/python | tail -n 1)
+# nvs_partition_gen. The first firmware build installs both, so they are
+# looked up when used, not when this file is sourced: `idf_path` prints
+# ESP-IDF's directory and `idf_python ARGUMENT...` runs its Python.
+idf_path() {
+    ls -d /root/.espressif/esp-idf/v* | tail -n 1
+}
+idf_python() {
+    python=$(ls /root/.espressif/python_env/idf*_env/bin/python 2>/dev/null | tail -n 1)
+    if [ -z "$python" ]; then
+        echo "ESP-IDF's Python environment is missing; build the firmware first" >&2
+        return 1
+    fi
+    "$python" "$@"
+}
 
 # What `cargo build --release` writes, and the partition table it flashes.
 firmware_elf=target/xtensa-esp32-espidf/release/doorcode-firmware

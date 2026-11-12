@@ -23,7 +23,9 @@ fi
 image=target/provisioning-nvs.bin
 
 # The build script's output directory holds provisioning.csv.
-out_dir=$(cargo build --release --message-format=json | "$idf_python" -c '
+# The build runs to its end first, since it is what installs ESP-IDF's Python.
+messages=$(cargo build --release --message-format=json)
+out_dir=$(printf '%s\n' "$messages" | idf_python -c '
 import json, sys
 for line in sys.stdin:
     message = json.loads(line)
@@ -39,16 +41,16 @@ fi
 # itself: the build does not regenerate its partition-table.bin when the CSV
 # changes, so that copy can be stale. Read into one variable first, so a
 # failure stops the script.
-nvs=$("$idf_python" "$idf_path/components/partition_table/parttool.py" -q \
+nvs=$(idf_python "$(idf_path)/components/partition_table/parttool.py" -q \
     --partition-table-file "$firmware_partitions" \
     get_partition_info --partition-name nvs --info offset size)
 set -- $nvs
 offset=$1
 size=$2
 
-"$idf_python" -m esp_idf_nvs_partition_gen generate "$out_dir/provisioning.csv" "$image" "$size"
+idf_python -m esp_idf_nvs_partition_gen generate "$out_dir/provisioning.csv" "$image" "$size"
 echo "provisioning image: firmware/$image (nvs at $offset, $size bytes)"
 
 if [ -n "$port" ]; then
-    "$idf_python" -m esptool --chip esp32 --port "$port" write_flash "$offset" "$image"
+    idf_python -m esptool --chip esp32 --port "$port" write_flash "$offset" "$image"
 fi

@@ -39,17 +39,17 @@ fi
 
 # The ELF's SHA-256 goes into the app descriptor's app_elf_sha256 field,
 # 0xb0 bytes into the image, as ESP-IDF's own build puts it there.
-"$idf_python" -m esptool --chip esp32 elf2image --flash_mode dio --flash_freq 40m \
+idf_python -m esptool --chip esp32 elf2image --flash_mode dio --flash_freq 40m \
     --flash_size 4MB --elf-sha256-offset 0xb0 -o "$unsigned" "$elf"
 
 rm -f "$signed"
 set --
 if [ "$variant" = migrate ]; then
-    "$idf_python" -m espsecure sign_data --version 1 --keyfile "$key" --output "$signed" "$unsigned"
+    idf_python -m espsecure sign_data --version 1 --keyfile "$key" --output "$signed" "$unsigned"
     set -- "$signed" "$key"
 fi
 
-"$idf_python" - "$version" "$unsigned" "$firmware_partitions" "$@" <<'PYTHON'
+idf_python - "$version" "$unsigned" "$firmware_partitions" "$@" <<'PYTHON'
 """Checks the image before it is released. With a signed image and the
 private key it was signed with, checks the stepping-stone image instead:
 its signature, and its size against the standard table's 1 MB slots."""
