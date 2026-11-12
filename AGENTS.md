@@ -109,7 +109,7 @@ The runtime budget covers everything `verify-fast` runs.
 | --- | --- | --- |
 | `verify-fast` | every gate above except mutation; the entrypoint suite and the fast connector tests | after every change |
 | `verify-mutation` | mutation testing of application code, survivor report | before finishing an application-code change |
-| `verify-integration` | the slow connector tests | only when a connector interface or implementation changed, and on a schedule in CI |
+| `verify-integration` | the slow connector tests | only when a connector interface or implementation changed; run locally, not by CI |
 | `verify-all` | all three, stopping at the first failure | before release or on request |
 
 ---
@@ -118,7 +118,7 @@ The runtime budget covers everything `verify-fast` runs.
 
 ## Stack
 
-- Language and version: Rust, stable 1.99 on the desktop workspace; the
+- Language and version: Rust, stable 1.99 (1.99.1 in CI) on the desktop workspace; the
   Espressif `esp` fork (Rust 1.93 nightly, Xtensa) for `firmware/`
 - Build system: cargo workspaces, orchestrated by `make`. The repository root
   is the desktop workspace; `firmware/` is a separate workspace that builds
@@ -139,11 +139,15 @@ The runtime budget covers everything `verify-fast` runs.
 - Complexity tool: `rust-code-analysis-cli` via `scripts/check-complexity.sh`,
   plus clippy `cognitive_complexity` through each crate's `clippy.toml`
 
-Tool installation on a fresh machine (none needs root):
+Tool installation on a fresh machine (none needs root), at the versions CI
+installs in `.github/actions/rust/action.yml`:
 
-    cargo install cargo-llvm-cov cargo-mutants cargo-machete rust-code-analysis-cli
+    cargo install cargo-llvm-cov@0.9.1 cargo-mutants@27.1.0 \
+        cargo-machete@0.9.2 rust-code-analysis-cli@0.0.25
 
 `jq`, `bc`, `make`, and `docker` come from the system package manager.
+`scripts/env.sh` points `cargo-llvm-cov` at the system `llvm-cov` and
+`llvm-profdata` when the toolchain has no `llvm-tools` component.
 
 ## Layout
 
@@ -206,6 +210,13 @@ image (`docker pull eclipse-mosquitto:2`). The broker tests start and remove
 their own containers, publishing the ports on 127.0.0.1 only. The download
 tests serve HTTPS from the test process and are fast, except the one that
 asks the system's name resolver about an unknown host.
+
+CI: `.github/workflows/verify.yml` runs on every push to a branch and
+every pull request, and other workflows reuse it through `workflow_call`.
+Its jobs run in parallel on `ubuntu-24.04`: `make verify-fast` and
+`make verify-mutation` on Rust 1.99.1 with the tools above, and
+`make firmware-check` then `make firmware-build` in the Espressif
+container. `make verify-integration` is run locally, not by CI.
 
 Firmware commands: `make firmware-build`, `make firmware-build-migrate`
 (the stepping-stone image, `docs/migration.md`), `make firmware-check`,
@@ -347,3 +358,12 @@ Gates the bootstrap could not establish for this stack, and what compensates.
   behavior is still covered by the mutants of its callees and by the 100%
   coverage gate.
 - **Firmware connector tests** cannot run on a desktop; see Deviations.
+- **CI** (`.github/workflows/verify.yml`) runs `verify-fast`,
+  `verify-mutation`, `firmware-check`, and `firmware-build` on every push
+  to a branch and every pull request. The slow connector tests of
+  `verify-integration` are run locally, when a connector changes, and not
+  by CI. Neither are the board nor the tests against a server in
+  `scripts/tests`, which need hardware or a development server and are
+  run by hand. The
+  firmware job starts with empty docker volumes, so each run downloads
+  ESP-IDF and builds the firmware from scratch.

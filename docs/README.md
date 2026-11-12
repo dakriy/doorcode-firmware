@@ -21,9 +21,9 @@ live outside the repository.
 - `host.md`: the desktop host binary, its flags, and its control API.
 - `mesh.md`: how doors far from an access point hop through other doors,
   and the telemetry that shows it.
-- `testing.md`: the integration test that runs a desktop door against a
-  development server, the load tool that runs many, and the bench files
-  that drive a real board. `../scripts/tests/README.md` summarizes each
+- `testing.md`: what CI runs and what runs locally, the integration test
+  that runs a desktop door against a development server, the load tool
+  that runs many, and the bench files that drive a real board. `../scripts/tests/README.md` summarizes each
   test script: what it needs, how to run it, and what it leaves behind.
 
 The firmware workspace's own README, `../firmware/README.md`, covers

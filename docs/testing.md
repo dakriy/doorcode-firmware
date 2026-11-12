@@ -1,3 +1,20 @@
+# What runs where
+
+| Check | Where it runs |
+| --- | --- |
+| `make verify-fast`, `make verify-mutation` | On a developer's machine, and in CI on every push to a branch and every pull request |
+| `make verify-integration` (the slow connector tests) | On a developer's machine only, when a connector changes; not in CI |
+| `make firmware-check`, `make firmware-build` | In the Espressif container, on a developer's machine and in CI on every push to a branch and every pull request |
+| The test against a server, the load tool, the bench run, the hardware walkthrough, and the configuration revert test (below) | By hand, against a development server and, for the bench scripts, a board on a serial port |
+
+CI is `.github/workflows/verify.yml`. Its jobs run in parallel on GitHub's
+`ubuntu-24.04` runner. The two Rust jobs install Rust 1.99.1 and the
+cargo tools at the versions named in `.github/actions/rust/action.yml`. The
+firmware job runs the same container script as a developer's machine,
+but starts with empty docker volumes, so it downloads ESP-IDF and builds
+the firmware from scratch each time. A failing job fails the push or the
+pull request.
+
 # Testing against a server
 
 The repository's own suites (`make verify-fast`, `make verify-mutation`,

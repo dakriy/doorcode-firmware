@@ -1,0 +1,41 @@
+name: Verify
+
+# Runs on every push to a branch and every pull request: the verification
+# the contract defines, except verify-integration, which runs locally. A
+# workflow run by a tag calls the same jobs through workflow_call.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: verify-fast
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust
+      - run: make verify-fast
+
+  mutation:
+    name: verify-mutation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust
+      - run: make verify-mutation
+
+  firmware:
+    name: firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - run: make firmware-check
+      - run: make firmware-build
