@@ -6,12 +6,13 @@ description: >
 runs:
   using: composite
   steps:
-    - name: Install Rust 1.99.1
+    - name: Install Rust
       shell: bash
       run: |
-        rustup toolchain install 1.99.1 --profile minimal \
+        toolchain=1.99.1
+        rustup toolchain install "$toolchain" --profile minimal \
           --component clippy,rustfmt,llvm-tools
-        rustup default 1.99.1
+        rustup default "$toolchain"
 
     - name: Install cargo tools
       uses: taiki-e/install-action@v2

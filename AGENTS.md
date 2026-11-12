@@ -118,8 +118,9 @@ The runtime budget covers everything `verify-fast` runs.
 
 ## Stack
 
-- Language and version: Rust, stable 1.99 (1.99.1 in CI) on the desktop workspace; the
-  Espressif `esp` fork (Rust 1.93 nightly, Xtensa) for `firmware/`
+- Language and version: Rust, stable 1.99 on the desktop workspace, at the
+  release `.github/actions/rust/action.yml` installs for CI; the Espressif
+  `esp` fork (Rust 1.93 nightly, Xtensa) for `firmware/`
 - Build system: cargo workspaces, orchestrated by `make`. The repository root
   is the desktop workspace; `firmware/` is a separate workspace that builds
   inside the `espressif/idf-rust:esp32_latest` container
@@ -139,11 +140,11 @@ The runtime budget covers everything `verify-fast` runs.
 - Complexity tool: `rust-code-analysis-cli` via `scripts/check-complexity.sh`,
   plus clippy `cognitive_complexity` through each crate's `clippy.toml`
 
-Tool installation on a fresh machine (none needs root), at the versions CI
-installs in `.github/actions/rust/action.yml`:
+Tool installation on a fresh machine (none needs root), each as
+`NAME@VERSION` at the version `.github/actions/rust/action.yml` installs
+for CI:
 
-    cargo install cargo-llvm-cov@0.9.1 cargo-mutants@27.1.0 \
-        cargo-machete@0.9.2 rust-code-analysis-cli@0.0.25
+    cargo install cargo-llvm-cov cargo-mutants cargo-machete rust-code-analysis-cli
 
 `jq`, `bc`, `make`, and `docker` come from the system package manager.
 `scripts/env.sh` points `cargo-llvm-cov` at the system `llvm-cov` and
@@ -214,7 +215,8 @@ asks the system's name resolver about an unknown host.
 CI: `.github/workflows/verify.yml` runs on every push to a branch and
 every pull request, and other workflows reuse it through `workflow_call`.
 Its jobs run in parallel on `ubuntu-24.04`: `make verify-fast` and
-`make verify-mutation` on Rust 1.99.1 with the tools above, and
+`make verify-mutation` with the toolchain and tools of
+`.github/actions/rust/action.yml`, and
 `make firmware-check` then `make firmware-build` in the Espressif
 container. `make verify-integration` is run locally, not by CI.
 
@@ -361,12 +363,9 @@ Gates the bootstrap could not establish for this stack, and what compensates.
   behavior is still covered by the mutants of its callees and by the 100%
   coverage gate.
 - **Firmware connector tests** cannot run on a desktop; see Deviations.
-- **CI** (`.github/workflows/verify.yml`) runs `verify-fast`,
-  `verify-mutation`, `firmware-check`, and `firmware-build` on every push
-  to a branch and every pull request. The slow connector tests of
+- **CI** runs what Commands lists under CI. The slow connector tests of
   `verify-integration` are run locally, when a connector changes, and not
   by CI. Neither are the board nor the tests against a server in
   `scripts/tests`, which need hardware or a development server and are
-  run by hand. The
-  firmware job starts with empty docker volumes, so each run downloads
-  ESP-IDF and builds the firmware from scratch.
+  run by hand. The firmware job starts with empty docker volumes, so each
+  run downloads ESP-IDF and builds the firmware from scratch.

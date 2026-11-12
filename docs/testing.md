@@ -8,11 +8,11 @@
 | The test against a server, the load tool, the bench run, the hardware walkthrough, and the configuration revert test (below) | By hand, against a development server and, for the bench scripts, a board on a serial port |
 
 CI is `.github/workflows/verify.yml`. Its jobs run in parallel on GitHub's
-`ubuntu-24.04` runner. The two Rust jobs install Rust 1.99.1 and the
-cargo tools at the versions named in `.github/actions/rust/action.yml`. The
-firmware job runs the same container script as a developer's machine,
-but starts with empty docker volumes, so it downloads ESP-IDF and builds
-the firmware from scratch each time. A failing job fails the push or the
+`ubuntu-24.04` runner. The two Rust jobs install the Rust toolchain and
+the cargo tools at the versions named in `.github/actions/rust/action.yml`.
+The firmware job runs the same container script as a developer's
+machine, but starts with empty docker volumes, so it downloads ESP-IDF
+and builds the firmware from scratch each time. A failing job fails the push or the
 pull request.
 
 A pushed tag `vVERSION` runs `.github/workflows/release.yml` instead, which
