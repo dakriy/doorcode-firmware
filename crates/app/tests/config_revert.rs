@@ -64,10 +64,7 @@ fn config_message(payload: Vec<u8>) -> Event {
 
 /// Door 7, running `good()`, after it received `payload` while online.
 fn received(payload: Vec<u8>) -> StubConnectors {
-    let connectors = StubConnectors {
-        storage: StubStorage::enrolled().with_config(&good()),
-        ..StubConnectors::online([(10, config_message(payload))])
-    };
+    let connectors = StubConnectors::online_with(&good(), [(10, config_message(payload))]);
     app::run(&connectors).unwrap();
     connectors
 }
@@ -239,10 +236,7 @@ fn the_network_starts_with_the_wifi_of_the_config_to_try() {
         wifi_password: "lobby-secret".to_owned(),
         ..good()
     };
-    let first = StubConnectors {
-        storage: StubStorage::enrolled().with_config(&good()),
-        ..StubConnectors::online([(10, config_for(7, &lobby))])
-    };
+    let first = StubConnectors::online_with(&good(), [(10, config_for(7, &lobby))]);
     app::run(&first).unwrap();
     let connectors = restarted(first, []);
 
@@ -643,10 +637,7 @@ fn a_connect_timeout_too_long_to_count_in_milliseconds_keeps_the_trial_going() {
         update_connect_timeout_s: u64::MAX,
         ..Config::default()
     };
-    let first = StubConnectors {
-        storage: StubStorage::enrolled().with_config(&endless),
-        ..StubConnectors::online([(10, config_message(moved()))])
-    };
+    let first = StubConnectors::online_with(&endless, [(10, config_message(moved()))]);
     app::run(&first).unwrap();
     let connectors = restarted(first, [(A_THOUSAND_CENTURIES_MS, Event::Connected)]);
 
@@ -878,10 +869,7 @@ fn every_setting_that_can_cut_the_door_off_puts_a_config_on_trial() {
     let tried: Vec<(usize, Option<Vec<u8>>)> = changes
         .iter()
         .map(|change| {
-            let connectors = StubConnectors {
-                storage: StubStorage::enrolled().with_config(&good()),
-                ..StubConnectors::online([(10, config_for(7, change))])
-            };
+            let connectors = StubConnectors::online_with(&good(), [(10, config_for(7, change))]);
             app::run(&connectors).unwrap();
             (
                 connectors.firmware.restarts(),
@@ -902,10 +890,7 @@ fn a_config_changing_only_other_settings_is_stored_and_run_at_once() {
         ntp_server: "time.example.org".to_owned(),
         ..good()
     };
-    let connectors = StubConnectors {
-        storage: StubStorage::enrolled().with_config(&good()),
-        ..StubConnectors::online([(10, config_for(7, &other))])
-    };
+    let connectors = StubConnectors::online_with(&good(), [(10, config_for(7, &other))]);
 
     let report = app::run(&connectors).unwrap();
 
@@ -941,14 +926,14 @@ fn a_config_changing_only_other_settings_stays_however_long_the_door_is_offline(
         keepalive_s: 45,
         ..good()
     };
-    let first = StubConnectors {
-        storage: StubStorage::enrolled().with_config(&good()),
-        ..StubConnectors::online([
+    let first = StubConnectors::online_with(
+        &good(),
+        [
             (10, config_for(7, &other)),
             (20, Event::Disconnected),
             (400_000, Event::Stop),
-        ])
-    };
+        ],
+    );
     app::run(&first).unwrap();
     let connectors = restarted(first, []);
 

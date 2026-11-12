@@ -17,6 +17,7 @@ use connectors::{
     Network, NetworkSettings, Radio, Random, Status, StatusReport, Storage, Strike, TcpCounters,
     WifiLink,
 };
+use protocol::Config;
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
 pub use door::{StrikeCall, StubDoorSensor, StubStrike};
@@ -290,6 +291,15 @@ impl StubConnectors {
         Self::enrolled(StubEvents::script(
             [(0, Event::Connected)].into_iter().chain(events),
         ))
+    }
+
+    /// The stubs of door 7 with `config` stored, which comes online at
+    /// millisecond 0 and then sees `events`.
+    pub fn online_with(config: &Config, events: impl IntoIterator<Item = (u64, Event)>) -> Self {
+        Self {
+            storage: StubStorage::enrolled().with_config(config),
+            ..Self::online(events)
+        }
     }
 }
 

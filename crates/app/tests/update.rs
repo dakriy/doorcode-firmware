@@ -55,14 +55,6 @@ fn keyed() -> Config {
     keyed_with(&signing_key_hex())
 }
 
-/// A door online with `config` stored that sees `events`.
-fn configured(config: &Config, events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
-    StubConnectors {
-        storage: StubStorage::enrolled().with_config(config),
-        ..StubConnectors::online(events)
-    }
-}
-
 /// The update for `image` at 10 ms, and `served` downloaded with `status`
 /// at 20 ms.
 fn update_downloading(image: &[u8], status: u16, served: &[u8]) -> Vec<(u64, Event)> {
@@ -75,7 +67,7 @@ fn update_downloading(image: &[u8], status: u16, served: &[u8]) -> Vec<(u64, Eve
 /// A door online with the signing key stored that is sent the update for
 /// `image` at 10 ms and downloads `served` with `status` at 20 ms.
 fn updating(image: &[u8], status: u16, served: &[u8]) -> StubConnectors {
-    configured(&keyed(), update_downloading(image, status, served))
+    StubConnectors::online_with(&keyed(), update_downloading(image, status, served))
 }
 
 /// A door online with the signing key stored that is sent the update for
@@ -329,7 +321,10 @@ fn a_signing_key_that_is_not_the_hex_of_a_point_counts_as_no_signing_key() {
     let acks: Vec<_> = malformed
         .iter()
         .map(|key| {
-            let connectors = configured(&keyed_with(key), update_downloading(&image, 200, &image));
+            let connectors = StubConnectors::online_with(
+                &keyed_with(key),
+                update_downloading(&image, 200, &image),
+            );
             app::run(&connectors).unwrap();
             connectors.broker.last_call()
         })
@@ -435,7 +430,7 @@ fn an_update_while_one_is_downloading_is_acked_failed_as_in_progress() {
     let image = signed_image(&body());
     let other = "fedcba9876543210";
     let events = [(10, update(&image)), (15, update_with_id(other, &image))];
-    let connectors = configured(&keyed(), events);
+    let connectors = StubConnectors::online_with(&keyed(), events);
 
     app::run(&connectors).unwrap();
 
@@ -462,7 +457,7 @@ fn the_update_downloading_goes_on_after_another_is_refused() {
     ]
     .into_iter()
     .chain(downloaded(20, 200, &image));
-    let connectors = configured(&keyed(), events);
+    let connectors = StubConnectors::online_with(&keyed(), events);
 
     app::run(&connectors).unwrap();
 

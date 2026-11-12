@@ -248,10 +248,8 @@ fn a_received_configuration_replaces_the_one_in_effect() {
         strike_pulse_ms: 3000,
         ..custom_config()
     };
-    let connectors = StubConnectors {
-        storage: StubStorage::enrolled().with_config(&in_effect),
-        ..StubConnectors::online([(10, config_for(7, &custom_config()))])
-    };
+    let connectors =
+        StubConnectors::online_with(&in_effect, [(10, config_for(7, &custom_config()))]);
 
     let report = app::run(&connectors).unwrap();
 

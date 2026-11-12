@@ -62,10 +62,10 @@ pub(crate) fn signing_key(hex: &str) -> Option<VerifyingKey> {
         .map(|digit| digit.to_digit(16))
         .collect::<Option<Vec<u32>>>()?;
     let (pairs, _) = digits.as_chunks::<2>();
-    let point = pairs
+    let point: Vec<u8> = pairs
         .iter()
-        .map(|[high, low]| u8::try_from(high * 16 + low).ok())
-        .collect::<Option<Vec<u8>>>()?;
+        .map(|[high, low]| (high * 16 + low) as u8)
+        .collect();
     let sec1 = [&[UNCOMPRESSED_POINT][..], &point].concat();
     VerifyingKey::from_sec1_bytes(&sec1).ok()
 }
