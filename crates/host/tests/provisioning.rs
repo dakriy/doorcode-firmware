@@ -72,6 +72,7 @@ fn the_door_config_is_stored_as_the_configuration_message() {
         Config {
             strike_pulse_ms: 2500,
             wifi_roam_rssi: -65,
+            firmware_signing_key: "0123456789abcdef".repeat(8),
             ..Config::default()
         }
     );

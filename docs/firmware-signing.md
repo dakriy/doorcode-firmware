@@ -1,8 +1,9 @@
 # Firmware image signatures
 
 Every firmware image the controller installs over the air carries a
-signature, which the application checks before it boots the image. The
-check can be turned off per door with the configuration field
+signature, which the application checks before it boots the image, with
+the key the server sends in the door's configuration. The check can be
+turned off per door with the configuration field
 `accept_unsigned_firmware` (default `false`). ESP-IDF's own check of signed
 images on update stays off; the application does it, so the configuration
 can decide.
@@ -30,15 +31,27 @@ The signature block is the last 68 bytes of the file. The `sha256` in an
 
 ## Key
 
-The public key is `firmware/signing_public_key.bin`: 64 bytes, the raw
-P-256 point, 32 bytes of `x` followed by 32 bytes of `y`, each big-endian
-(the SEC1 uncompressed point without its leading `0x04`). It is the format
-`espsecure extract_public_key --version 1` writes. The firmware embeds it at
-build time. The private key never enters the repository.
+The server owns the signing key. It keeps the private half, and sends the
+public half to every door as the configuration field
+`firmware_signing_key`, in each configuration message and in the
+provisioning file's `door_config` (`protocol.md`). The value is 128 hex
+characters spelling 64 bytes: the raw P-256 point, 32 bytes of `x`
+followed by 32 bytes of `y`, each big-endian (the SEC1 uncompressed point
+without its leading `0x04`). The door stores it with the rest of the
+configuration and checks every update with the key of the configuration
+it runs with. The firmware has no key of its own, and nothing about the
+key is in this repository.
+
+A door has no usable key when the field is missing or empty, is not 128
+hex characters, or does not spell a point on the curve. Such a door
+refuses every update with `no signing key`, unless it accepts unsigned
+firmware.
 
 ## Outcomes
 
 | Image | Ack detail |
 | --- | --- |
+| Any, while the configuration has no usable key | `no signing key` |
 | Shorter than 68 bytes, version word not 0, signature not a valid `r || s`, or not verifying with the key | `bad signature` |
 | Signature verifies | installed and booted |
+| Any, with `accept_unsigned_firmware` `true` | installed and booted, key or no key |

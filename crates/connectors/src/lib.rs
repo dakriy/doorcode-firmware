@@ -315,8 +315,6 @@ pub trait Firmware {
     fn running_version(&self) -> String;
     /// Why the device started this time.
     fn start_reason(&self) -> StartReason;
-    /// The raw P-256 public key, `x || y`, that images must be signed with.
-    fn signing_key(&self) -> Vec<u8>;
     /// Whether this boot is the first on a newly installed image, which the
     /// bootloader rolls back on the next restart unless it is marked valid.
     fn first_boot_of_new_image(&self) -> bool;

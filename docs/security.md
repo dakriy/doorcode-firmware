@@ -4,7 +4,10 @@ The controllers are ESP32 (revision 1.0) modules installed inside walls and
 serviced in place by technicians.
 
 - **Signed OTA images with rollback.** Every image is signed; the bootloader
-  rolls back an image that does not confirm itself after boot.
+  rolls back an image that does not confirm itself after boot. The server
+  holds the signing key and sends its public half in each door's
+  configuration (`firmware-signing.md`); no key is built into the firmware,
+  and a door without one refuses updates.
 - **Per-device credentials.** Each door enrolls with the shared enrollment
   account, is given broker credentials of its own, and rotates them when
   the server says so; they live in non-volatile storage. A release image

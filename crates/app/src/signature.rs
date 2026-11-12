@@ -3,8 +3,8 @@
 //! check reads it: the image, then a 4-byte little-endian version word
 //! that is 0, then the 64-byte ECDSA P-256 signature `r || s`, each half
 //! big-endian, of the SHA-256 of everything before the block. The key is the
-//! raw public point `x || y`, each half big-endian. `docs/firmware-signing.md`
-//! records the layout.
+//! raw public point `x || y`, each half big-endian, which the configuration
+//! carries as hex. `docs/firmware-signing.md` records the layout.
 
 use p256::ecdsa::signature::hazmat::PrehashVerifier;
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -16,6 +16,8 @@ const BLOCK_BYTES: usize = 4 + 64;
 const SIGNATURE_AT: usize = 4;
 /// The SEC1 tag of an uncompressed point, which the raw key leaves out.
 const UNCOMPRESSED_POINT: u8 = 4;
+/// The hex digits of a raw key: two for each byte of `x || y`.
+const KEY_DIGITS: usize = 128;
 
 /// An image followed as it arrives: everything but the last bytes, which
 /// may turn out to be the block, is hashed as the signed part.
@@ -36,18 +38,34 @@ impl SignedImage {
     }
 
     /// Whether the image ends in a block of version 0 whose signature of
-    /// the rest verifies with the raw public `key`.
-    pub(crate) fn verifies(self, key: &[u8]) -> bool {
+    /// the rest verifies with `key`.
+    pub(crate) fn verifies(self, key: &VerifyingKey) -> bool {
         let Ok(block) = <[u8; BLOCK_BYTES]>::try_from(self.tail.as_slice()) else {
             return false;
         };
         let (version, signature) = block.split_at(SIGNATURE_AT);
-        let point = [&[UNCOMPRESSED_POINT][..], key].concat();
-        let key = VerifyingKey::from_sec1_bytes(&point).ok();
-        let signature = Signature::from_slice(signature).ok();
         let digest = self.signed.finalize();
-        key.zip(signature).is_some_and(|(key, signature)| {
+        Signature::from_slice(signature).is_ok_and(|signature| {
             version == [0; SIGNATURE_AT] && key.verify_prehash(&digest, &signature).is_ok()
         })
     }
+}
+
+/// The key that `hex`, the raw public point `x || y` in 128 hex digits,
+/// spells, or `None` when it spells no point on the curve.
+pub(crate) fn signing_key(hex: &str) -> Option<VerifyingKey> {
+    if hex.len() != KEY_DIGITS {
+        return None;
+    }
+    let digits = hex
+        .chars()
+        .map(|digit| digit.to_digit(16))
+        .collect::<Option<Vec<u32>>>()?;
+    let (pairs, _) = digits.as_chunks::<2>();
+    let point = pairs
+        .iter()
+        .map(|[high, low]| u8::try_from(high * 16 + low).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    let sec1 = [&[UNCOMPRESSED_POINT][..], &point].concat();
+    VerifyingKey::from_sec1_bytes(&sec1).ok()
 }

@@ -29,7 +29,8 @@ pub use events::{
     typed, StubEvents,
 };
 pub use firmware::{
-    sha256_hex, signed_by_another_key, signed_image, FirmwareCall, StubDownload, StubFirmware,
+    sha256_hex, signed_by_another_key, signed_image, signing_key_hex, FirmwareCall, StubDownload,
+    StubFirmware,
 };
 pub use storage::StubStorage;
 

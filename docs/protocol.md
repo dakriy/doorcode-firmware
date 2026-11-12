@@ -84,7 +84,8 @@ Trying a configuration below).
 | `mesh_min_router_rssi` | -75 | When no access point is at least this strong, in dBm, the door joins a neighbouring door instead. |
 | `mesh_max_layer` | 4 | The most hops from the access point the door may sit at. |
 | `update_connect_timeout_s` | 300 | After installing firmware, the new image boots on trial; if it has not connected as its door within this many seconds, the door goes back to the previous image and reports the update failed with `reverted: could not connect`. A configuration on trial has as long, by this field of the configuration stored. |
-| `accept_unsigned_firmware` | `false` | When `true`, the door installs an image without a valid signature (`firmware-signing.md`). For bench and development boards only. |
+| `accept_unsigned_firmware` | `false` | When `true`, the door installs an image without a valid signature, with or without a signing key (`firmware-signing.md`). For bench and development boards only. |
+| `firmware_signing_key` | empty | The server's public firmware signing key, the raw P-256 point `x \|\| y` as 128 hex characters, which every update is checked with (`firmware-signing.md`). It is not a setting: the server sends the same key to every door, in every configuration message and in the provisioning file's `door_config`. Empty, or anything that is not such a point, leaves the door without a key, and it refuses updates with `no signing key`. |
 
 The Wi-Fi fields and the mesh fields apply on the ESP32 only; the desktop
 host has no Wi-Fi. The mesh is chosen when the door starts, so a
@@ -282,5 +283,5 @@ describes it: the enrollment announcement and credentials, the timeline it
 follows while disconnected, checks and replies, and the `open`,
 `credentials`, `update`, and `reboot` commands, each answered on the `ack`
 topic. The ack `detail` of a failed update is one of `checksum mismatch`,
-`bad signature`, the reason the download or the install failed, or
+`no signing key`, `bad signature`, the reason the download or the install failed, or
 `reverted: could not connect`.

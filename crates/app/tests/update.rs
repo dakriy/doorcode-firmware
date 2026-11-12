@@ -8,8 +8,8 @@ use pretty_assertions::assert_eq;
 use protocol::{Ack, Command, Config};
 use testkit::{
     command_for, config_for, downloaded, sha256_hex, signed_by_another_key, signed_image,
-    BrokerCall, FirmwareCall, Message, Sent, StubBroker, StubConnectors, StubDownload, StubEvents,
-    StubFirmware, StubStorage,
+    signing_key_hex, BrokerCall, FirmwareCall, Message, Sent, StubBroker, StubConnectors,
+    StubDownload, StubEvents, StubFirmware, StubStorage,
 };
 
 const ID: &str = "0123456789abcdef";
@@ -42,16 +42,44 @@ fn update(image: &[u8]) -> Event {
     update_with_id(ID, image)
 }
 
-/// A door online that is sent the update for `image` at 10 ms and
-/// downloads `served` with `status` at 20 ms.
-fn updating(image: &[u8], status: u16, served: &[u8]) -> StubConnectors {
-    let events = [(10, update(image))]
-        .into_iter()
-        .chain(downloaded(20, status, served));
-    StubConnectors::online(events)
+/// The configuration carrying `key` as the firmware signing key.
+fn keyed_with(key: &str) -> Config {
+    Config {
+        firmware_signing_key: key.to_owned(),
+        ..Config::default()
+    }
 }
 
-/// A door online that is sent the update for `image` and downloads it.
+/// The configuration carrying the key `signed_image` signs with.
+fn keyed() -> Config {
+    keyed_with(&signing_key_hex())
+}
+
+/// A door online with `config` stored that sees `events`.
+fn configured(config: &Config, events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
+    StubConnectors {
+        storage: StubStorage::enrolled().with_config(config),
+        ..StubConnectors::online(events)
+    }
+}
+
+/// The update for `image` at 10 ms, and `served` downloaded with `status`
+/// at 20 ms.
+fn update_downloading(image: &[u8], status: u16, served: &[u8]) -> Vec<(u64, Event)> {
+    [(10, update(image))]
+        .into_iter()
+        .chain(downloaded(20, status, served))
+        .collect()
+}
+
+/// A door online with the signing key stored that is sent the update for
+/// `image` at 10 ms and downloads `served` with `status` at 20 ms.
+fn updating(image: &[u8], status: u16, served: &[u8]) -> StubConnectors {
+    configured(&keyed(), update_downloading(image, status, served))
+}
+
+/// A door online with the signing key stored that is sent the update for
+/// `image` and downloads it.
 fn installing(image: &[u8]) -> StubConnectors {
     updating(image, 200, image)
 }
@@ -255,22 +283,63 @@ fn a_signature_block_of_another_version_is_acked_failed_as_a_bad_signature() {
 }
 
 #[test]
-fn a_device_trusting_a_malformed_key_refuses_every_image_as_a_bad_signature() {
-    let connectors = StubConnectors {
-        firmware: StubFirmware::default().trusting(&[0; 64]),
-        ..installing(&signed_image(&body()))
-    };
+fn an_image_is_checked_with_the_key_of_the_configuration_the_door_was_sent() {
+    let image = signed_image(&body());
+    let events = [(5, config_for(7, &keyed()))]
+        .into_iter()
+        .chain(update_downloading(&image, 200, &image));
+    let connectors = StubConnectors::online(events);
 
     app::run(&connectors).unwrap();
 
     assert_eq!(
-        connectors.broker.last_call(),
-        Some(failed_ack(ID, "bad signature"))
+        connectors.firmware.calls(),
+        vec![Begin, Write, Write, Write, Finish, SetBoot, Restart]
     );
 }
 
 #[test]
-fn an_unsigned_image_is_installed_when_the_configuration_accepts_unsigned_firmware() {
+fn a_door_whose_configuration_has_no_signing_key_acks_an_update_failed_as_no_signing_key() {
+    let image = signed_image(&body());
+    let connectors = StubConnectors::online(update_downloading(&image, 200, &image));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (connectors.broker.last_call(), connectors.firmware.calls()),
+        (
+            Some(failed_ack(ID, "no signing key")),
+            vec![Begin, Write, Write, Write]
+        )
+    );
+}
+
+#[test]
+fn a_signing_key_that_is_not_the_hex_of_a_point_counts_as_no_signing_key() {
+    let key = signing_key_hex();
+    let malformed = [
+        "0".repeat(128),
+        key[..126].to_owned(),
+        format!("{key}0"),
+        format!("{key}00"),
+        format!("zz{}", &key[2..]),
+    ];
+    let image = signed_image(&body());
+
+    let acks: Vec<_> = malformed
+        .iter()
+        .map(|key| {
+            let connectors = configured(&keyed_with(key), update_downloading(&image, 200, &image));
+            app::run(&connectors).unwrap();
+            connectors.broker.last_call()
+        })
+        .collect();
+
+    assert_eq!(acks, vec![Some(failed_ack(ID, "no signing key")); 5]);
+}
+
+#[test]
+fn an_unsigned_image_is_installed_with_no_signing_key_when_unsigned_firmware_is_accepted() {
     let config = Config {
         accept_unsigned_firmware: true,
         ..Config::default()
@@ -366,7 +435,7 @@ fn an_update_while_one_is_downloading_is_acked_failed_as_in_progress() {
     let image = signed_image(&body());
     let other = "fedcba9876543210";
     let events = [(10, update(&image)), (15, update_with_id(other, &image))];
-    let connectors = StubConnectors::online(events);
+    let connectors = configured(&keyed(), events);
 
     app::run(&connectors).unwrap();
 
@@ -393,7 +462,7 @@ fn the_update_downloading_goes_on_after_another_is_refused() {
     ]
     .into_iter()
     .chain(downloaded(20, 200, &image));
-    let connectors = StubConnectors::online(events);
+    let connectors = configured(&keyed(), events);
 
     app::run(&connectors).unwrap();
 

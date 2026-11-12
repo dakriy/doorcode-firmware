@@ -9,5 +9,6 @@ pub(crate) const PROVISIONING: &str = r#"{
   "enrollment": {"username": "doorcode-enroll", "password": "enroll-secret"},
   "wifi": {"ssid": "site", "password": "wifi-secret"},
   "door_config": {"strike_pulse_ms": 2500, "submit_key": "A", "wifi_roam_rssi": -65,
+                  "firmware_signing_key": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                   "a_field_from_later": [1, 2]}
 }"#;

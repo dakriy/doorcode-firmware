@@ -125,15 +125,6 @@ fn the_first_boot_of_a_new_image_is_as_constructed() {
     assert_eq!(flags, [true, false]);
 }
 
-#[test]
-fn the_signing_key_is_the_committed_public_key() {
-    let (_directory, firmware) = host_firmware();
-    let committed =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../firmware/signing_public_key.bin");
-
-    assert_eq!(firmware.signing_key(), fs::read(committed).unwrap());
-}
-
 fn read(directory: &Path, file: &str) -> Vec<u8> {
     fs::read(directory.join(file)).unwrap()
 }

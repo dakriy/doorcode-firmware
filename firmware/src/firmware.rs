@@ -55,9 +55,6 @@ const fn text<const N: usize>(value: &str) -> [core::ffi::c_char; N] {
     field
 }
 
-/// The public key firmware images are signed with.
-const SIGNING_KEY: &[u8] = include_bytes!("../signing_public_key.bin");
-
 /// The start reason for each reset reason ESP-IDF reports; any other is
 /// `StartReason::Unknown`.
 const START_REASONS: [(sys::esp_reset_reason_t, StartReason); 9] = [
@@ -129,10 +126,6 @@ impl Firmware for EspFirmware {
             .iter()
             .find(|(code, _)| *code == reset)
             .map_or(StartReason::Unknown, |(_, reason)| *reason)
-    }
-
-    fn signing_key(&self) -> Vec<u8> {
-        SIGNING_KEY.to_vec()
     }
 
     /// The bootloader marks a new image pending verification when it first

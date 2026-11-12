@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 /// The secret scalar of the key test images are signed with.
 const SIGNING_SCALAR: [u8; 32] = [7; 32];
-/// The secret scalar of a key the device does not trust.
+/// The secret scalar of a key the configuration does not carry.
 const OTHER_SCALAR: [u8; 32] = [9; 32];
 
 fn signing_key(scalar: [u8; 32]) -> SigningKey {
@@ -26,22 +26,32 @@ fn signed_with(scalar: [u8; 32], body: &[u8]) -> Vec<u8> {
     [body, &0u32.to_le_bytes(), &signature.to_bytes()].concat()
 }
 
-/// `body` signed with the key the stub firmware trusts.
+/// `body` signed with the key `signing_key_hex` names.
 pub fn signed_image(body: &[u8]) -> Vec<u8> {
     signed_with(SIGNING_SCALAR, body)
 }
 
-/// `body` signed with a key the stub firmware does not trust.
+/// The public key `signed_image` signs with, as a configuration carries
+/// it: the raw point `x || y` in 128 lowercase hex digits.
+pub fn signing_key_hex() -> String {
+    let point = signing_key(SIGNING_SCALAR)
+        .verifying_key()
+        .to_encoded_point(false);
+    hex_of(&point.as_bytes()[1..])
+}
+
+/// `body` signed with another key than the one `signing_key_hex` names.
 pub fn signed_by_another_key(body: &[u8]) -> Vec<u8> {
     signed_with(OTHER_SCALAR, body)
 }
 
 /// The SHA-256 of `bytes` in lower-case hex, as an update command quotes it.
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex_of(&Sha256::digest(bytes))
+}
+
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// A request the application made of the firmware connector.
@@ -55,15 +65,13 @@ pub enum FirmwareCall {
     Restart,
 }
 
-/// Firmware that records every request and keeps the image written. It
-/// trusts the key `signed_image` signs with.
+/// Firmware that records every request and keeps the image written.
 #[derive(Debug)]
 pub struct StubFirmware {
     version: String,
     /// Whether this boot is the first on a newly installed image.
     new_image: bool,
     start_reason: StartReason,
-    signing_key: Vec<u8>,
     /// A request that fails every time, with the detail it fails with.
     failure: Option<(FirmwareCall, String)>,
     calls: RefCell<Vec<FirmwareCall>>,
@@ -72,14 +80,10 @@ pub struct StubFirmware {
 
 impl Default for StubFirmware {
     fn default() -> Self {
-        let point = signing_key(SIGNING_SCALAR)
-            .verifying_key()
-            .to_encoded_point(false);
         Self {
             version: "2.0.0".to_owned(),
             new_image: false,
             start_reason: StartReason::PowerOn,
-            signing_key: point.as_bytes()[1..].to_vec(),
             failure: None,
             calls: RefCell::default(),
             written: RefCell::default(),
@@ -120,14 +124,6 @@ impl StubFirmware {
         }
     }
 
-    /// This firmware, trusting the raw public `key` instead.
-    pub fn trusting(self, key: &[u8]) -> Self {
-        Self {
-            signing_key: key.to_vec(),
-            ..self
-        }
-    }
-
     /// Every request made, in order.
     pub fn calls(&self) -> Vec<FirmwareCall> {
         self.calls.borrow().clone()
@@ -162,10 +158,6 @@ impl Firmware for StubFirmware {
 
     fn start_reason(&self) -> StartReason {
         self.start_reason
-    }
-
-    fn signing_key(&self) -> Vec<u8> {
-        self.signing_key.clone()
     }
 
     fn first_boot_of_new_image(&self) -> bool {

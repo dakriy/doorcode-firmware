@@ -157,6 +157,10 @@ pub struct Config {
     pub reconnect_max_s: u64,
     pub update_connect_timeout_s: u64,
     pub accept_unsigned_firmware: bool,
+    /// The public key firmware images must be signed with: the raw P-256
+    /// point `x || y` as 128 hex characters. Empty, or anything else that
+    /// is not such a point, leaves the door without a key.
+    pub firmware_signing_key: String,
     pub mesh_enabled: bool,
     pub mesh_ssid: String,
     pub mesh_password: String,
@@ -192,6 +196,7 @@ impl Default for Config {
             reconnect_max_s: 60,
             update_connect_timeout_s: 300,
             accept_unsigned_firmware: false,
+            firmware_signing_key: String::new(),
             mesh_enabled: false,
             mesh_ssid: String::new(),
             mesh_password: String::new(),
@@ -228,6 +233,7 @@ message! {
         reconnect_max_s: always,
         update_connect_timeout_s: always,
         accept_unsigned_firmware: always,
+        firmware_signing_key: always,
         mesh_enabled: always,
         mesh_ssid: always,
         mesh_password: always,

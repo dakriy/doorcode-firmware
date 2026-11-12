@@ -58,7 +58,7 @@ is the factory: one method per connector, nothing else.
 | `Events` | the next event, with a timeout | a channel fed by the other connectors and the control API | a queue fed by the connector threads; feeds the task watchdog |
 | `Broker` | connect, subscribe, publish, disconnect | `rumqttc` over TCP or TLS | esp-mqtt, MQTT 3.1.1 over TCP or TLS |
 | `Download` | start fetching a URL, reported as events | `ureq` on a thread, HTTPS against the operating system's roots, or plain HTTP | ESP-IDF's HTTP client on a thread, HTTPS against the provisioned CA |
-| `Firmware` | running version, signing key, trial boot, install, mark valid, restart | image files in the data directory | ESP-IDF's OTA API and bootloader rollback |
+| `Firmware` | running version, trial boot, install, mark valid, restart | image files in the data directory | ESP-IDF's OTA API and bootloader rollback |
 | `Storage` | load, store, and remove values by key | files in the data directory | NVS, namespace `doorcode` |
 | `Clock` | monotonic milliseconds, Unix seconds once known | the system clock | `esp_timer` and SNTP |
 | `Random` | random bytes | the operating system | the hardware generator |

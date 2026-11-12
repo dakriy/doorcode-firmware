@@ -6,9 +6,6 @@ use std::sync::Arc;
 
 use connectors::{Firmware, FirmwareError, StartReason};
 
-/// The public key firmware images are signed with, `x || y`.
-const SIGNING_KEY: &[u8] = include_bytes!("../../../firmware/signing_public_key.bin");
-
 /// The image being written.
 pub const WRITING_FILE: &str = "firmware-writing.bin";
 /// The image whose install has finished.
@@ -85,10 +82,6 @@ impl Firmware for HostFirmware {
     /// A desktop run starts as a device powering up would.
     fn start_reason(&self) -> StartReason {
         StartReason::PowerOn
-    }
-
-    fn signing_key(&self) -> Vec<u8> {
-        SIGNING_KEY.to_vec()
     }
 
     fn first_boot_of_new_image(&self) -> bool {

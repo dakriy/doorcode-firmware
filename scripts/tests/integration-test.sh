@@ -491,56 +491,42 @@ download_url_ready() {
         URL_SETTING_SET="$key"
         return 0
     fi
-    skip update-unsigned "the server refused $key $SERVER ($(answer .error)); firmware is only sent while $key is set"
-    skip update-accepted "as update-unsigned"
+    skip update "the server refused $key $SERVER ($(answer .error)); firmware is only sent while $key is set"
     return 1
 }
 
 # send_update: sends the door its firmware now.
 send_update() { api_ok POST "/doors/$DOOR_ID/update"; }
 
-step_update_unsigned() {
-    api_ok PUT "/doors/$DOOR_ID/firmware" "{\"firmware_id\":$FIRMWARE_ID}" ||
-        { fail update-unsigned "choosing the firmware $(reason)"; return; }
-    if ! send_update; then
-        fail update-unsigned "POST /doors/$DOOR_ID/update $(reason)"
-    elif ! eventually update_ended failed; then
-        fail update-unsigned "the update did not fail: $(update_state .)"
-    elif [[ "$(update_state .detail)" != *"bad signature"* ]]; then
-        fail update-unsigned "the update failed with \"$(update_state .detail)\", not naming bad signature"
-    else
-        pass update-unsigned "the unsigned image failed with bad signature"
-    fi
-}
-
-accepts_unsigned() { is true host_state .config.accept_unsigned_firmware; }
+# has_signing_key: whether the host stores a firmware signing key with its
+# configuration.
+has_signing_key() { [ -n "$(host_state '.config.firmware_signing_key // empty')" ]; }
 
 runs_new_version() {
     is "$NEW_VERSION" host_state .firmware_version &&
         is "$NEW_VERSION" door_state .firmware_version
 }
 
-step_update_accepted() {
-    if ! set_overrides "$(jq -c '. + {accept_unsigned_firmware: "true"}' <<<"$OVERRIDES")"; then
-        fail update-accepted "allowing unsigned firmware $(reason)"
-    elif ! eventually accepts_unsigned; then
-        fail update-accepted "the host's config never allowed unsigned firmware"
+step_update() {
+    if ! eventually has_signing_key; then
+        fail update "the host's configuration never carried firmware_signing_key"
+    elif ! api_ok PUT "/doors/$DOOR_ID/firmware" "{\"firmware_id\":$FIRMWARE_ID}"; then
+        fail update "choosing the firmware $(reason)"
     elif ! send_update; then
-        fail update-accepted "POST /doors/$DOOR_ID/update $(reason)"
+        fail update "POST /doors/$DOOR_ID/update $(reason)"
     elif ! eventually runs_new_version; then
-        fail update-accepted "the door runs $(door_state .firmware_version), the host $(host_state .firmware_version)"
+        fail update "the door runs $(door_state .firmware_version), the host $(host_state .firmware_version); last update: $(update_state .)"
     elif ! eventually update_ended succeeded; then
-        fail update-accepted "the update did not succeed: $(update_state .)"
+        fail update "the update did not succeed: $(update_state .)"
     else
-        pass update-accepted "the host restarted on $NEW_VERSION and the door reports it"
+        pass update "the host checked the image the server signed with the key of its configuration, restarted on $NEW_VERSION, and the door reports it"
     fi
 }
 
 step_firmware() {
     step_firmware_upload || return
     download_url_ready || return
-    step_update_unsigned
-    step_update_accepted
+    step_update
 }
 
 step_revoke() {

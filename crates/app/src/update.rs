@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::command;
 use crate::device::Device;
-use crate::signature::SignedImage;
+use crate::signature::{self, SignedImage};
 use crate::{hex, stored, RunError};
 
 /// The status of a download that brings the image.
@@ -126,7 +126,7 @@ impl Install {
     fn complete(self, device: &Device<'_>, door_id: u64, config: &Config) -> Result<(), RunError> {
         let version = self.version.clone();
         let id = self.id.clone();
-        match self.installed(device, config.accept_unsigned_firmware) {
+        match self.installed(device, config) {
             Ok(()) => {
                 device.restart(
                     Level::Info,
@@ -139,19 +139,24 @@ impl Install {
     }
 
     /// Finishes the install and sets it to boot once the download, the
-    /// checksum, and unless unsigned images are accepted, the signature are
-    /// in order; otherwise says what is not.
-    fn installed(self, device: &Device<'_>, accept_unsigned: bool) -> Result<(), String> {
+    /// checksum, and unless `config` accepts unsigned images, the signature
+    /// by the key `config` carries are in order; otherwise says what is not.
+    fn installed(self, device: &Device<'_>, config: &Config) -> Result<(), String> {
         if let Some(failure) = self.failure {
             return Err(failure);
         }
         if hex(&self.digest.finalize()) != self.sha256 {
             return Err("checksum mismatch".to_owned());
         }
-        let firmware = device.connectors.firmware();
-        if !accept_unsigned && !self.signed.verifies(&firmware.signing_key()) {
-            return Err("bad signature".to_owned());
+        if !config.accept_unsigned_firmware {
+            let Some(key) = signature::signing_key(&config.firmware_signing_key) else {
+                return Err("no signing key".to_owned());
+            };
+            if !self.signed.verifies(&key) {
+                return Err("bad signature".to_owned());
+            }
         }
+        let firmware = device.connectors.firmware();
         firmware
             .finish()
             .and_then(|()| firmware.set_boot())
