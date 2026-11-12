@@ -125,15 +125,10 @@ check settings-loaded 0 "http://server.test|Front door|/dev/ttyUSB0|60"
 settings 'bench_env_require DOORCODE_SERVER DOORCODE_TOKEN; echo ready'
 check settings-present 0 "ready"
 
-settings 'bench_env_require; echo ready'
-check settings-missing 2 "bench settings: DOORCODE_SIGNING_KEY is not set: put it in $WORK/root/test.env (see test.env.example) or pass its flag"
+settings 'DOORCODE_TOKEN=; bench_env_require; echo ready'
+check settings-missing 2 "bench settings: DOORCODE_TOKEN is not set: put it in $WORK/root/test.env (see test.env.example) or pass its flag"
 
-echo 'key' >"$WORK/root/signing.key"
-settings "DOORCODE_SIGNING_KEY='$WORK/root/signing.key'; bench_env_require"
-check settings-key-inside 2 "bench settings: DOORCODE_SIGNING_KEY: $WORK/root/signing.key is inside the repository; keep the signing key outside it"
-
-echo 'key' >"$WORK/signing.key"
-settings "DOORCODE_SIGNING_KEY='$WORK/signing.key'; DOORCODE_TIMEOUT_S=soon; bench_env_require"
+settings "DOORCODE_TIMEOUT_S=soon; bench_env_require"
 check settings-timeout 2 "bench settings: DOORCODE_TIMEOUT_S is soon, not a whole number of seconds"
 
 settings "bench_env_write_auth '$WORK/auth' secret && stat -c %a '$WORK/auth' && cat '$WORK/auth'"

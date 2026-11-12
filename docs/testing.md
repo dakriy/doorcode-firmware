@@ -98,14 +98,14 @@ they are kept.
 13. **rotate**: after `POST /api/v1/doors/{id}/credentials/rotate` the door
     connects with its new credentials, the old ones are revoked, and the
     door stays online.
-14. **firmware-upload**: a small unsigned image of a new version is
-    uploaded.
-15. **update-unsigned**: sent to the door, the update fails with
-    `bad signature`, as `GET /api/v1/doors/{id}/firmware` shows.
-16. **update-accepted**: with the door's `accept_unsigned_firmware`
-    override true, the host installs it, restarts on the new version, and
-    the door reports it.
-17. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke` the
+14. **firmware-upload**: a small image of a new version is uploaded,
+    unsigned, as every release is.
+15. **update**: once the host's configuration carries the server's
+    `firmware_signing_key`, the image is chosen as the door's own and
+    sent; the host checks the signature the server appended when it
+    served the image with that key, installs it, restarts on the new
+    version, and the door reports it.
+16. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke` the
     controller enrolls again.
 
 The server sends firmware only while `device_url` is set: update commands
@@ -115,8 +115,8 @@ it to `--server` and clears it again afterwards. A server too old to have
 sets that one. A development server accepts an `http://` address there,
 and the host downloads over plain HTTP as well as over HTTPS (trusting the
 operating system's certificate roots), so the update steps run against the
-server's compose stack. When the server refuses the address, the two
-update steps print `SKIP` with the server's reason.
+server's compose stack. When the server refuses the address, the update
+step prints `SKIP` with the server's reason.
 
 A real door downloads only over HTTPS, verified against its broker's CA
 (`protocol.md`).
@@ -275,7 +275,6 @@ board through one helper.
 | --- | --- | --- |
 | `DOORCODE_SERVER` | The server's base address. | required |
 | `DOORCODE_TOKEN` | A personal API token of a user holding `admin`, who may manage firmware and delete doors and users for good (see "A token" above). | required |
-| `DOORCODE_SIGNING_KEY` | The private signing key's PEM file, kept outside the repository (`firmware-signing.md`). | required for signed releases |
 | `DOORCODE_SERIAL_PORT` | The board's serial port. | `/dev/ttyUSB0` |
 | `DOORCODE_DOOR_NAME` | The name of the door created for the board. | `Bench board` |
 | `DOORCODE_TIMEOUT_S` | Seconds each step waits; firmware updates wait three times as long. | `60` |
@@ -315,22 +314,22 @@ uses it:
 server, and checks it through the server's API and the board's serial log. Like the
 integration test it creates a door and changes it: **run it only against a
 development server.** It needs `bash`, `curl`, `jq`, `uvx`, `make`, and
-`docker`, the settings `DOORCODE_SERVER` and `DOORCODE_TOKEN`, the board
-on `DOORCODE_SERIAL_PORT`, and for the firmware updates
-`DOORCODE_SIGNING_KEY`.
+`docker`, the settings `DOORCODE_SERVER` and `DOORCODE_TOKEN`, and the
+board on `DOORCODE_SERIAL_PORT`. It needs no signing key: the images it
+releases are unsigned, and the server signs them as it serves them.
 
     scripts/tests/bench-test.sh --dry-run     # the steps and settings; touches nothing
     scripts/tests/bench-test.sh               # flash and run every step
     scripts/tests/bench-test.sh --no-flash    # the board already runs the image
-    scripts/tests/bench-test.sh --skip-ota    # steps 1 to 7, 11, and 12; no signing key
+    scripts/tests/bench-test.sh --skip-ota    # steps 1 to 7, 11, and 12
 
 | Flag | Meaning |
 | --- | --- |
 | `--no-flash` | Skip downloading the provisioning file, building, flashing, and provisioning. The board must already run the image and wait to enroll. |
-| `--skip-ota` | Skip the firmware updates, steps 8 to 10. `DOORCODE_SIGNING_KEY` is then not needed. |
+| `--skip-ota` | Skip the firmware updates, steps 8 to 10. |
 | `--keep` | Leave the door and the uploaded firmware on the server, and print their ids. |
 | `--dry-run` | Print the steps and the settings in use, and exit without touching the port, the server, or the container. |
-| `--server URL`, `--token TOKEN`, `--signing-key PATH`, `--port PORT`, `--door-name NAME`, `--timeout SECONDS` | Override `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_SIGNING_KEY`, `DOORCODE_SERIAL_PORT`, `DOORCODE_DOOR_NAME`, and `DOORCODE_TIMEOUT_S`. |
+| `--server URL`, `--token TOKEN`, `--port PORT`, `--door-name NAME`, `--timeout SECONDS` | Override `DOORCODE_SERVER`, `DOORCODE_TOKEN`, `DOORCODE_SERIAL_PORT`, `DOORCODE_DOOR_NAME`, and `DOORCODE_TIMEOUT_S`. |
 | `--help` | Print the usage. |
 
 Each step prints `PASS`, `FAIL`, or `SKIP` with its name and a reason, and
@@ -379,31 +378,32 @@ point, fails the step that is waiting.
    the door goes offline, the board enrolls again, is approved into the
    same door, and comes online.
 8. **release**: the door's version from `GET /api/v1/doors/{id}/firmware`
-   must be `MAJOR.MINOR.PATCH`; the next two patch versions are released
-   with `make firmware-release` and `DOORCODE_SIGNING_KEY`, the first for
-   the signed update and the second for the unsigned one (each image
-   carries its own version, which the door must report for its update to
+   must be `MAJOR.MINOR.PATCH`; the next two patch versions are released,
+   unsigned, with `make firmware-release`, the first for the update of
+   step 8 and the second for the one back of step 9 (each image carries
+   its own version, which the door must report for its update to
    succeed). `firmware/provisioning.json` is moved to
    `target/bench/provisioning.json.aside` for the release and back after
    it, also when the run fails or is interrupted. **ota-signed**: the first
-   image is uploaded with `make firmware-upload`, chosen as the door's own
-   firmware (`PUT /api/v1/doors/{id}/firmware`), and sent
+   image is uploaded with `make firmware-upload`, and the server's answer
+   gives its `size` as the file's and the 68-byte signature block's
+   (`firmware-signing.md`), which the server appends when it serves the
+   image. It is chosen as the door's own firmware
+   (`PUT /api/v1/doors/{id}/firmware`) and sent
    (`POST /api/v1/doors/{id}/update`); the update's state reaches
-   `succeeded`, and the board's log shows
+   `succeeded`, so the board accepted the server's signature with the key
+   of its configuration, and the board's log shows
    `boot: Loaded app from partition at offset` with another offset than
    its previous boot and `the new firmware is kept`.
    **ota-signed-started**: the events record a start newer than the
    door's newest event before the update, a restart the firmware asked
    for.
-9. **ota-unsigned**: the second image without its last 68 bytes, the
-   signature block (`firmware-signing.md`), is uploaded, chosen, and sent;
-   the update fails with a detail naming `bad signature`.
-   **ota-unsigned-accepted**: with the override `accept_unsigned_firmware`
-   `"true"`, once the door's effective configuration shows it, the same
-   update succeeds. **ota-unsigned-accepted-started**: the events record a
-   start newer than the door's newest event before the override was set,
-   a restart the firmware asked for. **override-cleared**: the door's previous overrides
-   are put back.
+9. **ota-back**: the second image is uploaded, its size checked as in
+   step 8, chosen, and sent; the update succeeds and the board boots back
+   into the slot it ran before step 8, so each slot has taken a signed
+   image, and keeps the new firmware. **ota-back-started**: the events
+   record a start newer than the door's newest event before the update, a
+   restart the firmware asked for.
 10. **bad-download**: the `device_url` setting is pointed at
     `http://127.0.0.1:9`, which the board refuses at once, and the first
     image is sent again; the update fails. **device-url-restored**:

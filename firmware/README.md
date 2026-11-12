@@ -9,7 +9,7 @@ run in Espressif's container rather than the desktop toolchain:
     make firmware-check      # clippy at the connector complexity cap, and rustfmt
     make firmware-flash      # flashes FIRMWARE_PORT (default /dev/ttyUSB0) and opens the monitor
     make firmware-provision  # writes provisioning.json into the NVS partition on FIRMWARE_PORT
-    make firmware-release VERSION=x KEY=path   # signed dist/doorcode-firmware-x.bin
+    make firmware-release VERSION=x   # unsigned dist/doorcode-firmware-x.bin; the server signs it
     make firmware-upload SERVER=url TOKEN=t FILE=f VERSION=x
 
 `scripts/firmware-container.sh` runs a command in the container with the

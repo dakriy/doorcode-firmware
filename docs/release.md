@@ -1,20 +1,18 @@
 # Releasing firmware
 
-A release is one signed image file. It is built from a clean tree, signed
-with the release key, uploaded to the server, and rolled out to the doors
-by the server. Doors check the signature themselves before they boot an
-image, so an image signed with any other key is refused.
+A release is one image file. It is built from a clean tree, uploaded to
+the server, and rolled out to the doors by the server. The server signs
+the image each time it serves it, with the site's signing key, and sends
+the public half of that key to every door in its configuration; doors
+check the signature themselves before they boot an image, so an image the
+server did not sign is refused (`firmware-signing.md`). No signing key is
+needed to release.
 
-## 1. Build and sign
+## 1. Build
 
-    make firmware-release VERSION=2.1.0 KEY=/path/outside/the/repo/release-key.pem
+    make firmware-release VERSION=2.1.0
 
-or `scripts/firmware-release.sh VERSION KEY_PATH`. The key is the P-256
-private key in PEM form (`-----BEGIN EC PRIVATE KEY-----`) whose public half
-is `firmware/signing_public_key.bin`. It never enters the repository, and
-the script refuses a key path inside it.
-
-The script:
+or `scripts/firmware-release.sh VERSION`. The script:
 
 1. Refuses to run while `firmware/provisioning.json` exists, since the build
    embeds that file's broker, enrollment, and Wi-Fi secrets as first-boot
@@ -27,20 +25,20 @@ The script:
    and `-`.
 3. Turns the ELF into an app image with esptool's `elf2image`, as ESP-IDF's
    own build does, including the SHA-256 digest appended to it.
-4. Appends the 68-byte signature block with
-   `espsecure sign_data --version 1` (see `firmware-signing.md`).
-5. Checks the signature against `firmware/signing_public_key.bin`, and
-   that the signed image fits the smallest app slot of
-   `firmware/partitions.csv` (`ota_1`, 0x1F0000 bytes; an update may go
-   into either slot), and only then writes
+4. Checks that the image with the server's 68-byte signature block fits
+   the smallest app slot of `firmware/partitions.csv` (`ota_1`, 0x1F0000
+   bytes; an update may go into either slot), that is, that the image is
+   at most 2031548 bytes, which is also the largest upload the server
+   takes. Only then it writes the unsigned image as
    `dist/doorcode-firmware-VERSION.bin` and
-   `dist/doorcode-firmware-VERSION.sha256` (`sha256sum` format, of the whole
-   signed file). `dist/` is ignored by git.
+   `dist/doorcode-firmware-VERSION.sha256` (`sha256sum` format). `dist/`
+   is ignored by git.
 
-To try the flow without the release key, sign with a throwaway key and
-point `DOORCODE_SIGNING_PUBLIC_KEY` at its raw 64-byte public point
-(`openssl ec -in key.pem -pubout -outform DER | tail -c 64`). Doors refuse
-such an image unless they accept unsigned firmware.
+The SHA-256 the script writes is of the unsigned file. The server reports
+the `sha256` and `size` of the image it serves, signature block included,
+which is what the `update` command carries and the door checks; so its
+`sha256` differs from the one in `dist/`, and its `size` is 68 bytes
+larger.
 
 ## 2. Upload
 
@@ -93,16 +91,16 @@ reaches them as above. `migration.md` describes both steps.
 ## Bench boards and unsigned images
 
 A door whose configuration sets `accept_unsigned_firmware` to `true` skips
-the signature check, so it installs a development image that was not signed
-with the release key: one released with a throwaway key as above, or any
-app image without a signature block. Every other check still applies. Set
-it only for bench boards; it is `false` by default.
+the signature check, so it installs an image whatever its last 68 bytes
+hold, and with no signing key in its configuration. Every other check still
+applies. Set it only for bench and development boards; it is `false` by
+default.
 
 ## Trying a release on the bench
 
 `scripts/tests/bench-test.sh` goes through this flow on a bench board against
-a development server: it releases and uploads the next patch versions with
-`make firmware-release` and `make firmware-upload`, updates the board to a
-signed image, has an unsigned one refused and then accepted with
-`accept_unsigned_firmware`, and fails a download on purpose. "The bench
-run" in `testing.md` describes its steps and settings.
+a development server: it releases the next two patch versions with
+`make firmware-release`, uploads them with `make firmware-upload`, updates
+the board to the first and back to its other slot with the second, both
+signed by the server, and fails a download on purpose. "The bench run" in
+`testing.md` describes its steps and settings.

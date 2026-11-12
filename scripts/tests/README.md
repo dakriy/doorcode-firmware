@@ -83,21 +83,22 @@ the user going for good.
 Checks the bench board end to end through the server's API and the
 board's serial log: flashing and booting, enrollment, telemetry, the open
 and reboot commands, a configuration override, credential rotation and
-revocation, a signed firmware update, an unsigned one refused and then
-accepted, a failed download, and no crash and no lost memory over the run.
+revocation, firmware updates into each slot with images the server signs
+as it serves them, a failed download, and no crash and no lost memory over
+the run.
 After each restart it causes it finds the board's start in
 `GET /api/v1/events` (type `door`, reason `started`), newer than the newest
 event of the door when the restart began, since the server keeps the starts
 of earlier runs: `boot-started` after the approval, with its reason shown
 but not judged (the reset of the boot goes through the reset pin, which the
 ESP32 may report as a power on), and `reboot-started`, `ota-signed-started`,
-and `ota-unsigned-accepted-started`, each of which must say a restart the
+and `ota-back-started`, each of which must say a restart the
 firmware asked for. Each waits up to the timeout and fails naming the event
 it looked after.
 
 Needs: a server, an API token of a user holding `admin`,
-the board on its USB serial port, and for the firmware updates the private
-signing key's PEM file, kept outside the repository. Tools: `bash`,
+and the board on its USB serial port; no signing key, since the server
+signs the images it serves. Tools: `bash`,
 `curl`, `jq`, `uvx`, `make`, and `docker`. Settings come from `test.env`
 at the repository root; copy `test.env.example`, which explains every key.
 A flag overrides its key.
@@ -105,7 +106,7 @@ A flag overrides its key.
     scripts/tests/bench-test.sh --dry-run     # the 12 steps and the settings; touches nothing
     scripts/tests/bench-test.sh               # flash and run every step
     scripts/tests/bench-test.sh --no-flash    # the board already runs the image
-    scripts/tests/bench-test.sh --skip-ota    # no firmware updates; no signing key
+    scripts/tests/bench-test.sh --skip-ota    # no firmware updates
 
 | Flag | Meaning |
 | --- | --- |
@@ -115,7 +116,6 @@ A flag overrides its key.
 | `--dry-run` | Print the steps and settings and exit without touching the port, the server, or the container. |
 | `--server URL` | `DOORCODE_SERVER`. |
 | `--token TOKEN` | `DOORCODE_TOKEN`. |
-| `--signing-key PATH` | `DOORCODE_SIGNING_KEY`. |
 | `--port PORT` | `DOORCODE_SERIAL_PORT`, `/dev/ttyUSB0` by default. |
 | `--door-name NAME` | `DOORCODE_DOOR_NAME`, `Bench board` by default. |
 | `--timeout SECONDS` | `DOORCODE_TIMEOUT_S`, 60 by default; firmware updates wait three times as long. |
@@ -259,9 +259,8 @@ restarts and the alarms `configuration reverted` in the door's event log.
 
 Checks `bench-serial.py` against `fixtures/bench-boot.txt` (a match, a
 timeout, crash detection, the log file, and reset) and `bench-env.sh`
-against a scratch `test.env` (defaults, required keys, a signing key
-inside the repository, and the token's header file readable by its user
-only), and deleting for good against `fixtures/stub-api.py` (gone, a
+against a scratch `test.env` (defaults, required keys, a timeout that is
+not a number, and the token's header file readable by its user only), and deleting for good against `fixtures/stub-api.py` (gone, a
 server that refuses `force`, one that ignores it, and one that fails).
 Needs only `bash`, `curl`, and `python3`; it creates
 nothing outside a temporary directory, which it removes.

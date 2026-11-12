@@ -97,13 +97,16 @@ entrypoint presenting a certificate from that CA. See
 ## Release
 
 Move `firmware/provisioning.json` out of the way first; the release refuses
-to build while it exists. Then, with the release key kept outside the
-repository:
+to build while it exists. Then:
 
-    make firmware-release VERSION=2.1.0 KEY=/path/to/release-key.pem
+    make firmware-release VERSION=2.1.0
     make firmware-upload SERVER=https://doorcode.example.com TOKEN="$TOKEN" \
       FILE=dist/doorcode-firmware-2.1.0.bin VERSION=2.1.0
 
-The server rolls the version out to the doors in its update window. See
+The release is unsigned. The server signs the image each time it serves
+it and sends the doors the public half of its key in their configuration,
+so the SHA-256 the server shows, of the signed image, differs from the one
+in `dist/`. The server rolls the version out to the doors in its update
+window. See
 [`docs/release.md`](docs/release.md) and
 [`docs/firmware-signing.md`](docs/firmware-signing.md).

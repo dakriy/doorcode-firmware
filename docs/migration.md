@@ -15,9 +15,9 @@ update path.
 
 ## 1. Build the stepping-stone image
 
-    scripts/firmware-release.sh --migrate 2.0.0-migrate /path/outside/the/repo/release-key.pem
+    scripts/firmware-release.sh --migrate 2.0.0-migrate /path/outside/the/repo/signing-key.pem
 
-This is the release script of `release.md` with three differences:
+This is the release script of `release.md` with four differences:
 
 - It builds the `migrate` variant of the firmware (`cargo build --profile
   migrate --features migrate` with `firmware/sdkconfig.migrate` on top of
@@ -29,12 +29,17 @@ This is the release script of `release.md` with three differences:
   it only to the previous update server.
 - The version must end in `-migrate`, so the doorcode server never takes
   it for a release to roll out, and the signed image must fit the old 1 MB
-  slots. The script refuses either otherwise. It writes
-  `dist/doorcode-firmware-2.0.0-migrate.bin`.
-
-The image is signed with the same key and in the same format as every
-release (`firmware-signing.md`), which is what boards of the previous
-firmware check before they install an update.
+  slots. The script refuses either otherwise.
+- It signs the image. The boards it goes to check an update against the
+  key their running firmware was built with, not one a server sends, so
+  the image is signed with the private half of that key, the P-256 PEM
+  file at the path given (`-----BEGIN EC PRIVATE KEY-----`). The key never
+  enters the repository, and the script refuses a key path inside it. The
+  signature block has the layout of `firmware-signing.md`, made with
+  `espsecure sign_data --version 1`, and the script checks the signature
+  against the public half of that same key before it writes
+  `dist/doorcode-firmware-2.0.0-migrate.bin`, signed, and its SHA-256
+  beside it.
 
 To fit 1 MB the stepping-stone image leaves out everything a board does
 not need to get to the next step:

@@ -87,9 +87,9 @@ firmware-flash:
 firmware-provision:
 	$(FIRMWARE) --device $(FIRMWARE_PORT) 'sh /repo/scripts/firmware-provision.sh $(FIRMWARE_PORT)'
 
-## firmware-release: builds, signs, and checks dist/doorcode-firmware-VERSION.bin with the private key at KEY.
+## firmware-release: builds and checks the unsigned dist/doorcode-firmware-VERSION.bin, which the server signs.
 firmware-release:
-	@sh scripts/firmware-release.sh '$(VERSION)' '$(KEY)'
+	@sh scripts/firmware-release.sh '$(VERSION)'
 
 ## firmware-upload: uploads FILE as VERSION to the server at SERVER with the API token TOKEN.
 firmware-upload:

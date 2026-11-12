@@ -20,9 +20,8 @@ Loads test.env from the repository root if present and applies defaults:
   DOORCODE_DOOR_NAME    Bench board
   DOORCODE_TIMEOUT_S    60
 bench_env_require exits 2 naming each KEY that is empty (by default
-DOORCODE_SERVER, DOORCODE_TOKEN, and DOORCODE_SIGNING_KEY), a timeout that is
-not a whole number of seconds, or a signing key that is not a readable file
-outside the repository. bench_env_write_auth writes the Authorization header
+DOORCODE_SERVER and DOORCODE_TOKEN), or a timeout that is not a whole
+number of seconds. bench_env_write_auth writes the Authorization header
 for TOKEN to FILE, readable by this user only, for curl -H @FILE.
 bench_env_delete_for_good deletes the door or user at PATH, such as
 /doors/12, for good (DELETE ?force=true, which needs the admin role) with
@@ -45,23 +44,9 @@ if [ -f "$BENCH_ENV_FILE" ]; then
 fi
 DOORCODE_SERVER="${DOORCODE_SERVER:-}"
 DOORCODE_TOKEN="${DOORCODE_TOKEN:-}"
-DOORCODE_SIGNING_KEY="${DOORCODE_SIGNING_KEY:-}"
 DOORCODE_SERIAL_PORT="${DOORCODE_SERIAL_PORT:-/dev/ttyUSB0}"
 DOORCODE_DOOR_NAME="${DOORCODE_DOOR_NAME:-Bench board}"
 DOORCODE_TIMEOUT_S="${DOORCODE_TIMEOUT_S:-60}"
-
-# bench_env_signing_key_problem: why DOORCODE_SIGNING_KEY cannot be used, if
-# it cannot.
-bench_env_signing_key_problem() {
-    local key="$DOORCODE_SIGNING_KEY"
-    if ! [ -f "$key" ] || ! [ -r "$key" ]; then
-        echo "$key is not a readable file"
-        return
-    fi
-    case "$(cd "$(dirname "$key")" && pwd)/" in
-    "$BENCH_ROOT"/*) echo "$key is inside the repository; keep the signing key outside it" ;;
-    esac
-}
 
 # bench_env_write_auth FILE TOKEN: writes the Authorization header for TOKEN
 # to FILE, readable by this user only. curl reads it with -H @FILE, so the
@@ -127,16 +112,12 @@ bench_env_delete_for_good() {
 # the caller needs is empty or unusable.
 bench_env_require() {
     local keys=("$@") key problems=()
-    [ ${#keys[@]} -gt 0 ] || keys=(DOORCODE_SERVER DOORCODE_TOKEN DOORCODE_SIGNING_KEY)
+    [ ${#keys[@]} -gt 0 ] || keys=(DOORCODE_SERVER DOORCODE_TOKEN)
     for key in "${keys[@]}"; do
         [ -n "${!key:-}" ] || problems+=("$key is not set: put it in $BENCH_ENV_FILE (see test.env.example) or pass its flag")
     done
     [[ "$DOORCODE_TIMEOUT_S" =~ ^[0-9]+$ ]] ||
         problems+=("DOORCODE_TIMEOUT_S is $DOORCODE_TIMEOUT_S, not a whole number of seconds")
-    if [[ " ${keys[*]} " == *" DOORCODE_SIGNING_KEY "* ]] && [ -n "$DOORCODE_SIGNING_KEY" ]; then
-        key="$(bench_env_signing_key_problem)"
-        [ -z "$key" ] || problems+=("DOORCODE_SIGNING_KEY: $key")
-    fi
     [ ${#problems[@]} -eq 0 ] && return 0
     printf 'bench settings: %s\n' "${problems[@]}" >&2
     exit 2

@@ -2,8 +2,8 @@
 # Runs the bench board on its USB serial port against a development doorcode
 # server and checks it end to end: flashing and booting, enrollment, telemetry,
 # the open and reboot commands, a configuration override, credential rotation
-# and revocation, signed and unsigned firmware updates, a failed download,
-# and the board's health over the run. It creates or restores a door for the
+# and revocation, firmware updates into both slots with images the server
+# signs, a failed download, and the board's health over the run. It creates or restores a door for the
 # board, uploads firmware, and changes the device_url setting, and undoes all
 # of it again, deleting a door it created for good, which needs a token of a
 # user holding the admin role: run it only against a development server.
@@ -22,8 +22,8 @@ source "$(dirname "$0")/bench-env.sh"
 usage() {
     cat <<'EOF'
 usage: scripts/tests/bench-test.sh [--no-flash] [--skip-ota] [--keep]
-           [--dry-run] [--server URL] [--token TOKEN] [--signing-key PATH]
-           [--port PORT] [--door-name NAME] [--timeout SECONDS]
+           [--dry-run] [--server URL] [--token TOKEN] [--port PORT]
+           [--door-name NAME] [--timeout SECONDS]
 
 Settings come from test.env at the repository root (see test.env.example);
 a flag overrides its key.
@@ -31,16 +31,13 @@ a flag overrides its key.
   --no-flash          skip downloading the provisioning file, building,
                       flashing, and provisioning: the board already runs the
                       image and waits to enroll
-  --skip-ota          skip the firmware updates (steps 8 to 10), which need
-                      the signing key
+  --skip-ota          skip the firmware updates (steps 8 to 10)
   --keep              leave the door and the uploaded firmware on the server,
                       and print their ids
   --dry-run           print the steps and settings, and touch nothing
   --server URL        DOORCODE_SERVER, the server's base address
   --token TOKEN       DOORCODE_TOKEN, an API token of a user holding the
                       admin role
-  --signing-key PATH  DOORCODE_SIGNING_KEY, the private signing key's PEM
-                      file, outside the repository
   --port PORT         DOORCODE_SERIAL_PORT, the board's serial port
   --door-name NAME    DOORCODE_DOOR_NAME, the door the board becomes
   --timeout SECONDS   DOORCODE_TIMEOUT_S, how long each step waits; firmware
@@ -63,7 +60,6 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=true; shift ;;
     --server) DOORCODE_SERVER="${2:-}"; shift 2 || misuse ;;
     --token) DOORCODE_TOKEN="${2:-}"; shift 2 || misuse ;;
-    --signing-key) DOORCODE_SIGNING_KEY="${2:-}"; shift 2 || misuse ;;
     --port) DOORCODE_SERIAL_PORT="${2:-}"; shift 2 || misuse ;;
     --door-name) DOORCODE_DOOR_NAME="${2:-}"; shift 2 || misuse ;;
     --timeout) DOORCODE_TIMEOUT_S="${2:-}"; shift 2 || misuse ;;
@@ -80,8 +76,8 @@ STEPS=(
     "5 override, override-restore: with telemetry_interval_s \"10\" a sample follows the next one within 15 s; restoring the overrides restores the effective configuration"
     "6 reboot, reboot-started: POST reboot; the board logs rst: and sta ip:, and the door is online again, with the time it took; GET /events records a newer start, a restart its firmware asked for"
     "7 rotate, revoke: rotate, then revoke; the door goes offline, enrolls again, is approved into the same door, and comes online"
-    "8 release, ota-signed, ota-signed-started: release the next two patch versions above the one the door runs with DOORCODE_SIGNING_KEY (firmware/provisioning.json moved aside and back); upload the first, choose it for the door, update; the update succeeds and the board boots the other slot and logs the new firmware is kept; GET /events records a newer start, a restart its firmware asked for"
-    "9 ota-unsigned, ota-unsigned-accepted, ota-unsigned-accepted-started, override-cleared: upload the second image without its 68-byte signature block, update; it fails with bad signature; with the override accept_unsigned_firmware \"true\" it succeeds and GET /events records a newer start, a restart its firmware asked for; the overrides are put back"
+    "8 release, ota-signed, ota-signed-started: release the next two patch versions above the one the door runs, unsigned (firmware/provisioning.json moved aside and back); upload the first, whose size the server reports 68 bytes larger, signed; choose it for the door, update; the update succeeds and the board boots the other slot and logs the new firmware is kept; GET /events records a newer start, a restart its firmware asked for"
+    "9 ota-back, ota-back-started: upload the second image, its size checked likewise, choose it, update; the update succeeds and the board boots back into the slot it ran before step 8 and logs the new firmware is kept; GET /events records a newer start, a restart its firmware asked for"
     "10 bad-download, device-url-restored: with the device_url setting at an address that refuses, update to the first image; it fails; device_url is put back and the door is online"
     "11 no-crash, free-memory: the run's serial log holds no crash text; free_bytes in the last telemetry sample is at most 10% below the first"
     "12 cleanup: put device_url and the overrides back; unless --keep, put the door's firmware choice back and delete the uploaded firmware, and the door: for good when the run created it, the ordinary way when it restored it"
@@ -93,15 +89,11 @@ if $DRY_RUN; then
     $OTA || echo "  --skip-ota: steps 8 to 10 do not run"
     echo "settings: server ${DOORCODE_SERVER:-(not set)}, port $DOORCODE_SERIAL_PORT," \
         "door \"$DOORCODE_DOOR_NAME\", timeout ${DOORCODE_TIMEOUT_S} s," \
-        "signing key ${DOORCODE_SIGNING_KEY:-(not set)}, flash $FLASH, ota $OTA, keep $KEEP"
+        "flash $FLASH, ota $OTA, keep $KEEP"
     exit 0
 fi
 
-if $OTA; then
-    bench_env_require DOORCODE_SERVER DOORCODE_TOKEN DOORCODE_SIGNING_KEY
-else
-    bench_env_require DOORCODE_SERVER DOORCODE_TOKEN
-fi
+bench_env_require DOORCODE_SERVER DOORCODE_TOKEN
 for tool in curl jq uvx make docker; do
     command -v "$tool" >/dev/null || { echo "bench-test: $tool is required" >&2; exit 2; }
 done
@@ -638,11 +630,11 @@ step_revoke() {
 
 # --- 8 signed update --------------------------------------------------------
 
-# The versions released for the signed and the unsigned update, and the
-# signed one's firmware id once uploaded.
-SIGNED_VERSION=""
-UNSIGNED_VERSION=""
-SIGNED_ID=""
+# The versions released for the update of step 8 and the one back of step
+# 9, and the first one's firmware id once uploaded.
+FIRST_VERSION=""
+SECOND_VERSION=""
+FIRST_ID=""
 RELEASED=false
 
 door_firmware() { api_ok GET "/doors/$DOOR_ID/firmware" && answer "$1"; }
@@ -656,10 +648,9 @@ next_patches() {
 
 image() { echo "$ROOT/dist/doorcode-firmware-$1.bin"; }
 
-# release VERSION: builds and signs the image of VERSION into dist/.
+# release VERSION: builds the unsigned image of VERSION into dist/.
 release() {
-    make -C "$ROOT" --no-print-directory firmware-release VERSION="$1" KEY="$DOORCODE_SIGNING_KEY" \
-        >"$WORK/release.log" 2>&1
+    make -C "$ROOT" --no-print-directory firmware-release VERSION="$1" >"$WORK/release.log" 2>&1
 }
 
 # release_both: releases both versions while firmware/provisioning.json is
@@ -670,7 +661,7 @@ WHY=""
 release_both() {
     local built=true
     provisioning_aside || { WHY="moving firmware/provisioning.json aside failed"; return 1; }
-    if ! release "$SIGNED_VERSION" || ! release "$UNSIGNED_VERSION"; then
+    if ! release "$FIRST_VERSION" || ! release "$SECOND_VERSION"; then
         built=false
     fi
     provisioning_back || { WHY="moving $PROVISIONING_ASIDE back to firmware/provisioning.json failed"; return 1; }
@@ -688,24 +679,26 @@ step_release() {
         fail release "the door runs \"$running\", not MAJOR.MINOR.PATCH"
         return
     fi
-    read -r SIGNED_VERSION UNSIGNED_VERSION <<<"$versions"
+    read -r FIRST_VERSION SECOND_VERSION <<<"$versions"
     if ! release_both; then
         fail release "$WHY"
         return
     fi
     RELEASED=true
-    pass release "the door runs $running; released $SIGNED_VERSION and $UNSIGNED_VERSION"
+    pass release "the door runs $running; released $FIRST_VERSION and $SECOND_VERSION"
 }
 
 # upload VERSION FILE: uploads FILE as VERSION and sets UPLOADED_ID. The
-# token reaches make on its standard input, never its command line.
+# server's answer is in $WORK/uploaded.json. The token reaches make on its
+# standard input, never its command line.
 UPLOADED_ID=""
 upload() {
     UPLOADED_ID=""
     printf '%s\n' "$DOORCODE_TOKEN" |
         make -C "$ROOT" --no-print-directory firmware-upload SERVER="$DOORCODE_SERVER" \
             TOKEN=- FILE="$2" VERSION="$1" >"$WORK/upload.log" 2>&1 || return 1
-    UPLOADED_ID="$(grep -v '^HTTP ' "$WORK/upload.log" | jq -r '.id // empty' 2>/dev/null)"
+    grep -v '^HTTP ' "$WORK/upload.log" >"$WORK/uploaded.json"
+    UPLOADED_ID="$(jq -r '.id // empty' "$WORK/uploaded.json" 2>/dev/null)"
     [ -n "$UPLOADED_ID" ] || return 1
     FIRMWARE_IDS+=("$UPLOADED_ID")
 }
@@ -774,91 +767,65 @@ booted_other_slot() {
     echo "booted from $after instead of $2 and kept the new firmware"
 }
 
-step_signed_ota() {
-    local mark before slot
-    $RELEASED || { skip ota-signed "no release to update to"; return; }
-    if ! upload "$SIGNED_VERSION" "$(image "$SIGNED_VERSION")"; then
-        fail ota-signed "$(upload_problem)"
-        return
+# The signature block the server appends to the image it serves
+# (docs/firmware-signing.md).
+SIGNATURE_BYTES=68
+
+# served_size FILE: the size the server reports for the image it serves
+# of FILE, just uploaded, when that is FILE and the signature block.
+# Prints why not otherwise.
+served_size() {
+    local size served
+    size="$(wc -c <"$1")" || return 1
+    served="$(jq -r '.size // empty' "$WORK/uploaded.json" 2>/dev/null)"
+    if [ "$served" != "$((size + SIGNATURE_BYTES))" ]; then
+        echo "the server reports ${served:-no} size for the $size-byte image, not $((size + SIGNATURE_BYTES)) with its signature block"
+        return 1
     fi
-    SIGNED_ID="$UPLOADED_ID"
-    if ! choose "$SIGNED_ID"; then
-        fail ota-signed "choosing firmware $SIGNED_ID for door $DOOR_ID $(reason)"
-        return
+    echo "$served"
+}
+
+# update_to STEP VERSION: uploads the image of VERSION, makes it the door's
+# own, sends it, and checks that the update succeeds, the board boots the
+# other slot and keeps the new firmware, and the events record a restart
+# its firmware asked for. Sets UPLOADED_ID.
+update_to() {
+    local mark before slot served
+    if ! upload "$2" "$(image "$2")"; then
+        fail "$1" "$(upload_problem)"
+        return 1
+    fi
+    if ! served="$(served_size "$(image "$2")")"; then
+        fail "$1" "$served"
+        return 1
+    fi
+    if ! choose "$UPLOADED_ID"; then
+        fail "$1" "choosing firmware $UPLOADED_ID for door $DOOR_ID $(reason)"
+        return 1
     fi
     before="$(offset_of <"$SERIAL_LOG")"
     mark="$(log_mark)"
     mark_events
-    ota ota-signed succeeded || return
-    if slot="$(booted_other_slot "$mark" "$before")"; then
-        pass ota-signed "$SIGNED_VERSION (firmware $SIGNED_ID) succeeded; $slot"
-        found_start ota-signed-started "$SOFTWARE_START"
-    else
-        fail ota-signed "$slot"
+    ota "$1" succeeded || return 1
+    if ! slot="$(booted_other_slot "$mark" "$before")"; then
+        fail "$1" "$slot"
+        return 1
     fi
+    pass "$1" "$2 (firmware $UPLOADED_ID, $served bytes signed) succeeded; $slot"
+    found_start "$1-started" "$SOFTWARE_START"
 }
 
-# --- 9 unsigned update ------------------------------------------------------
-
-# The signature block at the end of a signed image (docs/firmware-signing.md).
-SIGNATURE_BYTES=68
-
-# unsigned_copy SIGNED OUT: writes SIGNED without its signature block to OUT.
-unsigned_copy() {
-    local size
-    size="$(wc -c <"$1")" || return 1
-    head -c "$((size - SIGNATURE_BYTES))" "$1" >"$2"
+step_signed_ota() {
+    $RELEASED || { skip ota-signed "no release to update to"; return; }
+    update_to ota-signed "$FIRST_VERSION"
+    FIRST_ID="$UPLOADED_ID"
 }
 
-# accepts_unsigned: whether the door's effective config accepts unsigned
-# firmware.
-accepts_unsigned() { is true config '.effective.accept_unsigned_firmware | tostring'; }
+# --- 9 update back ----------------------------------------------------------
 
-step_unsigned_accepted() {
-    local overrides
-    if ! overrides="$(current_overrides)"; then
-        fail ota-unsigned-accepted "reading the config $(reason)"
-        return
-    fi
-    OVERRIDES_BEFORE="$overrides"
-    mark_events
-    if ! set_overrides "$(jq -c '. + {accept_unsigned_firmware: "true"}' <<<"$overrides")"; then
-        fail ota-unsigned-accepted "setting accept_unsigned_firmware $(reason)"
-    elif ! eventually accepts_unsigned; then
-        fail ota-unsigned-accepted "the effective config never accepted unsigned firmware: $(effective_config)"
-    elif ota ota-unsigned-accepted succeeded; then
-        pass ota-unsigned-accepted "with accept_unsigned_firmware \"true\" the door installed $UNSIGNED_VERSION"
-        found_start ota-unsigned-accepted-started "$SOFTWARE_START"
-    fi
-    if ! restore_overrides; then
-        fail override-cleared "restoring the overrides $overrides $(reason)"
-    else
-        pass override-cleared "the overrides are $overrides again"
-    fi
-}
-
-step_unsigned_ota() {
-    local unsigned detail
-    $RELEASED || { skip ota-unsigned "no release to update to"; return; }
-    unsigned="$WORK/unsigned-$UNSIGNED_VERSION.bin"
-    unsigned_copy "$(image "$UNSIGNED_VERSION")" "$unsigned"
-    if ! upload "$UNSIGNED_VERSION" "$unsigned"; then
-        fail ota-unsigned "$(upload_problem)"
-        return
-    fi
-    if ! choose "$UPLOADED_ID"; then
-        fail ota-unsigned "choosing firmware $UPLOADED_ID for door $DOOR_ID $(reason)"
-        return
-    fi
-    if ota ota-unsigned failed; then
-        detail="$(update_state .detail)"
-        if [[ "$detail" == *"bad signature"* ]]; then
-            pass ota-unsigned "$UNSIGNED_VERSION without its signature block was refused: $detail"
-        else
-            fail ota-unsigned "the update failed with \"$detail\", not naming bad signature"
-        fi
-    fi
-    step_unsigned_accepted
+step_back_ota() {
+    $RELEASED || { skip ota-back "no release to update to"; return; }
+    update_to ota-back "$SECOND_VERSION"
 }
 
 # --- 10 bad download --------------------------------------------------------
@@ -869,7 +836,7 @@ UNREACHABLE_URL="http://127.0.0.1:9"
 
 step_bad_download() {
     local value
-    [ -n "$SIGNED_ID" ] || { skip bad-download "no signed firmware uploaded"; return; }
+    [ -n "$FIRST_ID" ] || { skip bad-download "no firmware uploaded"; return; }
     if ! api_ok GET /settings/device_url; then
         fail bad-download "reading device_url $(reason)"
         return
@@ -886,10 +853,10 @@ step_bad_download() {
     fi
     if ! api_ok PUT /settings/device_url "{\"value\":\"$UNREACHABLE_URL\"}"; then
         fail bad-download "setting device_url to $UNREACHABLE_URL $(reason)"
-    elif ! choose "$SIGNED_ID"; then
-        fail bad-download "choosing firmware $SIGNED_ID for door $DOOR_ID $(reason)"
+    elif ! choose "$FIRST_ID"; then
+        fail bad-download "choosing firmware $FIRST_ID for door $DOOR_ID $(reason)"
     elif ota bad-download failed; then
-        pass bad-download "the update to $SIGNED_VERSION from $UNREACHABLE_URL failed: $(update_state .detail)"
+        pass bad-download "the update to $FIRST_VERSION from $UNREACHABLE_URL failed: $(update_state .detail)"
     fi
     if ! restore_device_url; then
         fail device-url-restored "putting device_url back to \"$value\" $(reason)"
@@ -953,7 +920,7 @@ step_revoke
 if $OTA; then
     step_release
     step_signed_ota
-    step_unsigned_ota
+    step_back_ota
     step_bad_download
 else
     skip ota "--skip-ota: steps 8 to 10 do not run"

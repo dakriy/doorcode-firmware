@@ -210,7 +210,7 @@ asks the system's name resolver about an unknown host.
 Firmware commands: `make firmware-build`, `make firmware-build-migrate`
 (the stepping-stone image, `docs/migration.md`), `make firmware-check`,
 `make firmware-flash` (`FIRMWARE_PORT`, default `/dev/ttyUSB0`), and for
-releases `make firmware-release VERSION= KEY=` and
+releases `make firmware-release VERSION=` and
 `make firmware-upload SERVER= TOKEN= FILE= VERSION=` (`docs/release.md`).
 
 ## Complexity caps

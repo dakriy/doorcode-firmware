@@ -1,41 +1,47 @@
 #!/bin/sh
-# Builds a release image of the firmware as VERSION, signs it with the
-# P-256 private key at KEY_PATH (PEM), and checks the signature with the
-# committed public key and refuses an image larger than the smaller OTA slot
-# of firmware/partitions.csv before it writes
-# dist/doorcode-firmware-VERSION.bin and its SHA-256 beside it.
+# Builds a release image of the firmware as VERSION and refuses one that
+# with the server's 68-byte signature block would be larger than the
+# smaller OTA slot of firmware/partitions.csv, before it writes the
+# unsigned image as dist/doorcode-firmware-VERSION.bin and its SHA-256
+# beside it. The server signs the image each time it serves it.
 # docs/release.md describes the flow and docs/firmware-signing.md the
 # signature block.
 #
-# The build, the signing, and the checks run in the firmware container
-# (scripts/firmware-release-image.sh). The key is mounted into it read-only
-# and is refused when it lies inside the repository.
-#
-# DOORCODE_SIGNING_PUBLIC_KEY names another raw public key to check the
-# signature with, for trying the flow with a throwaway key; an image signed
-# with any key but the committed one is refused by every door.
+# The build and the checks run in the firmware container
+# (scripts/firmware-release-image.sh).
 #
 # With --migrate it builds the stepping-stone image for boards on ESP-IDF's
 # standard two-OTA table instead (docs/migration.md). It embeds
 # firmware/provisioning.json, which must exist; its VERSION must end in
-# -migrate, so that no server takes it for a release to update to; and the
-# signed image must fit that table's 1 MB app slots.
+# -migrate, so that no server takes it for a release to update to; it is
+# signed with the P-256 private key at KEY_PATH (PEM), and the signature is
+# checked with that key's public half; and the signed image must fit that
+# table's 1 MB app slots. The key is mounted into the container read-only
+# and is refused when it lies inside the repository.
 #
-# Usage: scripts/firmware-release.sh [--migrate] VERSION KEY_PATH
+# Usage: scripts/firmware-release.sh VERSION
+#        scripts/firmware-release.sh --migrate VERSION KEY_PATH
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
+usage() {
+    echo "usage: $0 VERSION" >&2
+    echo "       $0 --migrate VERSION KEY_PATH" >&2
+    exit 2
+}
+
 variant=full
+key=
 if [ "${1:-}" = --migrate ]; then
     variant=migrate
     shift
+    [ $# -eq 2 ] && [ -n "$2" ] || usage
+    key=$2
+else
+    [ $# -eq 1 ] || usage
 fi
-if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-    echo "usage: $0 [--migrate] VERSION KEY_PATH" >&2
-    exit 2
-fi
+[ -n "$1" ] || usage
 version=$1
-key=$2
 
 # A release image goes to every door, so it must not embed the
 # provisioning file's secrets. The stepping-stone image must: the boards it
@@ -66,41 +72,36 @@ if ! printf '%s' "$version" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z._+-]{0,30}$'; the
     exit 1
 fi
 
-absolute() {
-    (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")")
-}
-
-if [ ! -f "$key" ]; then
-    echo "no private key at $key" >&2
-    exit 1
+if [ "$variant" = migrate ]; then
+    if [ ! -f "$key" ]; then
+        echo "no private key at $key" >&2
+        exit 1
+    fi
+    key=$(cd "$(dirname "$key")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$key")")
+    case "$key" in
+    "$(cd "$repo" && pwd -P)"/*)
+        echo "the private key must not be inside the repository: $key" >&2
+        exit 1
+        ;;
+    esac
 fi
-key=$(absolute "$key")
-case "$key" in
-"$(cd "$repo" && pwd -P)"/*)
-    echo "the private key must not be inside the repository: $key" >&2
-    exit 1
-    ;;
-esac
-public=${DOORCODE_SIGNING_PUBLIC_KEY:-$repo/firmware/signing_public_key.bin}
-# Checked here, since docker mounts a missing file as a new directory.
-if [ ! -f "$public" ]; then
-    echo "no public key at $public" >&2
-    exit 1
-fi
-public=$(absolute "$public")
 
 name="doorcode-firmware-$version"
 mkdir -p "$repo/dist"
 rm -f "$repo/dist/$name.bin" "$repo/dist/$name.sha256"
+image="sh /repo/scripts/firmware-release-image.sh '$version' /repo/dist/$name.bin $(id -u):$(id -g)"
 
-sh "$repo/scripts/firmware-container.sh" \
-    -v "$key":/run/release/signing-key.pem:ro \
-    -v "$public":/run/release/signing-public-key.bin:ro \
-    "sh /repo/scripts/firmware-release-image.sh '$version' \
-        /run/release/signing-key.pem /run/release/signing-public-key.bin \
-        /repo/dist/$name.bin $(id -u):$(id -g) $variant"
+if [ "$variant" = migrate ]; then
+    sh "$repo/scripts/firmware-container.sh" \
+        -v "$key":/run/release/signing-key.pem:ro \
+        "$image migrate /run/release/signing-key.pem"
+    kind="signed, signature checked"
+else
+    sh "$repo/scripts/firmware-container.sh" "$image"
+    kind="unsigned; the server signs it"
+fi
 
 (cd "$repo/dist" && sha256sum "$name.bin" > "$name.sha256")
 size=$(wc -c < "$repo/dist/$name.bin")
-echo "release $version: dist/$name.bin ($size bytes), signature checked"
+echo "release $version: dist/$name.bin ($size bytes, $kind)"
 echo "sha256: $(cut -d ' ' -f 1 "$repo/dist/$name.sha256")"

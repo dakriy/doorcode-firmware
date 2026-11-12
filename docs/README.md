@@ -14,8 +14,8 @@ live outside the repository.
 - `security.md`: the security posture and why.
 - `firmware-signing.md`: the signature block on firmware images and the key
   that checks it.
-- `release.md`: building, signing, uploading, and rolling out a firmware
-  release.
+- `release.md`: building, uploading, and rolling out a firmware release,
+  which the server signs.
 - `migration.md`: moving boards from ESP-IDF's standard two-OTA partition
   table to this firmware's, through a stepping-stone image.
 - `host.md`: the desktop host binary, its flags, and its control API.
