@@ -1,23 +1,21 @@
 #!/bin/sh
-# Builds a release image of the firmware as VERSION and refuses one that
-# with the server's 68-byte signature block would be larger than the
-# smaller OTA slot of firmware/partitions.csv, before it writes the
-# unsigned image as dist/doorcode-firmware-VERSION.bin and its SHA-256
-# beside it. The server signs the image each time it serves it.
-# docs/release.md describes the flow and docs/firmware-signing.md the
-# signature block.
+# Releases the firmware as VERSION: dist/doorcode-firmware-VERSION.bin,
+# unsigned, and its SHA-256 beside it. The server signs the image each time
+# it serves it. docs/release.md describes the flow and
+# docs/firmware-signing.md the signature block.
 #
-# The build and the checks run in the firmware container
-# (scripts/firmware-release-image.sh).
+# This half checks the arguments and the repository: the version's form,
+# and that firmware/provisioning.json, whose secrets the build embeds, is
+# absent. The build, the app descriptor and slot-size checks, and any
+# signing run in the firmware container (scripts/firmware-release-image.sh).
 #
-# With --migrate it builds the stepping-stone image for boards on ESP-IDF's
-# standard two-OTA table instead (docs/migration.md). It embeds
-# firmware/provisioning.json, which must exist; its VERSION must end in
-# -migrate, so that no server takes it for a release to update to; it is
-# signed with the P-256 private key at KEY_PATH (PEM), and the signature is
-# checked with that key's public half; and the signed image must fit that
-# table's 1 MB app slots. The key is mounted into the container read-only
-# and is refused when it lies inside the repository.
+# With --migrate it releases the stepping-stone image for boards on
+# ESP-IDF's standard two-OTA table instead (docs/migration.md), signed with
+# the P-256 private key at KEY_PATH (PEM). That image embeds
+# firmware/provisioning.json, which must then exist, and its VERSION must
+# end in -migrate, so that no server takes it for a release to update to.
+# The key is refused when it lies inside the repository, and is mounted
+# into the container read-only.
 #
 # Usage: scripts/firmware-release.sh VERSION
 #        scripts/firmware-release.sh --migrate VERSION KEY_PATH

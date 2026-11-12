@@ -107,6 +107,5 @@ The release is unsigned. The server signs the image each time it serves
 it and sends the doors the public half of its key in their configuration,
 so the SHA-256 the server shows, of the signed image, differs from the one
 in `dist/`. The server rolls the version out to the doors in its update
-window. See
-[`docs/release.md`](docs/release.md) and
+window. See [`docs/release.md`](docs/release.md) and
 [`docs/firmware-signing.md`](docs/firmware-signing.md).

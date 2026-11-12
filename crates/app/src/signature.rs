@@ -1,4 +1,4 @@
-//! The signature block a release appends to a firmware image, as
+//! The signature block the server appends to a firmware image it serves, as
 //! `espsecure sign_data --version 1` writes it and ESP-IDF's signed-app
 //! check reads it: the image, then a 4-byte little-endian version word
 //! that is 0, then the 64-byte ECDSA P-256 signature `r || s`, each half

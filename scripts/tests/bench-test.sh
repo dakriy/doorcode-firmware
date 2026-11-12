@@ -3,10 +3,11 @@
 # server and checks it end to end: flashing and booting, enrollment, telemetry,
 # the open and reboot commands, a configuration override, credential rotation
 # and revocation, firmware updates into both slots with images the server
-# signs, a failed download, and the board's health over the run. It creates or restores a door for the
-# board, uploads firmware, and changes the device_url setting, and undoes all
-# of it again, deleting a door it created for good, which needs a token of a
-# user holding the admin role: run it only against a development server.
+# signs, a failed download, and the board's health over the run. It creates
+# or restores a door for the board, uploads firmware, and changes the
+# device_url setting, and undoes all of it again, deleting a door it created
+# for good, which needs a token of a user holding the admin role: run it only
+# against a development server.
 # Settings come from test.env (scripts/tests/bench-env.sh); docs/testing.md
 # describes the run.
 

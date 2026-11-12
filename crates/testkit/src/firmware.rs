@@ -16,7 +16,7 @@ fn signing_key(scalar: [u8; 32]) -> SigningKey {
     SigningKey::from_slice(&scalar).expect("a valid scalar")
 }
 
-/// `body` with the signature block a release appends: the version word 0,
+/// `body` with the signature block the server appends: the version word 0,
 /// little-endian, and the ECDSA P-256 signature `r || s` of its SHA-256.
 fn signed_with(scalar: [u8; 32], body: &[u8]) -> Vec<u8> {
     let digest = Sha256::digest(body);
