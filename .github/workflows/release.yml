@@ -1,0 +1,60 @@
+name: Release
+
+# Runs when a tag vVERSION is pushed: checks that VERSION is one the
+# release script would release, runs the verification of verify.yml, builds
+# the unsigned image with make firmware-release, and publishes it with its
+# SHA-256 as the GitHub Release VERSION. A VERSION with a '-' part, such as
+# 2.1.0-rc1, is published as a pre-release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=${TAG#v}
+          sh scripts/firmware-release.sh --check "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: version
+    uses: ./.github/workflows/verify.yml
+
+  release:
+    name: release
+    needs: [version, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make firmware-release VERSION="$VERSION"
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set --
+          case "$VERSION" in
+          *-*) set -- --prerelease ;;
+          esac
+          gh release create "$TAG" --verify-tag --title "$VERSION" \
+            --notes "Unsigned firmware image $VERSION; the server signs it when it serves it." \
+            "$@" \
+            "dist/doorcode-firmware-$VERSION.bin" \
+            "dist/doorcode-firmware-$VERSION.sha256"

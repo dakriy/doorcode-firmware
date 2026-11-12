@@ -15,6 +15,10 @@ but starts with empty docker volumes, so it downloads ESP-IDF and builds
 the firmware from scratch each time. A failing job fails the push or the
 pull request.
 
+A pushed tag `vVERSION` runs `.github/workflows/release.yml` instead, which
+calls the same jobs before it builds and publishes the release
+(`release.md`).
+
 # Testing against a server
 
 The repository's own suites (`make verify-fast`, `make verify-mutation`,

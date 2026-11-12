@@ -10,6 +10,22 @@ needed to release.
 
 ## 1. Build
 
+Push a tag `vVERSION`, such as `v2.1.0`, and GitHub builds the release
+(`.github/workflows/release.yml`). The workflow:
+
+1. Asks `scripts/firmware-release.sh --check VERSION` whether VERSION is
+   one it would release, and stops there if not.
+2. Runs the same verification as a push (`verify.yml`).
+3. Runs `make firmware-release VERSION=VERSION`, described below.
+4. Publishes the GitHub Release named VERSION on the tag, holding
+   `doorcode-firmware-VERSION.bin` and `doorcode-firmware-VERSION.sha256`.
+   A VERSION with a `-` part, such as `2.1.0-rc1`, is marked a pre-release.
+
+Nothing is published when any step fails. Download the `.bin` from the
+release's page and upload it to the server as below.
+
+To build a release locally instead:
+
     make firmware-release VERSION=2.1.0
 
 or `scripts/firmware-release.sh VERSION`. The script:
@@ -22,7 +38,8 @@ or `scripts/firmware-release.sh VERSION`. The script:
    `firmware_version` the door reports and the version in the image's app
    descriptor; the script checks that the two agree. Versions are semver
    from 2.0.0 on, at most 31 characters of letters, digits, `.`, `_`, `+`,
-   and `-`.
+   and `-`, and never end in `-migrate`, which marks the stepping-stone
+   image (`migration.md`).
 3. Turns the ELF into an app image with esptool's `elf2image`, as ESP-IDF's
    own build does, including the SHA-256 digest appended to it.
 4. Checks that the image with the server's 68-byte signature block fits

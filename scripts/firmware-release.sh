@@ -15,44 +15,73 @@
 # firmware/provisioning.json, which must then exist, and its VERSION must
 # end in -migrate, so that no server takes it for a release to update to.
 # The key is refused when it lies inside the repository, and is mounted
-# into the container read-only.
+# into the container read-only. A release's version must not end in
+# -migrate.
+#
+# With --check it only checks that VERSION is one it would release, and
+# builds nothing; the release workflow asks it before anything else.
 #
 # Usage: scripts/firmware-release.sh VERSION
+#        scripts/firmware-release.sh --check VERSION
 #        scripts/firmware-release.sh --migrate VERSION KEY_PATH
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 
 usage() {
     echo "usage: $0 VERSION" >&2
+    echo "       $0 --check VERSION" >&2
     echo "       $0 --migrate VERSION KEY_PATH" >&2
     exit 2
 }
 
 variant=full
 key=
-if [ "${1:-}" = --migrate ]; then
+case "${1:-}" in
+--migrate)
     variant=migrate
     shift
     [ $# -eq 2 ] && [ -n "$2" ] || usage
     key=$2
-else
+    ;;
+--check)
+    variant=check
+    shift
     [ $# -eq 1 ] || usage
-fi
+    ;;
+*)
+    [ $# -eq 1 ] || usage
+    ;;
+esac
 [ -n "$1" ] || usage
 version=$1
+
+# The server takes letters, digits, dots, dashes, underscores, and plus
+# signs, starting with a letter or digit; the app descriptor holds 31 bytes.
+if ! printf '%s' "$version" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z._+-]{0,30}$'; then
+    echo "version '$version' is not 1 to 31 letters, digits, '.', '_', '+', or '-', starting with a letter or digit" >&2
+    exit 1
+fi
+
+# Only the stepping-stone image's version ends in -migrate, so that no
+# server takes it for a release to update to.
+case "$variant:$version" in
+migrate:*-migrate) ;;
+migrate:*)
+    echo "the stepping-stone image's version '$version' does not end in -migrate" >&2
+    exit 1
+    ;;
+*:*-migrate)
+    echo "version '$version' ends in -migrate, which only the stepping-stone image's does" >&2
+    exit 1
+    ;;
+esac
+[ "$variant" != check ] || exit 0
 
 # A release image goes to every door, so it must not embed the
 # provisioning file's secrets. The stepping-stone image must: the boards it
 # goes to have nothing in NVS, so the embedded defaults are their broker,
 # enrollment account, and Wi-Fi network.
 if [ "$variant" = migrate ]; then
-    case "$version" in
-    *-migrate) ;;
-    *)
-        echo "the stepping-stone image's version '$version' does not end in -migrate" >&2
-        exit 1
-        ;;
-    esac
     if [ ! -f "$repo/firmware/provisioning.json" ]; then
         echo "the stepping-stone image embeds firmware/provisioning.json, which is missing" >&2
         exit 1
@@ -60,13 +89,6 @@ if [ "$variant" = migrate ]; then
 elif [ -e "$repo/firmware/provisioning.json" ]; then
     echo "firmware/provisioning.json exists; a release image would embed its secrets." >&2
     echo "Move it out of the repository and run the release again." >&2
-    exit 1
-fi
-
-# The server takes letters, digits, dots, dashes, underscores, and plus
-# signs, starting with a letter or digit; the app descriptor holds 31 bytes.
-if ! printf '%s' "$version" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z._+-]{0,30}$'; then
-    echo "version '$version' is not 1 to 31 letters, digits, '.', '_', '+', or '-', starting with a letter or digit" >&2
     exit 1
 fi
 

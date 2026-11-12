@@ -96,8 +96,14 @@ entrypoint presenting a certificate from that CA. See
 
 ## Release
 
-Move `firmware/provisioning.json` out of the way first; the release refuses
-to build while it exists. Then:
+Push a tag `vVERSION`, such as `v2.1.0`. After the same verification as a
+push, GitHub builds the image and publishes it as the GitHub Release
+`2.1.0`, holding `doorcode-firmware-2.1.0.bin` and its `.sha256`; a version
+with a `-` part, such as `2.1.0-rc1`, is a pre-release. Upload the `.bin`
+to the server with `make firmware-upload` as below.
+
+To build locally instead, move `firmware/provisioning.json` out of the way
+first; the release refuses to build while it exists. Then:
 
     make firmware-release VERSION=2.1.0
     make firmware-upload SERVER=https://doorcode.example.com TOKEN="$TOKEN" \

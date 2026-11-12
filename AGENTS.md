@@ -223,6 +223,9 @@ Firmware commands: `make firmware-build`, `make firmware-build-migrate`
 `make firmware-flash` (`FIRMWARE_PORT`, default `/dev/ttyUSB0`), and for
 releases `make firmware-release VERSION=` and
 `make firmware-upload SERVER= TOKEN= FILE= VERSION=` (`docs/release.md`).
+Pushing a tag `vVERSION` runs `.github/workflows/release.yml`, which calls
+`verify.yml`, then `make firmware-release`, and publishes the GitHub
+Release.
 
 ## Complexity caps
 
