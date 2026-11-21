@@ -67,8 +67,9 @@ The profile aborts on a panic without formatting a message
 (`panic = "immediate-abort"`, through `-Z build-std`), and
 `sdkconfig.migrate` turns off what a board does not need on the way:
 IPv6, the soft-AP, log levels below error, error names, the TLS server,
-and every cipher suite, curve, and hash but ECDHE-ECDSA with AES-GCM,
-SHA-256, and P-256. `make firmware-check` runs clippy on both variants.
+the root bundle, renegotiation, pre-shared keys, and DHE. Its TLS client
+otherwise matches the full image's, and adds TLS 1.3 and
+ChaCha20-Poly1305. `make firmware-check` runs clippy on both variants.
 
 ## Provisioning
 

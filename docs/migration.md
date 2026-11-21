@@ -52,10 +52,15 @@ not need to get to the next step:
   the configuration says about the mesh.
 - IPv4 only: the broker and the download server must be reachable over
   IPv4.
-- TLS 1.2 client only, with ECDHE-ECDSA key exchange, AES-GCM, SHA-256,
-  and the P-256 curve. The broker's and the device download address's
-  certificates, and the CA they chain to, must be ECDSA P-256 signed with
-  SHA-256.
+- TLS client only, over TLS 1.2 or TLS 1.3. It accepts the cipher suites,
+  key exchanges, and certificates the full image does, and
+  ChaCha20-Poly1305 besides: ECDHE with ECDSA or RSA certificates (and the
+  non-ephemeral RSA and ECDH exchanges), AES-GCM, AES-CCM, and
+  ChaCha20-Poly1305, SHA-256 and SHA-384, and the curves X25519, P-256,
+  P-384, and P-521 among others. It does not offer finite-field
+  Diffie-Hellman (DHE), pre-shared keys, or renegotiation, and it does not
+  read certificate revocation lists. It trusts only the provisioned CA, not
+  a root bundle.
 - ESP-IDF and the firmware log errors only; error codes are logged by
   number, without their names; and a panic restarts the board without a
   message.
