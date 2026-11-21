@@ -74,6 +74,10 @@ pub struct Enrollment {
     pub online: bool,
     pub firmware_version: String,
     pub signal: i32,
+    /// The token the board's previous firmware identified it with. Only
+    /// the announcement sent again without being retained carries it, so
+    /// the broker never keeps it.
+    pub previous_token: String,
 }
 
 message! {
@@ -81,6 +85,7 @@ message! {
         online: always,
         signal: unless_default,
         firmware_version: unless_default,
+        previous_token: unless_default,
     }
 }
 

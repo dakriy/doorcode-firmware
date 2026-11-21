@@ -91,8 +91,13 @@ reads the table at 0x8000 and the flash address it runs from:
 3. **New table.** It goes on.
 4. **Any other table.** It logs an error, changes nothing, and goes on.
 
-It then runs as a door without a keypad: it joins the provisioned Wi-Fi
-network, enrolls, and connects to the broker. Once it has connected it
+It then copies the previous firmware's token, if that firmware left one,
+into its own storage as `previous_token`. That firmware keeps it as an NVS
+string under the key `API_TOKEN` in the namespace `storage`; the NVS
+partition is the same in both tables, and the image only reads that
+namespace. The image then runs as a door without a keypad: it joins the
+provisioned Wi-Fi network, enrolls, announcing the token once more without
+retaining it (`protocol.md`), and connects to the broker. Once it has connected it
 marks itself valid, as every update does (`release.md`), and reports its
 version, `2.0.0-migrate`.
 

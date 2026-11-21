@@ -27,6 +27,8 @@ mod mqtt;
 mod network;
 mod nvs_storage;
 mod pins;
+#[cfg(feature = "migrate")]
+mod previous;
 mod provisioning;
 mod radio;
 mod random;
@@ -131,13 +133,16 @@ impl Connectors for EspConnectors {
     }
 }
 
-/// The application's storage, seeded with the embedded provisioning.
+/// The application's storage, seeded with the embedded provisioning and,
+/// in the stepping-stone image, the previous firmware's token.
 fn storage(partition: &EspDefaultNvsPartition) -> NvsStorage {
     let storage = NvsStorage::open(partition.clone(), storage_keys::NAMESPACE)
         .expect("opening the application's NVS namespace");
     if let Err(error) = provisioning::seed(&storage) {
         log::error!("seeding provisioning: {error}");
     }
+    #[cfg(feature = "migrate")]
+    previous::seed(partition, &storage);
     storage
 }
 

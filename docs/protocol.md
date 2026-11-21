@@ -25,6 +25,26 @@ file (`host.md`). Keys the firmware does not use, such as
 `server.device_url` and `generated_at`, are ignored: the `update` command
 carries the full download address.
 
+## The previous firmware's token
+
+A board that comes from other firmware may carry the token that firmware
+identified it with; the stepping-stone image copies it into storage as
+`previous_token` (`migration.md`). While a controller holding one enrolls,
+each announcement goes out twice on `doorcode/enroll/<hwid>`, QoS 1: first
+the retained announcement the contract describes, then the same
+announcement **not retained**, with one key more, `previous_token` (text).
+The broker therefore keeps only the announcement without the token, and
+only a client subscribed at that moment receives the token: the server,
+which ignores the key as it ignores every key it does not know, and any
+client the site gives a subscription to the enrollment topics, which can
+use it to tell which door the board was. Both are sent again whenever the
+announcement is, after every connection and every ten minutes while the
+controller waits.
+
+The controller removes `previous_token` from storage whenever it starts
+as a door, so a controller that has been approved once never sends it
+again, even if it enrolls anew later.
+
 ## One CA for the broker and for downloads
 
 The firmware trusts exactly one CA: `broker_ca_pem` from the configuration,

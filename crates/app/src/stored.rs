@@ -38,6 +38,9 @@ pub(crate) const CONFIG_TRY: &str = "config_try";
 pub(crate) const CONFIG_TRIED: &str = "config_tried";
 const SAID: &str = " said";
 pub(crate) const TIMELINE: &str = "timeline";
+/// The token the board's previous firmware identified it with, kept until
+/// the board is a door.
+const PREVIOUS_TOKEN: &str = "previous_token";
 
 pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunError> {
     let broker = broker(storage)?;
@@ -53,7 +56,14 @@ pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunErr
         broker,
         enrollment,
         wifi,
+        previous_token: optional(storage, PREVIOUS_TOKEN)?,
     })
+}
+
+/// Forgets the token the board's previous firmware identified it with,
+/// which only an enrolling controller sends.
+pub(crate) fn forget_previous_token(storage: &dyn Storage) -> Result<(), RunError> {
+    remove(storage, &[PREVIOUS_TOKEN])
 }
 
 /// The door credentials, when all three parts are stored.

@@ -140,6 +140,10 @@ pub struct Provisioning {
     /// The shared account an unenrolled controller connects as.
     pub enrollment: Account,
     pub wifi: WifiNetwork,
+    /// The token the board's previous firmware identified it with, sent
+    /// with the announcement while enrolling so the side that approves can
+    /// tell which door the board was; empty when the board has none.
+    pub previous_token: String,
 }
 
 /// A broker username and password.

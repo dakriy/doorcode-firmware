@@ -191,11 +191,33 @@ fn announce(device: &Device<'_>) -> Result<(), BrokerError> {
         online: true,
         firmware_version: device.firmware_version(),
         signal: device.signal_dbm(),
+        previous_token: String::new(),
     };
     device
         .connectors
         .broker()
         .publish(&status(device, &announcement))?;
+    identify(device, announcement)
+}
+
+/// The announcement once more, not retained, with the token the board's
+/// previous firmware identified it with, when it has one: whoever listens
+/// on the enrollment topics at that moment hears it, and the broker keeps
+/// nothing of it.
+fn identify(device: &Device<'_>, announcement: Enrollment) -> Result<(), BrokerError> {
+    let token = &device.provisioning.previous_token;
+    if token.is_empty() {
+        return Ok(());
+    }
+    let identified = Enrollment {
+        previous_token: token.clone(),
+        ..announcement
+    };
+    device.connectors.broker().publish(&Publication {
+        topic: protocol::enroll_topic(&device.hardware_id),
+        payload: identified.encode(),
+        retain: false,
+    })?;
     Ok(())
 }
 

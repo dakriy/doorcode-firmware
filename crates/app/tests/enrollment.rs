@@ -54,6 +54,31 @@ fn announcement() -> BrokerCall {
             online: true,
             firmware_version: "2.0.0".to_owned(),
             signal: -61,
+            previous_token: String::new(),
+        }),
+    })
+}
+
+const PREVIOUS_TOKEN: &str = "Xk2pQ9rT0vLmN4sB7wYc1dEf6gHj3kZa8uIo5pRq2sTv9xWy0zAb4cDe7fGh";
+
+/// A controller whose previous firmware left it a token.
+fn identified_controller(events: StubEvents) -> StubConnectors {
+    StubConnectors {
+        storage: StubStorage::provisioned().with("previous_token", PREVIOUS_TOKEN.as_bytes()),
+        events,
+        ..StubConnectors::default()
+    }
+}
+
+fn identified_announcement() -> BrokerCall {
+    BrokerCall::Publish(Sent {
+        topic: "doorcode/enroll/a1b2c3d4e5f6".to_owned(),
+        retain: false,
+        message: Message::Enrollment(Enrollment {
+            online: true,
+            firmware_version: "2.0.0".to_owned(),
+            signal: -61,
+            previous_token: PREVIOUS_TOKEN.to_owned(),
         }),
     })
 }
@@ -501,4 +526,97 @@ fn a_controller_with_only_part_of_its_door_credentials_stored_enrolls() {
 
     assert_eq!(report.door, None);
     assert_eq!(connectors.broker.calls(), vec![enrollment_connection()]);
+}
+
+#[test]
+fn a_controller_with_a_previous_token_announces_itself_again_not_retained_with_the_token() {
+    let connectors = identified_controller(StubEvents::script([(0, Event::Connected)]));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.broker.calls(),
+        vec![
+            enrollment_connection(),
+            credentials_subscription(),
+            announcement(),
+            identified_announcement()
+        ]
+    );
+}
+
+#[test]
+fn the_announcement_with_the_previous_token_is_encoded_exactly_as_the_contract_shows() {
+    let connectors = StubConnectors {
+        firmware: StubFirmware::running("1.4.2"),
+        storage: StubStorage::provisioned().with("previous_token", b"tok"),
+        ..controller(StubEvents::script([(0, Event::Connected)]))
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.broker.published_payloads()[1],
+        hex(
+            "a5617601666f6e6c696e65f5667369676e616c383c6e70726576696f75735f746f6b656e63746f6b706669726d776172655f76657273696f6e65312e342e32"
+        )
+    );
+}
+
+#[test]
+fn a_controller_with_a_previous_token_still_waiting_after_ten_minutes_sends_both_again() {
+    let connectors = identified_controller(StubEvents::script([
+        (0, Event::Connected),
+        (TEN_MINUTES_MS + 500, Event::Stop),
+    ]));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.broker.calls(),
+        vec![
+            enrollment_connection(),
+            credentials_subscription(),
+            announcement(),
+            identified_announcement(),
+            announcement(),
+            identified_announcement()
+        ]
+    );
+}
+
+#[test]
+fn once_enrolled_the_controller_keeps_its_door_credentials_in_place_of_the_previous_token() {
+    let connectors = identified_controller(StubEvents::script([
+        (0, Event::Connected),
+        (5_000, credentials_for(HARDWARE_ID, &door_seven())),
+    ]));
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            connectors.storage.stored("door_id"),
+            connectors.storage.stored("previous_token")
+        ),
+        (Some(b"7".to_vec()), None)
+    );
+}
+
+#[test]
+fn a_door_starting_with_a_previous_token_still_stored_drops_it() {
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled().with("previous_token", PREVIOUS_TOKEN.as_bytes()),
+        ..StubConnectors::default()
+    };
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (
+            report.door.map(|door| door.door_id),
+            connectors.storage.stored("previous_token")
+        ),
+        (Some(7), None)
+    );
 }

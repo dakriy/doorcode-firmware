@@ -36,6 +36,7 @@ fn provisioning_is_read_from_storage() {
                 ssid: "building".to_owned(),
                 password: "wifi-secret".to_owned(),
             },
+            previous_token: String::new(),
         }
     );
 }
@@ -135,4 +136,14 @@ fn a_storage_failure_is_reported() {
         error,
         RunError::Storage(StorageError("flash is worn out".to_owned()))
     );
+}
+
+#[test]
+fn the_token_the_previous_firmware_left_is_read_with_the_provisioning() {
+    let connectors =
+        with_storage(StubStorage::provisioned().with("previous_token", b"legacy-token"));
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(report.provisioning.previous_token, "legacy-token");
 }

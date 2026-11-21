@@ -115,6 +115,7 @@ pub(crate) fn start(
     running: Running,
 ) -> Result<Door, RunError> {
     let storage = device.connectors.storage();
+    stored::forget_previous_token(storage)?;
     let next = stored::next_credentials(storage, credentials.door_id)?;
     let Running {
         config,
