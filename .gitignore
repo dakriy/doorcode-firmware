@@ -19,3 +19,4 @@
 /test.env
 # Bytecode from checking the bench helper with py_compile.
 __pycache__/
+.idea/
