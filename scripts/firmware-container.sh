@@ -28,13 +28,18 @@ for argument; do
 done
 shift "$count"
 
+# Each checkout builds into a cache volume of its own, named after its
+# path: cargo and ESP-IDF decide what to rebuild by file times, which say
+# nothing about a build another checkout left in a shared volume.
+target_volume="esp-rs-target-$(printf '%s' "$repo" | sha256sum | cut -c 1-12)"
+
 # The image's login shell resets PATH, so the cargo bin dir is exported here.
 exec docker run --rm -u root \
     -v "$repo":/repo -w /repo/firmware \
     -v esp-rs-espressif:/root/.espressif \
     -v esp-rs-embuild:/root/.embuild \
     -v esp-rs-cargo-reg:/root/.cargo/registry \
-    -v esp-rs-target:/repo/firmware/target \
+    -v "$target_volume":/repo/firmware/target \
     -e RUSTUP_HOME=/home/esp/.rustup -e CARGO_HOME=/root/.cargo \
     -e ESP_IDF_TOOLS_INSTALL_DIR=global \
     "$@" "$image" bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; $command"

@@ -21,8 +21,13 @@ partition table, and the application to `ota_0`, and erases `otadata` so
 the board boots it.
 
 Caches live in the docker volumes `esp-rs-espressif`, `esp-rs-embuild`,
-`esp-rs-cargo-reg`, and `esp-rs-target`. The first build downloads and
-compiles ESP-IDF (about fifteen minutes); later builds take under a minute.
+and `esp-rs-cargo-reg`, shared by every checkout, and the build output in
+`esp-rs-target-<hash>`, one volume per checkout, named after its path.
+Cargo and ESP-IDF decide what to rebuild by file times, and a shared
+output volume would hand one checkout what another built, its sdkconfig
+included. The first build downloads and compiles ESP-IDF (about fifteen
+minutes); a checkout's first build compiles it again into its own volume,
+and later builds take under a minute.
 
 The mesh comes from two components of Espressif's component registry,
 `espressif/mesh_lite` and the `espressif/iot_bridge` it builds on, listed
