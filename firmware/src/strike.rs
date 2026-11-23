@@ -6,6 +6,7 @@ use connectors::Strike;
 use esp_idf_svc::hal::gpio::{AnyOutputPin, Level, Output, PinDriver};
 use esp_idf_svc::sys::EspError;
 
+use crate::esp_error::coded;
 use crate::threads;
 
 pub(crate) struct GpioStrike {
@@ -24,7 +25,7 @@ impl GpioStrike {
 
     fn drive(&self, level: Level) {
         if let Err(error) = threads::lock(&self.pin).set_level(level) {
-            log::error!("driving the strike {level:?}: {error}");
+            log::error!("driving the strike {level:?}: {}", coded(&error));
         }
     }
 }

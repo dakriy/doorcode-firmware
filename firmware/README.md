@@ -235,6 +235,10 @@ for size so an image fits.
   every call of `Events::next`, and every five seconds while it waits, so
   only an event loop iteration that hangs trips it. The brownout detector
   is on.
+- **Errors.** ESP-IDF errors are logged and reported with their name and
+  their code, as `ESP_ERR_NVS_NOT_ENOUGH_SPACE (0x1105)`. The
+  stepping-stone image is built without ESP-IDF's table of names, so its
+  errors read `UNKNOWN ERROR (0x1105)`.
 - **Log level.** The configured `log_level` sets the level of every ESP-IDF
   log tag and of the firmware's own log. ESP-IDF's components are compiled
   with `info` as their most detailed level, to keep the image small, so

@@ -22,6 +22,8 @@ use std::time::Duration;
 
 use esp_idf_svc::sys::{self, EspError};
 
+use crate::esp_error::coded;
+
 /// Where the bootloader reads the partition table, and its length.
 const TABLE_AT: u32 = 0x8000;
 const TABLE_BYTES: usize = 0xC00;
@@ -71,7 +73,7 @@ enum Table {
 /// the table it has, and is tried again on the next start.
 pub(crate) fn run() {
     if let Err(error) = step() {
-        log::error!("moving to the new partition table: {error}");
+        log::error!("moving to the new partition table: {}", coded(&error));
     }
 }
 

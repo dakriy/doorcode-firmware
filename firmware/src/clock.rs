@@ -9,6 +9,8 @@ use connectors::Clock;
 use esp_idf_svc::sntp::{EspSntp, SntpConf};
 use esp_idf_svc::sys::{self, EspError};
 
+use crate::esp_error::coded;
+
 /// Milliseconds since boot.
 pub(crate) fn now_ms() -> u64 {
     // SAFETY: takes no arguments and only reads the timer, from any task.
@@ -64,7 +66,7 @@ impl TimeSync {
         self.server = Some(server.to_owned());
         match start(server, Arc::clone(&self.synced)) {
             Ok(service) => self.service = Some(service),
-            Err(error) => log::warn!("SNTP from {server}: {error}"),
+            Err(error) => log::warn!("SNTP from {server}: {}", coded(&error)),
         }
     }
 }

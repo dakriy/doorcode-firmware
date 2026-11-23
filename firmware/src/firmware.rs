@@ -5,6 +5,8 @@ use std::cell::Cell;
 use std::ptr;
 
 use connectors::{Firmware, FirmwareError, StartReason};
+
+use crate::esp_error::coded;
 use esp_idf_svc::sys::{self, esp_ota_handle_t, esp_partition_t, EspError};
 
 /// The version this image was built as.
@@ -107,7 +109,7 @@ impl EspFirmware {
 }
 
 fn refused(error: EspError) -> FirmwareError {
-    FirmwareError(error.to_string())
+    FirmwareError(coded(&error))
 }
 
 fn not_begun() -> FirmwareError {

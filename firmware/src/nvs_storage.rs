@@ -4,6 +4,7 @@ use connectors::{Storage, StorageError};
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use esp_idf_svc::sys::EspError;
 
+use crate::esp_error::coded;
 use crate::threads;
 
 /// Storage backed by one NVS namespace. Every value is a blob, as
@@ -26,7 +27,7 @@ impl NvsStorage {
 }
 
 fn to_storage_error(error: EspError) -> StorageError {
-    StorageError(error.to_string())
+    StorageError(coded(&error))
 }
 
 impl Storage for NvsStorage {

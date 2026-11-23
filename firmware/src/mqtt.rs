@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use connectors::{Broker, BrokerError, ConnectOptions, Event, Publication};
 use esp_idf_svc::sys::EspError;
 
+use crate::esp_error::coded;
 use crate::events::EventSender;
 use crate::network::Link;
 use crate::threads;
@@ -121,7 +122,7 @@ fn open(shared: &Shared, generation: u32, settings: Settings, events: &EventSend
     match Client::start(settings, reporter()) {
         Ok(client) => *threads::lock(&shared.client) = Some(client),
         Err(error) => {
-            log::warn!("starting the MQTT client: {error}");
+            log::warn!("starting the MQTT client: {}", coded(&error));
             reporter().report(Event::Disconnected);
         }
     }

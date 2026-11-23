@@ -6,6 +6,8 @@
 //! its copy once the board is a door; the namespace itself is only read.
 
 use connectors::{Storage, StorageError};
+
+use crate::esp_error::coded;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use esp_idf_svc::sys::{EspError, ESP_ERR_NVS_NOT_FOUND};
 
@@ -60,7 +62,7 @@ fn read(nvs: &EspNvs<NvsDefault>) -> Result<Option<String>, EspError> {
 }
 
 fn esp_text(error: EspError) -> String {
-    error.to_string()
+    coded(&error)
 }
 
 fn text(error: StorageError) -> String {

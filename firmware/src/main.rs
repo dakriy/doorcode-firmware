@@ -11,6 +11,7 @@ mod clock;
 #[cfg(not(feature = "migrate"))]
 mod door_sensor;
 mod download;
+mod esp_error;
 mod events;
 mod firmware;
 #[cfg(feature = "migrate")]

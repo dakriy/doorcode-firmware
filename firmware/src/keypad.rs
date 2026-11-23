@@ -18,6 +18,7 @@ use esp_idf_svc::hal::delay::Ets;
 use esp_idf_svc::hal::gpio::{AnyIOPin, AnyOutputPin, Input, Output, PinDriver, Pull};
 use esp_idf_svc::sys::EspError;
 
+use crate::esp_error::coded;
 use crate::events::EventSender;
 use crate::pins::KeypadPins;
 use crate::threads;
@@ -115,7 +116,7 @@ fn scan_forever(matrix: &mut Matrix, events: &EventSender) -> ! {
     threads::repeat(|| {
         match matrix.scan() {
             Ok(held) => push_presses(&mut keys, held, events),
-            Err(error) => log::warn!("scanning the keypad: {error}"),
+            Err(error) => log::warn!("scanning the keypad: {}", coded(&error)),
         }
         SCAN_EVERY
     })

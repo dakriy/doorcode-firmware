@@ -14,6 +14,7 @@ use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use esp_idf_svc::http::Method;
 use esp_idf_svc::sys::{self, esp, EspError};
 
+use crate::esp_error::coded;
 use crate::events::EventSender;
 use crate::nvs_storage::NvsStorage;
 use crate::storage_keys::BROKER_CA;
@@ -168,5 +169,5 @@ fn whole(connection: &EspHttpConnection) -> Result<(), String> {
 
 /// What ESP-IDF said, which never quotes the address.
 fn describe(error: EspError) -> String {
-    error.to_string()
+    coded(&error)
 }

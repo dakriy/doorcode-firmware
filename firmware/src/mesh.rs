@@ -39,6 +39,7 @@ use esp_idf_svc::sys::{self, mesh_lite, EspError};
 use esp_idf_svc::wifi::WifiEvent;
 
 use crate::clock::now_ms;
+use crate::esp_error::coded;
 use crate::network::{
     power_save_off, roam_scan_due, set_11b_disabled, worth_roaming, Context, Credentials,
     MeshSettings, WeakRun, CHECK_EVERY, STACK_BYTES,
@@ -351,7 +352,7 @@ impl MeshStation {
     fn tell(&mut self, credentials: Credentials) {
         log::info!("joining {} through the mesh", credentials.ssid);
         if let Err(error) = configure_router(&credentials) {
-            log::warn!("configuring {}: {error}", credentials.ssid);
+            log::warn!("configuring {}: {}", credentials.ssid, coded(&error));
         }
         self.told = credentials;
         self.rejoin();

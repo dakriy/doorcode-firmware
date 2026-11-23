@@ -26,6 +26,7 @@ use esp_idf_svc::wifi::{
 };
 
 use crate::clock::now_ms;
+use crate::esp_error::coded;
 use crate::network::{
     power_save_off, restart, roam_scan_due, set_11b_disabled, worth_roaming, Context, Credentials,
     Settings, WeakRun, CHECK_EVERY, STACK_BYTES,
@@ -78,7 +79,7 @@ impl Station {
     /// looks after the link.
     fn run(mut self) {
         if let Err(error) = self.start() {
-            log::error!("starting Wi-Fi: {error}");
+            log::error!("starting Wi-Fi: {}", coded(&error));
             restart("Wi-Fi did not start");
         }
         threads::repeat(|| self.check())
@@ -111,7 +112,7 @@ impl Station {
     fn switch_11b(&mut self, disable_11b: bool) -> Duration {
         log::info!("restarting Wi-Fi with the 802.11b rates disabled: {disable_11b}");
         if let Err(error) = self.restart_wifi(disable_11b) {
-            log::error!("restarting Wi-Fi: {error}");
+            log::error!("restarting Wi-Fi: {}", coded(&error));
             restart("Wi-Fi did not restart with the new 802.11b switch");
         }
         CHECK_EVERY
@@ -176,7 +177,7 @@ impl Station {
         };
         let joined = self.associate(credentials, &access_point);
         if let Err(error) = &joined {
-            log::warn!("joining {}: {error}", credentials.ssid);
+            log::warn!("joining {}: {}", credentials.ssid, coded(error));
         }
         self.joined = joined.ok().map(|()| credentials.clone());
         self.context.link.set(self.joined.is_some());
@@ -215,7 +216,7 @@ impl Station {
         match self.associate(credentials, access_point) {
             Ok(()) => self.context.counts.roamed(),
             Err(error) => {
-                log::warn!("roaming: {error}");
+                log::warn!("roaming: {}", coded(&error));
                 self.joined = None;
                 self.context.link.set(false);
             }
@@ -237,7 +238,7 @@ impl Station {
         let scanned = self.wifi.scan();
         self.last_scan_ms = now_ms();
         scanned
-            .inspect_err(|error| log::warn!("scanning: {error}"))
+            .inspect_err(|error| log::warn!("scanning: {}", coded(error)))
             .ok()
     }
 
