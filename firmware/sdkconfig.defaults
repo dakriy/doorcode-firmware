@@ -46,6 +46,22 @@ CONFIG_BRIDGE_EXTERNAL_NETIF_STATION=y
 CONFIG_BRIDGE_DATA_FORWARDING_NETIF_SOFTAP=y
 # CONFIG_BRIDGE_ETHERNET_NETIF_ENABLE is not set
 
+# TLS: a client of TLS 1.2 and TLS 1.3, whichever the server picks.
+# ChaCha20-Poly1305 is offered beside AES-GCM under both, so the full
+# image accepts every server the stepping-stone image does. TLS 1.3
+# agrees keys by ephemeral (EC)DHE only, never by pre-shared key, and
+# sends the middlebox compatibility messages. Certificate and host name
+# checks are the same under either version.
+CONFIG_MBEDTLS_SSL_PROTO_TLS1_2=y
+CONFIG_MBEDTLS_SSL_PROTO_TLS1_3=y
+CONFIG_MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE=y
+CONFIG_MBEDTLS_SSL_TLS1_3_KEXM_EPHEMERAL=y
+# CONFIG_MBEDTLS_SSL_TLS1_3_KEXM_PSK is not set
+# CONFIG_MBEDTLS_SSL_TLS1_3_KEXM_PSK_EPHEMERAL is not set
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+
 # lwIP keeps protocol statistics; telemetry reports its TCP counters.
 # components/lwip_mib2 adds the MIB2 counters, which hold retransmits.
 CONFIG_LWIP_STATS=y

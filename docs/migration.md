@@ -53,11 +53,11 @@ not need to get to the next step:
 - IPv4 only: the broker and the download server must be reachable over
   IPv4.
 - TLS client only, over TLS 1.2 or TLS 1.3. It accepts the cipher suites,
-  key exchanges, and certificates the full image does, and
-  ChaCha20-Poly1305 besides: ECDHE with ECDSA or RSA certificates (and the
-  non-ephemeral RSA and ECDH exchanges), AES-GCM, AES-CCM, and
-  ChaCha20-Poly1305, SHA-256 and SHA-384, and the curves X25519, P-256,
-  P-384, and P-521 among others. It does not offer finite-field
+  key exchanges, and certificates the full image does: ECDHE with ECDSA or
+  RSA certificates (and the non-ephemeral RSA and ECDH exchanges under
+  TLS 1.2), AES-GCM, AES-CCM, and ChaCha20-Poly1305, SHA-256 and SHA-384,
+  and the curves X25519, P-256, P-384, and P-521 among others. It does
+  not offer finite-field
   Diffie-Hellman (DHE), pre-shared keys, or renegotiation, and it does not
   read certificate revocation lists. It trusts only the provisioned CA, not
   a root bundle.

@@ -68,8 +68,8 @@ The profile aborts on a panic without formatting a message
 `sdkconfig.migrate` turns off what a board does not need on the way:
 IPv6, the soft-AP, log levels below error, error names, the TLS server,
 the root bundle, renegotiation, pre-shared keys, and DHE. Its TLS client
-otherwise matches the full image's, and adds TLS 1.3 and
-ChaCha20-Poly1305. `make firmware-check` runs clippy on both variants.
+otherwise matches the full image's. `make firmware-check` runs clippy on
+both variants.
 
 ## Provisioning
 
@@ -202,6 +202,13 @@ for size so an image fits.
   the event loop in 4 KB chunks, waiting while the event queue is backed
   up. ESP-IDF's HTTP client log is off, since it would print the address,
   which may carry a one-time token.
+- **TLS.** The broker connection and downloads go through ESP-IDF's
+  esp-tls over mbedTLS, as a client of TLS 1.2 and TLS 1.3, whichever the
+  server picks; neither pins a version. ChaCha20-Poly1305 is offered
+  beside AES-GCM, and TLS 1.3 agrees keys by ephemeral (EC)DHE only,
+  without pre-shared keys. Under either version the server's chain must
+  lead to the CA and its certificate must name the host the door
+  connects to, as a DNS name or an IP address (`sdkconfig.defaults`).
 - **Randomness** comes from the hardware generator, which is true random
   while Wi-Fi runs.
 - **Time.** Milliseconds come from `esp_timer`. Unix time comes from SNTP
