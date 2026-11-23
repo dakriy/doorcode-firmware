@@ -597,14 +597,8 @@ fn a_broker_ca_in_the_configuration_is_used_from_the_next_connection_on() {
     let connectors = reconnected_after(StubStorage::enrolled(), config_for(7, &trusted));
 
     assert_eq!(
-        (
-            last_address(&connectors).ca_pem,
-            connectors.storage.stored("broker_ca")
-        ),
-        (
-            "-----BEGIN CERTIFICATE-----\nnew".to_owned(),
-            Some(b"-----BEGIN CERTIFICATE-----\nnew".to_vec())
-        )
+        last_address(&connectors).ca_pem,
+        "-----BEGIN CERTIFICATE-----\nnew".to_owned()
     );
 }
 

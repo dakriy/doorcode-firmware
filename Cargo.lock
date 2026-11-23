@@ -6,6 +6,7 @@ version = 4
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "connectors",
  "p256",
  "pretty_assertions",
@@ -1300,6 +1301,7 @@ dependencies = [
 name = "testkit"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "connectors",
  "p256",
  "protocol",

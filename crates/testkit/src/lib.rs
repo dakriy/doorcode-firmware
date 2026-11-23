@@ -3,6 +3,7 @@
 //! return what the test seeded; they make no decisions.
 
 mod broker;
+mod certificates;
 mod door;
 mod enrolled;
 mod events;
@@ -20,6 +21,7 @@ use connectors::{
 use protocol::Config;
 
 pub use broker::{BrokerCall, Connection, Message, Sent, StubBroker};
+pub use certificates::certificates;
 pub use door::{StrikeCall, StubDoorSensor, StubStrike};
 pub use enrolled::{
     door_coming_online, door_coming_online_as, door_connection_as, door_connection_to,
@@ -33,7 +35,7 @@ pub use firmware::{
     sha256_hex, signed_by_another_key, signed_image, signing_key_hex, FirmwareCall, StubDownload,
     StubFirmware,
 };
-pub use storage::StubStorage;
+pub use storage::{nvs_entries, StubStorage, NOT_ENOUGH_SPACE};
 
 /// The bytes a string of hex digits spells. Panics on anything else.
 pub fn hex(digits: &str) -> Vec<u8> {

@@ -188,9 +188,11 @@ for size so an image fits.
   removes `config_try`, and tells the network the configuration from
   memory. Coming online stores it as `config`; any other end of that start
   is a restart onto `config`, which the trial never wrote
-  (`docs/protocol.md`). The broker entries, `broker_ca` included, change
-  only once a trial is kept, so downloads verify against the CA in use
-  until then.
+  (`docs/protocol.md`). The broker entries change only once a trial is
+  kept. A configuration storage cannot hold to try is given up at once, as
+  one tried and not kept, and said with `config_reverted`; one it cannot
+  keep restarts the door onto the previous configuration, which says it
+  gave the trial up. Neither restarts into it again.
 - **Broker.** Each connection is an esp-mqtt client: MQTT 3.1.1, QoS 1
   for every publication, subscription, and will, clean session, and TLS
   verified against the provisioned CA unless the broker is configured

@@ -8,11 +8,13 @@
 mod access;
 mod check;
 mod command;
+mod config_store;
 mod device;
 mod door;
 mod enrollment;
 mod entry;
 mod network;
+mod pem;
 mod rotation;
 mod signature;
 mod status;
@@ -178,9 +180,11 @@ enum Phase {
 
 impl Phase {
     /// A door running `running` when its credentials are stored, otherwise
-    /// enrolling.
+    /// enrolling, at the provisioned broker as `running` moves it: a stored
+    /// configuration may carry the broker's certificates in place of the
+    /// provisioned ones.
     fn start(device: &Device<'_>, running: Running) -> Result<Phase, RunError> {
-        let broker = device.provisioning.broker.clone();
+        let broker = door::configured_broker(&device.provisioning.broker, &running.config);
         let since_start = SinceStart::default();
         let phase = match stored::door_credentials(device.connectors.storage())? {
             Some(credentials) => {

@@ -583,7 +583,7 @@ impl Door {
     /// Forgets the door, with its configuration, and enrolls again.
     fn revoked(mut self, device: &Device<'_>) -> Result<Phase, RunError> {
         self.gate.lock(device);
-        stored::forget_door(device.connectors.storage())?;
+        stored::forget_door(device.connectors.storage(), &self.broker)?;
         network::configure(device, &Config::default());
         device.log(
             Level::Warn,
@@ -681,10 +681,11 @@ impl Door {
             return Ok(self);
         }
         if let Some(why) = self.to_try(&config) {
-            trial::start(device, payload, &digest, why)?;
+            let door_id = self.credentials.door_id;
+            trial::start(device, door_id, (&config, payload), &digest, why);
             return Ok(self);
         }
-        trial::store(device, payload)?;
+        trial::store(device, &config, &digest, payload)?;
         network::configure(device, &config);
         let level = log_level(&config.log_level);
         if level != log_level(&self.config.log_level) {
@@ -747,7 +748,7 @@ impl Door {
 /// The broker `config` moves the door to from `current`. Each broker field
 /// it gives replaces the one in use; an empty host or CA, a missing port or
 /// one of zero or out of range, and a missing TLS flag keep it.
-fn configured_broker(current: &BrokerAddress, config: &Config) -> BrokerAddress {
+pub(crate) fn configured_broker(current: &BrokerAddress, config: &Config) -> BrokerAddress {
     BrokerAddress {
         host: given_text(&config.broker_host, &current.host),
         port: given_port(config.broker_port).unwrap_or(current.port),

@@ -130,8 +130,11 @@ pub(crate) fn promote_next_credentials(
 }
 
 /// Forgets everything that belongs to the door the controller was, so it
-/// starts over as a new controller would.
-pub(crate) fn forget_door(storage: &dyn Storage) -> Result<(), RunError> {
+/// starts over as a new controller would, at `broker`, which is stored
+/// first with its certificates, since the configuration that may hold
+/// them goes.
+pub(crate) fn forget_door(storage: &dyn Storage, broker: &BrokerAddress) -> Result<(), RunError> {
+    store_broker(storage, broker, true)?;
     remove(
         storage,
         &[
@@ -218,12 +221,26 @@ fn broker(storage: &dyn Storage) -> Result<BrokerAddress, RunError> {
     })
 }
 
-/// Moves the controller to another broker, from the next start on too.
-pub(crate) fn store_broker(storage: &dyn Storage, broker: &BrokerAddress) -> Result<(), RunError> {
+/// Moves the controller to another broker, from the next start on too,
+/// storing its certificates as well when `with_ca`. Without, they are
+/// the stored configuration's.
+pub(crate) fn store_broker(
+    storage: &dyn Storage,
+    broker: &BrokerAddress,
+    with_ca: bool,
+) -> Result<(), RunError> {
+    if with_ca {
+        store(storage, BROKER_CA, &broker.ca_pem)?;
+    }
     store(storage, BROKER_HOST, &broker.host)?;
     store(storage, BROKER_PORT, &broker.port.to_string())?;
-    store(storage, BROKER_TLS, &broker.tls.to_string())?;
-    store(storage, BROKER_CA, &broker.ca_pem)
+    store(storage, BROKER_TLS, &broker.tls.to_string())
+}
+
+/// Forgets the certificates stored beside the broker, which the stored
+/// configuration then carries.
+pub(crate) fn forget_provisioned_ca(storage: &dyn Storage) -> Result<(), RunError> {
+    remove(storage, &[BROKER_CA])
 }
 
 pub(crate) fn bytes(storage: &dyn Storage, key: &str) -> Result<Option<Vec<u8>>, RunError> {

@@ -9,6 +9,7 @@ description = "Application code. Reaches the world only through connector interf
 # Denylist in effect: only `connectors` and pure crates may appear here.
 # scripts/check-imports.sh fails the build on anything else.
 [dependencies]
+base64.workspace = true
 connectors.workspace = true
 p256.workspace = true
 protocol.workspace = true

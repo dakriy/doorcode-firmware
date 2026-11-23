@@ -134,7 +134,9 @@ configuration the door runs, compared field by field as received (a
 missing key compares as missing): `broker_host`, `broker_port`,
 `broker_tls`, `broker_ca_pem`, `wifi_ssid`, `wifi_password`,
 `wifi_11b_disabled`, `mesh_enabled`, `mesh_ssid`, `mesh_password`,
-`mesh_min_router_rssi`, and `mesh_max_layer`. A wrong value of any of them
+`mesh_min_router_rssi`, and `mesh_max_layer`. `broker_ca_pem` compares by
+the certificates it holds, in order, so the same certificates laid out
+with other line breaks are not a change. A wrong value of any of them
 can leave the door unable to reach the server. A configuration that
 changes only other fields is stored and takes effect at once as the table
 says, with no trial.
@@ -153,8 +155,10 @@ outside the list above. A trial never stores it there. Instead:
    start from its settings.
 3. **Kept** as soon as the door comes online as its door: connected to the
    broker with its door credentials, subscribed, and its online status
-   published. The door then stores it as its own configuration, stores the
-   broker it moved to as the broker in use, and forgets the digest tried.
+   published. The door then stores the broker it moved to as the broker
+   in use, stores the configuration as its own, and forgets the digest
+   tried. When storage cannot hold it, the door restarts onto the
+   configuration stored, as a trial given up.
 4. **Given up** by any other end of that start, which is a restart onto
    the configuration stored, with nothing to restore:
    - the deadline: `update_connect_timeout_s` of the stored configuration,
@@ -167,6 +171,10 @@ outside the list above. A trial never stores it there. Instead:
      refuses that pair too, the trial is given up. The door keeps its
      identity and credentials, rather than forgetting them and enrolling
      again as a refusal outside a trial makes it do.
+
+A configuration storage cannot hold to try is given up at once: the door
+says `config_reverted` for it right away, remembers its digest as tried and
+said, and runs on without a restart.
 
 A configuration that arrives while the one on trial is not kept yet is
 tried in turn, whatever it changes: the door stores it as the one to try
