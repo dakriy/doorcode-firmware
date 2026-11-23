@@ -21,12 +21,12 @@ use crate::storage_keys::BROKER_CA;
 use crate::threads;
 
 /// How many bytes of the body each `Transfer::Chunk` carries at most.
-const CHUNK_BYTES: usize = 4096;
+const CHUNK_BYTES: usize = 2048;
 /// The download waits while the event queue holds this many events, so a
 /// body arriving faster than the application writes it stays off the heap.
-const QUEUED_EVENTS: usize = 4;
+const QUEUED_EVENTS: usize = 1;
 /// The download's thread runs the TLS handshake.
-const STACK_BYTES: usize = 10 * 1024;
+const STACK_BYTES: usize = 8 * 1024;
 /// Response headers longer than this fail the download.
 const HEADER_BYTES: usize = 2048;
 /// How long a connection, or a read from it, may take.
@@ -146,14 +146,14 @@ fn configuration(tls: bool) -> Configuration {
 
 /// Reports the body in chunks as it arrives, until the server ends it.
 fn stream(connection: &mut EspHttpConnection, events: &EventSender) -> Result<(), String> {
-    let mut buffer = vec![0; CHUNK_BYTES];
     loop {
+        let mut buffer = vec![0; CHUNK_BYTES];
         let count = connection.read(&mut buffer).map_err(describe)?;
         if count == 0 {
             return whole(connection);
         }
-        let chunk = Transfer::Chunk(buffer[..count].to_vec());
-        events.push_when_below(QUEUED_EVENTS, Event::Download(chunk));
+        buffer.truncate(count);
+        events.push_when_below(QUEUED_EVENTS, Event::Download(Transfer::Chunk(buffer)));
     }
 }
 

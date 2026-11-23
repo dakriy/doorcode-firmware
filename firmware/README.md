@@ -204,9 +204,10 @@ for size so an image fits.
   CA, and fail when no CA is stored. An `http://` address downloads
   without TLS and without a CA, leaving the CA store alone; like plain
   MQTT, that is for development setups only. Downloads hand the body to
-  the event loop in 4 KB chunks, waiting while the event queue is backed
-  up. ESP-IDF's HTTP client log is off, since it would print the address,
-  which may carry a one-time token.
+  the event loop in 2 KB chunks, one at a time: the next is read only once
+  the queue is empty, so the body never piles up on the heap while the
+  MQTT session's TLS buffers are held too. ESP-IDF's HTTP client log is
+  off, since it would print the address, which may carry a one-time token.
 - **TLS.** The broker connection and downloads go through ESP-IDF's
   esp-tls over mbedTLS, as a client of TLS 1.2 and TLS 1.3, whichever the
   server picks; neither pins a version. ChaCha20-Poly1305 is offered
@@ -214,6 +215,11 @@ for size so an image fits.
   without pre-shared keys. Under either version the server's chain must
   lead to the CA and its certificate must name the host the door
   connects to, as a DNS name or an IP address (`sdkconfig.defaults`).
+  Each session holds a 16 KB input buffer, since a server may send records
+  that long, and a 2 KB output buffer; mbedTLS's dynamic buffers, which
+  would free them between records, are not available with TLS 1.3. With
+  the MQTT session and a download open at once about 20 KB of heap stay
+  free.
 - **Randomness** comes from the hardware generator, which is true random
   while Wi-Fi runs.
 - **Time.** Milliseconds come from `esp_timer`. Unix time comes from SNTP
@@ -244,7 +250,7 @@ for size so an image fits.
   with `info` as their most detailed level, to keep the image small, so
   `debug` adds the firmware's own debug lines only.
 - **Updates.** An install goes into the OTA slot the board is not running,
-  through ESP-IDF's OTA API. Each 4 KB chunk of the download erases the
+  through ESP-IDF's OTA API. Each chunk of the download erases the
   flash sector it reaches as it is written (sequential writes), so no call
   erases the whole slot at once; an install begun before and never
   finished is abandoned first. Finishing runs ESP-IDF's check of the

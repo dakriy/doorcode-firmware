@@ -31,10 +31,13 @@ pub(crate) struct SignedImage {
 impl SignedImage {
     /// Takes the next bytes of the image.
     pub(crate) fn feed(&mut self, bytes: &[u8]) {
-        self.tail.extend_from_slice(bytes);
-        let signed = self.tail.len().saturating_sub(BLOCK_BYTES);
-        self.signed.update(&self.tail[..signed]);
-        self.tail.drain(..signed);
+        let signed = (self.tail.len() + bytes.len()).saturating_sub(BLOCK_BYTES);
+        let from_tail = signed.min(self.tail.len());
+        let from_bytes = signed - from_tail;
+        self.signed.update(&self.tail[..from_tail]);
+        self.signed.update(&bytes[..from_bytes]);
+        self.tail.drain(..from_tail);
+        self.tail.extend_from_slice(&bytes[from_bytes..]);
     }
 
     /// Whether the image ends in a block of version 0 whose signature of
