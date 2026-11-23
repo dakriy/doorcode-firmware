@@ -197,6 +197,7 @@ impl Firmware for StubFirmware {
 #[derive(Debug, Default)]
 pub struct StubDownload {
     started: RefCell<Vec<String>>,
+    trusted: RefCell<Vec<String>>,
     failure: Option<DownloadError>,
 }
 
@@ -213,11 +214,17 @@ impl StubDownload {
     pub fn started(&self) -> Vec<String> {
         self.started.borrow().clone()
     }
+
+    /// The certificates each download was started trusting, in order.
+    pub fn trusted(&self) -> Vec<String> {
+        self.trusted.borrow().clone()
+    }
 }
 
 impl Download for StubDownload {
-    fn start(&self, url: &str) -> Result<(), DownloadError> {
+    fn start(&self, url: &str, ca_pem: &str) -> Result<(), DownloadError> {
         self.started.borrow_mut().push(url.to_owned());
+        self.trusted.borrow_mut().push(ca_pem.to_owned());
         match &self.failure {
             Some(error) => Err(error.clone()),
             None => Ok(()),

@@ -96,10 +96,11 @@ Download it from the server's firmware page ("Download provisioning
 file"), or from a door's page for a board meant for that door, and save it
 as `firmware/provisioning.json`. `generated_at` and `server.device_url` are
 not used: an update command carries its full download address. That
-address must present a certificate from `broker.ca_pem`, the one CA the
-board trusts (`docs/protocol.md`), unless it is plain `http://`, which a
-development setup may use with an empty `ca_pem`. Git ignores the file,
-since it holds secrets. The desktop host reads the same file.
+address must present a certificate from one of the CAs of
+`broker.ca_pem`, the list the board trusts (`docs/protocol.md`), unless
+it is plain `http://`, which a development setup may use with an empty
+`ca_pem`. Git ignores the file, since it holds secrets. The desktop host
+reads the same file.
 
 The values reach the board two ways, as the same NVS entries in the
 `doorcode` namespace (each a blob; `config` is the configuration message in
@@ -200,8 +201,9 @@ for size so an image fits.
   event loop never waits on the network.
   Messages longer than the 4 KB receive buffer arrive in pieces and are
   put back together before they are delivered.
-- **Downloads** run on a thread each, over HTTPS verified against the same
-  CA, and fail when no CA is stored. An `http://` address downloads
+- **Downloads** run on a thread each, over HTTPS verified against the
+  certificates of the broker connection in use, which the application
+  hands over, and fail without any. An `http://` address downloads
   without TLS and without a CA, leaving the CA store alone; like plain
   MQTT, that is for development setups only. Downloads hand the body to
   the event loop in 2 KB chunks, one at a time: the next is read only once

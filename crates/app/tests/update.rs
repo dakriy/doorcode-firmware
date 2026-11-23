@@ -115,6 +115,22 @@ fn an_update_remembers_the_command_id_and_version_and_downloads_the_url() {
 }
 
 #[test]
+fn an_update_downloads_trusting_the_certificates_of_the_broker_connection() {
+    let trusted = Config {
+        broker_ca_pem: "-----BEGIN CERTIFICATE-----\nconfigured".to_owned(),
+        ..Config::default()
+    };
+    let connectors = StubConnectors::online_with(&trusted, [(10, update(&signed_image(&body())))]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        connectors.download.trusted(),
+        vec!["-----BEGIN CERTIFICATE-----\nconfigured".to_owned()]
+    );
+}
+
+#[test]
 fn a_signed_image_with_its_checksum_is_installed_set_to_boot_and_restarted_into() {
     let image = signed_image(&body());
     let connectors = installing(&image);

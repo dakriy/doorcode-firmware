@@ -12,10 +12,10 @@ serviced in place by technicians.
   account, is given broker credentials of its own, and rotates them when
   the server says so; they live in non-volatile storage. A release image
   carries no secrets.
-- **One trusted CA.** A door verifies the broker and firmware downloads
-  against the one CA it was provisioned or configured with, and trusts no
-  public roots (`protocol.md`). Without a CA, a TLS connection or an
-  HTTPS download fails.
+- **One trusted CA list.** A door verifies the broker and firmware
+  downloads against the CA certificates it was provisioned or configured
+  with, and trusts no public roots (`protocol.md`). Without any, a TLS
+  connection or an HTTPS download fails.
 - **Plain transports are for development.** A broker configured without
   TLS (`broker_tls` false) and an `http://` download address need no CA and
   carry credentials, codes, and images in the clear. They exist for

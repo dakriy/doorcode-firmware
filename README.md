@@ -87,11 +87,12 @@ See [`firmware/README.md`](firmware/README.md).
 The board joins the Wi-Fi network, enrolls, and waits for approval on the
 server.
 
-The firmware trusts one CA, the broker's: `broker_ca_pem` from the
-configuration, or the CA in the provisioning file. It verifies both the
-broker and firmware downloads against it. So the server's `device_url`,
-from which update download addresses are built, must point at an HTTPS
-entrypoint presenting a certificate from that CA. See
+The firmware trusts one list of CA certificates, the broker's:
+`broker_ca_pem` from the configuration, or the list in the provisioning
+file. It verifies both the broker and firmware downloads against it. So
+the server's `device_url`, from which update download addresses are built,
+must point at an HTTPS entrypoint presenting a certificate from one of
+those CAs. See
 [`docs/protocol.md`](docs/protocol.md).
 
 ## Release

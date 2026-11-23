@@ -1,14 +1,15 @@
 //! HTTP and HTTPS downloads on ESP-IDF's HTTP client, each on a thread of
 //! its own so that the event loop keeps serving keys. Over HTTPS the
-//! server's certificate must chain to the provisioned CA, the one stored for
-//! the broker; plain http, for development setups, needs no CA. The address
+//! server's certificate must chain to the certificates the application
+//! hands over, the broker connection's; plain http, for development setups,
+//! needs none. The address
 //! is never part of what it reports or logs, since it may carry a one-time
 //! token.
 
 use std::ffi::{CStr, CString};
 use std::time::Duration;
 
-use connectors::{Download, DownloadError, Event, Storage, Transfer};
+use connectors::{Download, DownloadError, Event, Transfer};
 use esp_idf_svc::handle::RawHandle;
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use esp_idf_svc::http::Method;
@@ -16,8 +17,6 @@ use esp_idf_svc::sys::{self, esp, EspError};
 
 use crate::esp_error::coded;
 use crate::events::EventSender;
-use crate::nvs_storage::NvsStorage;
-use crate::storage_keys::BROKER_CA;
 use crate::threads;
 
 /// How many bytes of the body each `Transfer::Chunk` carries at most.
@@ -39,37 +38,28 @@ const PLAIN_SCHEME: &str = "http://";
 
 pub(crate) struct EspDownload {
     events: EventSender,
-    /// The application's storage, read for the CA on every download.
-    storage: NvsStorage,
 }
 
 impl EspDownload {
-    pub(crate) fn new(events: EventSender, storage: NvsStorage) -> Self {
-        Self { events, storage }
-    }
-
-    /// The stored CA, NUL-terminated as mbedTLS reads PEM; empty when none
-    /// is stored, which fails an HTTPS download.
-    fn ca(&self) -> Result<CString, DownloadError> {
-        let stored = self
-            .storage
-            .load(BROKER_CA)
-            .map_err(|error| DownloadError(error.to_string()))?;
-        CString::new(stored.unwrap_or_default()).map_err(|error| DownloadError(error.to_string()))
-    }
-
-    /// The CA to verify `url` against, and none for plain http.
-    fn ca_for(&self, url: &str) -> Result<Option<CString>, DownloadError> {
-        if plain_http(url) {
-            return Ok(None);
-        }
-        self.ca().map(Some)
+    pub(crate) fn new(events: EventSender) -> Self {
+        Self { events }
     }
 }
 
+/// `ca_pem` NUL-terminated, as mbedTLS reads PEM, to verify `url` against,
+/// and none for plain http. Empty certificates fail an HTTPS download.
+fn ca_for(url: &str, ca_pem: &str) -> Result<Option<CString>, DownloadError> {
+    if plain_http(url) {
+        return Ok(None);
+    }
+    CString::new(ca_pem)
+        .map(Some)
+        .map_err(|error| DownloadError(error.to_string()))
+}
+
 impl Download for EspDownload {
-    fn start(&self, url: &str) -> Result<(), DownloadError> {
-        let ca = self.ca_for(url)?;
+    fn start(&self, url: &str, ca_pem: &str) -> Result<(), DownloadError> {
+        let ca = ca_for(url, ca_pem)?;
         silence_client_log();
         let events = self.events.clone();
         let url = url.to_owned();

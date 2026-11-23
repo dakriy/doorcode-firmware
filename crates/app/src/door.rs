@@ -632,8 +632,8 @@ impl Door {
             Order::Restart(pending) => self.restart = Some(pending),
             Order::Update(command) => {
                 let under_way = self.install.take();
-                self.install =
-                    update::order(device, self.credentials.door_id, under_way, &command)?;
+                let (door_id, ca_pem) = (self.credentials.door_id, &self.broker.ca_pem);
+                self.install = update::order(device, door_id, ca_pem, under_way, &command)?;
             }
             Order::Nothing => {}
         }

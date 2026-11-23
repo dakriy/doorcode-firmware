@@ -51,7 +51,9 @@ fn certificates(pem: &str) -> Vec<Certificate<'static>> {
 }
 
 impl Download for HostDownload {
-    fn start(&self, url: &str) -> Result<(), DownloadError> {
+    /// Trusts the roots the download was made with; the desktop door's
+    /// broker certificates are not its download server's.
+    fn start(&self, url: &str, _ca_pem: &str) -> Result<(), DownloadError> {
         let agent = self.agent.clone();
         let events = self.events.clone();
         let url = url.to_owned();

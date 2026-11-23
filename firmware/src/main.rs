@@ -186,14 +186,12 @@ fn connectors(modem: Modem, inputs: Inputs, strike: GpioStrike) -> EspConnectors
     let clock = EspClock::default();
     let network = EspNetwork::new(modem, partition.clone(), clock.time_sync());
     let events = EspEvents::default();
-    let download_storage = NvsStorage::open(partition, storage_keys::NAMESPACE)
-        .expect("opening the application's NVS namespace");
     let (strike, door_sensor) = door(inputs, strike, &events);
     EspConnectors {
         storage,
         broker: MqttBroker::start(events.sender(), network.link())
             .expect("starting the MQTT thread"),
-        download: EspDownload::new(events.sender(), download_storage),
+        download: EspDownload::new(events.sender()),
         door_sensor,
         events,
         clock,

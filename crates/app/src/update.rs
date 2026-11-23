@@ -35,6 +35,7 @@ pub(crate) struct Install {
 pub(crate) fn order(
     device: &Device<'_>,
     door_id: u64,
+    ca_pem: &str,
     under_way: Option<Install>,
     command: &Command,
 ) -> Result<Option<Install>, RunError> {
@@ -51,7 +52,7 @@ pub(crate) fn order(
         signed: SignedImage::default(),
         failure: None,
     };
-    if let Err(error) = device.connectors.download().start(&command.url) {
+    if let Err(error) = device.connectors.download().start(&command.url, ca_pem) {
         install.fail(device, door_id, &download_failed(error))?;
         return Ok(None);
     }

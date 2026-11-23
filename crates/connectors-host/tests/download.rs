@@ -116,7 +116,7 @@ fn summary(transfers: Vec<Transfer>) -> (Option<u16>, Vec<u8>, Transfer) {
 fn download_with(ca_pem: Option<&str>, url: &str) -> Vec<Transfer> {
     let events = HostEvents::new();
     let download = HostDownload::new(events.sender(), ca_pem);
-    download.start(url).unwrap();
+    download.start(url, "").unwrap();
     transfers(&events)
 }
 
@@ -134,7 +134,7 @@ fn starting_a_download_succeeds_on_the_host_and_the_stub() {
     let host = HostDownload::new(events.sender(), None);
     let downloads: [&dyn Download; 2] = [&host, &StubDownload::default()];
 
-    let started = downloads.map(|download| download.start("https://127.0.0.1:1/image"));
+    let started = downloads.map(|download| download.start("https://127.0.0.1:1/image", ""));
 
     assert_eq!(started, [Ok(()), Ok(())]);
 }

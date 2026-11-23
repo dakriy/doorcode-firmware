@@ -45,12 +45,15 @@ The controller removes `previous_token` from storage whenever it starts
 as a door, so a controller that has been approved once never sends it
 again, even if it enrolls anew later.
 
-## One CA for the broker and for downloads
+## One CA list for the broker and for downloads
 
-The firmware trusts exactly one CA: `broker_ca_pem` from the configuration,
-or the CA it was provisioned with. It verifies both the broker's TLS
-certificate and the server's certificate when it downloads a firmware image
-against that CA, and holds no public root certificates. The download
+The firmware trusts one list of CA certificates: `broker_ca_pem` from the
+configuration it runs, or the list it was provisioned with. The list holds
+one or more PEM certificate blocks; a chain leading to any of them is
+trusted. The firmware verifies both the broker's TLS certificate and the
+server's certificate when it downloads a firmware image against that list,
+the one of the broker connection in use, and holds no public root
+certificates. The download
 address in an `update` command is built from the server's `device_url`
 setting, so `device_url` must point at an HTTPS entrypoint that presents a
 certificate chain from that same CA. That is usually a second port or host
@@ -91,7 +94,7 @@ Trying a configuration below).
 | `broker_host` | empty | The broker to connect to. Empty keeps the host in use. A change is tried (below). |
 | `broker_port` | 8883 | The broker's port. A missing key or 0 keeps the port in use. A change is tried. |
 | `broker_tls` | `true` | Whether to connect over TLS. A missing key keeps the setting in use. `false` is for development brokers only. A change is tried. |
-| `broker_ca_pem` | empty | The CA to verify the broker and downloads against (see above). Empty keeps the CA in use. A change is tried, and downloads use the new CA once it is kept. |
+| `broker_ca_pem` | empty | The CA certificates to verify the broker and downloads against, one or more PEM blocks (see above). Empty keeps the list in use. A change is tried; during the trial, downloads verify against the list on trial, which the broker connection uses too. |
 | `keepalive_s` | 30 | The MQTT keep-alive interval, from the next connection on. |
 | `reconnect_max_s` | 60 | The longest pause between attempts to connect again. The door backs off 1, 2, 4 seconds and so on up to this, each pause plus up to a quarter more at random so doors that lost the broker together do not return together. |
 | `wifi_ssid` | empty | The Wi-Fi network to join. Empty keeps the provisioned one. If the network the door was told fails to associate, it falls back to the one that last did. |

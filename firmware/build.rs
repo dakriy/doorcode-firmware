@@ -25,10 +25,12 @@ use serde_json::{Map, Number, Value};
 #[path = "src/storage_keys.rs"]
 mod storage_keys;
 
-use storage_keys::{BROKER_CA, NAMESPACE};
+use storage_keys::NAMESPACE;
 
 /// The configuration message, in CBOR.
 const CONFIG: &str = "config";
+/// The broker's certificates, PEM text.
+const BROKER_CA: &str = "broker_ca";
 /// The provisioned Wi-Fi network, as text.
 const WIFI_SSID: &str = "wifi_ssid";
 const WIFI_PASSWORD: &str = "wifi_password";

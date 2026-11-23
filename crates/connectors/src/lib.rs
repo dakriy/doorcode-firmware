@@ -274,8 +274,9 @@ pub trait Network {
 /// HTTPS downloads. Calls start work; progress arrives through `Events` as
 /// `Event::Download`.
 pub trait Download {
-    /// Starts an HTTPS `GET` of `url`, verifying the server's certificate.
-    fn start(&self, url: &str) -> Result<(), DownloadError>;
+    /// Starts an HTTPS `GET` of `url`, verifying the server's certificate
+    /// against `ca_pem`, the PEM certificates the broker connection trusts.
+    fn start(&self, url: &str, ca_pem: &str) -> Result<(), DownloadError>;
 }
 
 /// What a download connector reports when the download could not start.
