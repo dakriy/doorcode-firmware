@@ -314,5 +314,8 @@ describes it: the enrollment announcement and credentials, the timeline it
 follows while disconnected, checks and replies, and the `open`,
 `credentials`, `update`, and `reboot` commands, each answered on the `ack`
 topic. The ack `detail` of a failed update is one of `checksum mismatch`,
-`no signing key`, `bad signature`, the reason the download or the install failed, or
-`reverted: could not connect`.
+`no signing key`, `bad signature`, the reason the download or the install failed,
+`reverted: could not connect` when the new image ran and did not come online
+in time, or `interrupted: restarted before the install finished` when a
+crash, a reset, or a power cut ended the download or the install before the
+new image was set to boot.

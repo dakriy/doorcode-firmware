@@ -513,7 +513,7 @@ fn a_download_with_no_update_under_way_is_logged_and_ignored() {
 /// `ID`, that sees `events`.
 fn new_image(events: impl IntoIterator<Item = (u64, Event)>) -> StubConnectors {
     StubConnectors {
-        storage: StubStorage::enrolled().with_update(ID, VERSION),
+        storage: StubStorage::enrolled().with_installed_update(ID, VERSION),
         firmware: StubFirmware::new_image(),
         ..StubConnectors::enrolled(StubEvents::script(events))
     }
@@ -621,7 +621,7 @@ fn a_new_image_that_cannot_be_kept_is_logged_and_its_update_still_forgotten() {
 #[test]
 fn back_on_the_previous_image_the_update_is_acked_failed_as_reverted_once_online() {
     let connectors = StubConnectors {
-        storage: StubStorage::enrolled().with_update(ID, VERSION),
+        storage: StubStorage::enrolled().with_installed_update(ID, VERSION),
         ..StubConnectors::online([])
     };
 
@@ -639,7 +639,7 @@ fn back_on_the_previous_image_the_update_is_acked_failed_as_reverted_once_online
 #[test]
 fn back_on_the_previous_image_the_revert_is_acked_only_once() {
     let connectors = StubConnectors {
-        storage: StubStorage::enrolled().with_update(ID, VERSION),
+        storage: StubStorage::enrolled().with_installed_update(ID, VERSION),
         ..StubConnectors::online([(10, Event::Disconnected), (2000, Event::Connected)])
     };
 
@@ -652,4 +652,43 @@ fn back_on_the_previous_image_the_revert_is_acked_only_once() {
         .filter(|call| *call == failed_ack(ID, "reverted: could not connect"))
         .count();
     assert_eq!(acks, 1);
+}
+
+#[test]
+fn an_update_cut_short_by_a_restart_before_its_install_finished_is_acked_failed_as_interrupted() {
+    let connectors = StubConnectors {
+        storage: StubStorage::enrolled().with_update(ID, VERSION),
+        ..StubConnectors::online([])
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (connectors.broker.last_call(), stored_update(&connectors)),
+        (
+            Some(failed_ack(
+                ID,
+                "interrupted: restarted before the install finished"
+            )),
+            [None, None]
+        )
+    );
+}
+
+#[test]
+fn an_image_installed_and_restarted_into_that_reverts_is_acked_failed_as_reverted() {
+    let image = signed_image(&body());
+    let installed = installing(&image);
+    app::run(&installed).unwrap();
+    let reverted = StubConnectors {
+        storage: installed.storage,
+        ..StubConnectors::online([])
+    };
+
+    app::run(&reverted).unwrap();
+
+    assert_eq!(
+        reverted.broker.last_call(),
+        Some(failed_ack(ID, "reverted: could not connect"))
+    );
 }

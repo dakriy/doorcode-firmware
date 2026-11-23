@@ -10,6 +10,11 @@ use crate::{DOOR_TOKEN, DOOR_USERNAME};
 /// names it.
 pub const NOT_ENOUGH_SPACE: &str = "ESP_ERR_NVS_NOT_ENOUGH_SPACE (0x1105)";
 
+/// What a store under a key longer than NVS holds is refused with.
+const KEY_TOO_LONG: &str = "ESP_ERR_NVS_KEY_TOO_LONG (0x1109)";
+/// The longest key NVS holds.
+const KEY_BYTES: usize = 15;
+
 /// The 32-byte entries of an NVS page that can hold data: 126 less the
 /// one header entry a chunk needs.
 const CHUNK_ENTRIES: usize = 125;
@@ -30,7 +35,8 @@ pub fn nvs_entries(length: usize) -> usize {
 
 /// In-memory storage. Seed it before the run; inspect it after.
 ///
-/// It counts the NVS entries its values would take. ESP-IDF writes a new
+/// It refuses keys longer than NVS holds, and counts the NVS entries its
+/// values would take. ESP-IDF writes a new
 /// value before it erases the one it replaces, so a store counts both for
 /// the moment. With a capacity, a store that would exceed it is refused as
 /// NVS refuses it.
@@ -79,10 +85,17 @@ impl StubStorage {
         self.with("config", &config.encode())
     }
 
-    /// This storage with update `id` to `version` remembered as under way.
+    /// This storage with update `id` to `version` remembered as under way,
+    /// its image not installed yet.
     pub fn with_update(self, id: &str, version: &str) -> Self {
         self.with("update_id", id.as_bytes())
             .with("update_version", version.as_bytes())
+    }
+
+    /// This storage with update `id` to `version` remembered as under way,
+    /// its image installed and set to boot.
+    pub fn with_installed_update(self, id: &str, version: &str) -> Self {
+        self.with_update(id, version).with("update_ready", b"")
     }
 
     /// This storage with nothing under `key`.
@@ -174,6 +187,9 @@ impl Storage for StubStorage {
 
     fn store(&self, key: &str, value: &[u8]) -> Result<(), StorageError> {
         self.succeed()?;
+        if key.len() > KEY_BYTES {
+            return Err(StorageError(KEY_TOO_LONG.to_owned()));
+        }
         let during = self.entries() + nvs_entries(value.len());
         let refused = self.refused.iter().any(|refused| refused == key);
         if refused || self.capacity.is_some_and(|capacity| during > capacity) {

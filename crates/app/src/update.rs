@@ -129,6 +129,7 @@ impl Install {
         let id = self.id.clone();
         match self.installed(device, config) {
             Ok(()) => {
+                stored::store_update_installed(device.connectors.storage())?;
                 device.restart(
                     Level::Info,
                     &format!("firmware {version} installed; restarting"),
@@ -192,8 +193,13 @@ pub(crate) enum Boot {
     /// and abandoned for the previous image at `revert_at`.
     Trial { revert_at: u64 },
     /// Back on the previous image after update `id` to `version` was
-    /// abandoned.
-    Reverted { id: String, version: String },
+    /// abandoned: its image ran and did not come online when `installed`,
+    /// or its download or install was cut short by a restart otherwise.
+    Reverted {
+        id: String,
+        version: String,
+        installed: bool,
+    },
     /// Nothing to do with an update.
     Settled,
 }
@@ -206,7 +212,11 @@ pub(crate) fn boot(device: &Device<'_>, config: &Config) -> Result<Boot, RunErro
         return Ok(Boot::Trial { revert_at });
     }
     let boot = match stored::update(device.connectors.storage())? {
-        Some((id, version)) => Boot::Reverted { id, version },
+        Some(under_way) => Boot::Reverted {
+            id: under_way.id,
+            version: under_way.version,
+            installed: under_way.installed,
+        },
         None => Boot::Settled,
     };
     Ok(boot)
@@ -235,12 +245,32 @@ impl Boot {
     pub(crate) fn online(self, device: &Device<'_>, door_id: u64) -> Result<(), RunError> {
         match self {
             Boot::Trial { .. } => keep(device),
-            Boot::Reverted { id, version } => {
+            Boot::Reverted {
+                id,
+                version,
+                installed: true,
+            } => {
                 device.log(
                     Level::Warn,
                     &format!("firmware {version} could not connect and was abandoned"),
                 );
                 fail(device, door_id, &id, "reverted: could not connect")
+            }
+            Boot::Reverted {
+                id,
+                version,
+                installed: false,
+            } => {
+                device.log(
+                    Level::Warn,
+                    &format!("the update to firmware {version} was cut short by a restart"),
+                );
+                fail(
+                    device,
+                    door_id,
+                    &id,
+                    "interrupted: restarted before the install finished",
+                )
             }
             Boot::Settled => Ok(()),
         }

@@ -26,6 +26,10 @@ const NEXT_TOKEN: &str = "next_token";
 /// failure after the new image was rolled back.
 const UPDATE_ID: &str = "update_id";
 const UPDATE_VERSION: &str = "update_version";
+/// Present once the image of the update under way is installed and set to
+/// boot, so that the previous image, back after a revert, can tell a new
+/// image that ran and gave up from an install that never finished.
+const UPDATE_INSTALLED: &str = "update_ready";
 /// The configuration message the door has last been online with, or one
 /// that differs from it only in settings that cannot cut the door off.
 pub(crate) const CONFIG: &str = "config";
@@ -194,12 +198,30 @@ pub(crate) fn store_said(storage: &dyn Storage, digest: &str) -> Result<(), RunE
     store(storage, CONFIG_TRIED, &format!("{digest}{SAID}"))
 }
 
-/// The command id and version of the update under way, when one is.
-pub(crate) fn update(storage: &dyn Storage) -> Result<Option<(String, String)>, RunError> {
+/// The update under way, when one is.
+pub(crate) struct UnderWay {
+    pub(crate) id: String,
+    pub(crate) version: String,
+    /// Whether its image was installed and set to boot.
+    pub(crate) installed: bool,
+}
+
+/// The update under way, when one is.
+pub(crate) fn update(storage: &dyn Storage) -> Result<Option<UnderWay>, RunError> {
     let Some(id) = text(storage, UPDATE_ID)? else {
         return Ok(None);
     };
-    Ok(Some((id, optional(storage, UPDATE_VERSION)?)))
+    Ok(Some(UnderWay {
+        id,
+        version: optional(storage, UPDATE_VERSION)?,
+        installed: bytes(storage, UPDATE_INSTALLED)?.is_some(),
+    }))
+}
+
+/// Remembers that the image of the update under way is installed and set
+/// to boot.
+pub(crate) fn store_update_installed(storage: &dyn Storage) -> Result<(), RunError> {
+    store(storage, UPDATE_INSTALLED, "")
 }
 
 pub(crate) fn store_update(storage: &dyn Storage, id: &str, version: &str) -> Result<(), RunError> {
@@ -208,7 +230,7 @@ pub(crate) fn store_update(storage: &dyn Storage, id: &str, version: &str) -> Re
 }
 
 pub(crate) fn forget_update(storage: &dyn Storage) -> Result<(), RunError> {
-    remove(storage, &[UPDATE_ID, UPDATE_VERSION])
+    remove(storage, &[UPDATE_ID, UPDATE_VERSION, UPDATE_INSTALLED])
 }
 
 /// The broker the controller connects to, as `store_broker` keeps it.

@@ -95,7 +95,9 @@ counts the update done. If it has not connected within
 `update_connect_timeout_s` (default 300 s), or it resets for any reason
 before then, the bootloader goes back to the previous image, which reports
 the old version and acknowledges the update as failed with
-`reverted: could not connect`.
+`reverted: could not connect`. A door that restarts while it downloads or
+installs the image, before it is set to boot, acknowledges it as failed with
+`interrupted: restarted before the install finished`.
 
 ## Boards on the standard partition table
 
