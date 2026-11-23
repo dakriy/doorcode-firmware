@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::modem::Modem;
-use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::{self, EspError};
 use esp_idf_svc::wifi::{
     AccessPointInfo, BlockingWifi, ClientConfiguration, Configuration, EspWifi,
@@ -37,13 +36,9 @@ use crate::threads;
 const RETRY_AFTER: Duration = Duration::from_secs(5);
 
 /// Starts the station on a thread of its own.
-pub(crate) fn start(
-    modem: Modem,
-    partition: EspDefaultNvsPartition,
-    context: Context,
-) -> Result<(), EspError> {
+pub(crate) fn start(modem: Modem, context: Context) -> Result<(), EspError> {
     let station = Station {
-        wifi: wifi(modem, partition, context.event_loop.clone())?,
+        wifi: wifi(modem, context.event_loop.clone())?,
         context,
         tried: None,
         joined: None,
@@ -53,12 +48,13 @@ pub(crate) fn start(
     threads::spawn("network", STACK_BYTES, move || station.run())
 }
 
+/// Wi-Fi without NVS: the driver keeps its settings in RAM, and the last
+/// network that associated is the application's to remember.
 fn wifi(
     modem: Modem,
-    partition: EspDefaultNvsPartition,
     event_loop: EspSystemEventLoop,
 ) -> Result<BlockingWifi<EspWifi<'static>>, EspError> {
-    let wifi = EspWifi::new(modem, event_loop.clone(), Some(partition))?;
+    let wifi = EspWifi::new(modem, event_loop.clone(), None)?;
     BlockingWifi::wrap(wifi, event_loop)
 }
 

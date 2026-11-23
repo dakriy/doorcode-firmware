@@ -95,7 +95,10 @@ It then copies the previous firmware's token, if that firmware left one,
 into its own storage as `previous_token`. That firmware keeps it as an NVS
 string under the key `API_TOKEN` in the namespace `storage`; the NVS
 partition is the same in both tables, and the image only reads that
-namespace. The image then runs as a door without a keypad: it joins the
+namespace. Before that copy it empties the NVS namespaces the previous firmware's
+Wi-Fi driver and PHY calibration filled, which neither image reads (the
+full image does the same on every start); the partition is 16 KB, and
+those two take about a quarter of it. The image then runs as a door without a keypad: it joins the
 provisioned Wi-Fi network, enrolls, announcing the token once more without
 retaining it (`protocol.md`), and connects to the broker. Once it has connected it
 marks itself valid, as every update does (`release.md`), and reports its

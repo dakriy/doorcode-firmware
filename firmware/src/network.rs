@@ -216,7 +216,7 @@ impl EspNetwork {
     /// Starts the station the settings told ask for, on its own thread.
     fn start(&self, unstarted: Unstarted) -> Result<(), EspError> {
         let context = Context::open(&unstarted.partition, unstarted.time, self)?;
-        let position = run(unstarted.modem, unstarted.partition, context)?;
+        let position = run(unstarted.modem, context)?;
         self.placement.get_or_init(|| position);
         Ok(())
     }
@@ -234,16 +234,12 @@ impl Network for EspNetwork {
 
 /// Starts Mesh-Lite or the plain station, and returns how to read where
 /// the door sits in the mesh.
-fn run(
-    modem: Modem,
-    partition: EspDefaultNvsPartition,
-    context: Context,
-) -> Result<Position, EspError> {
+fn run(modem: Modem, context: Context) -> Result<Position, EspError> {
     #[cfg(not(feature = "migrate"))]
     if let Some(settings) = context.mesh.clone() {
         return mesh::start(modem, &settings, context).map(|()| mesh::position as Position);
     }
-    station::start(modem, partition, context).map(|()| Mesh::default as Position)
+    station::start(modem, context).map(|()| Mesh::default as Position)
 }
 
 /// What the station was told, read anew on every check.

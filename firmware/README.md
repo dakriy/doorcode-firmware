@@ -181,6 +181,30 @@ for size so an image fits.
   same way; a roam is a root rejoining for another, stronger access point
   (never the one it has joined, by BSSID), and the access point reported
   is the parent door's soft-AP below the root.
+- **Storage.** The application's values live in the NVS namespace
+  `doorcode` of the 16 KB `nvs` partition, which ESP-IDF's standard table
+  has too, so a board that came from other firmware has the same room:
+  four pages of 126 entries of 32 bytes, one page kept free, 378 entries
+  for data. A stored configuration (`config`, and `config_try` during a
+  trial) is one record: the digest of the message the server sent, its
+  certificates as DER, a third smaller than the PEM text, and the message
+  without them. The certificates are kept nowhere else while a
+  configuration carries them: `broker_ca`, the provisioned PEM, is removed
+  once one does, and a start that finds both, or a configuration stored as
+  the server's message, brings storage into that form. A configuration
+  whose certificates are not PEM certificate blocks is stored as the
+  message. Wi-Fi runs with the driver's NVS storage off
+  (`CONFIG_ESP_WIFI_NVS_ENABLED`), and the PHY calibrates in full at every
+  start instead of storing its calibration data
+  (`CONFIG_ESP_PHY_CALIBRATION_AND_DATA_STORAGE`), which costs a few
+  hundred milliseconds per start and saves about 60 entries. Every start
+  empties the namespaces `nvs.net80211` and `phy`, which an earlier
+  firmware's drivers may have filled (`src/leftovers.rs`). With the
+  previous firmware's token and the last Wi-Fi network, a door trusting two
+  roots of the sizes of an RSA-4096 and a P-384 root uses about 140
+  entries, and about 230 at the most while a trial of two other roots is
+  stored beside them; with four roots, about 360 at the most during such a
+  trial. `crates/app/tests/storage.rs` counts these against the partition.
 - **Configuration trial.** A configuration that changes how the door
   connects is stored as `config_try` and the door restarts. The next start
   takes it up before the network starts: it stores the configuration's

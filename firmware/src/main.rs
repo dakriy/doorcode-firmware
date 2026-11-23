@@ -18,6 +18,7 @@ mod firmware;
 mod inert;
 #[cfg(not(feature = "migrate"))]
 mod keypad;
+mod leftovers;
 mod link_counts;
 mod logger;
 #[cfg(not(feature = "migrate"))]
@@ -182,6 +183,7 @@ fn door(
 /// start runs.
 fn connectors(modem: Modem, inputs: Inputs, strike: GpioStrike) -> EspConnectors {
     let partition = EspDefaultNvsPartition::take().expect("the default NVS partition");
+    leftovers::clear();
     let storage = storage(&partition);
     let clock = EspClock::default();
     let network = EspNetwork::new(modem, partition.clone(), clock.time_sync());
