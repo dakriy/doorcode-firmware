@@ -287,6 +287,79 @@ fn a_reboot_whose_ack_cannot_be_sent_restarts_at_once() {
 }
 
 #[test]
+fn a_reboot_while_the_strike_is_released_waits_for_it_to_lock_again() {
+    // The open's ack is publication 3 and the reboot's 4; the strike locks
+    // again at 4010.
+    let connectors = StubConnectors::online([
+        (10, open_for(4000)),
+        (20, reboot()),
+        (30, Event::Delivered { message_id: 4 }),
+        (4009, Event::Stop),
+    ]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (connectors.firmware.restarts(), report.access.strike),
+        (0, StrikeState::Released { relock_at_ms: 4010 })
+    );
+}
+
+#[test]
+fn a_reboot_while_the_strike_is_released_restarts_as_it_locks_again() {
+    let connectors = StubConnectors::online([
+        (10, open_for(4000)),
+        (20, reboot()),
+        (30, Event::Delivered { message_id: 4 }),
+        (4011, Event::Stop),
+    ]);
+
+    let report = app::run(&connectors).unwrap();
+
+    assert_eq!(
+        (connectors.firmware.restarts(), report.access.strike),
+        (1, StrikeState::Locked)
+    );
+}
+
+#[test]
+fn a_reboot_while_the_strike_is_released_restarts_once_the_door_opens() {
+    let connectors = StubConnectors::online([
+        (10, open_for(4000)),
+        (20, reboot()),
+        (30, Event::Delivered { message_id: 4 }),
+        (1000, Event::Door { open: true }),
+        (1001, Event::Stop),
+    ]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(connectors.firmware.restarts(), 1);
+}
+
+#[test]
+fn a_reboot_whose_ack_cannot_be_sent_waits_for_the_strike_to_lock() {
+    let connectors = StubConnectors {
+        broker: StubBroker::failing_publish_on("doorcode/doors/7/ack", "queue full"),
+        ..StubConnectors::online([(10, open_for(4000)), (20, reboot()), (4009, Event::Stop)])
+    };
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(connectors.firmware.restarts(), 0);
+}
+
+#[test]
+fn an_unacknowledged_reboot_while_the_strike_is_released_waits_for_it_to_lock() {
+    let connectors =
+        StubConnectors::online([(10, open_for(8000)), (20, reboot()), (7999, Event::Stop)]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(connectors.firmware.restarts(), 0);
+}
+
+#[test]
 fn new_credentials_are_stored_beside_the_old_and_the_door_reconnects_with_them() {
     let connectors = StubConnectors::online([(10, new_credentials())]);
 

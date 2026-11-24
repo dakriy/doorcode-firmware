@@ -58,7 +58,7 @@ pub(crate) struct Door {
     /// closed, and while it is open since before the door started.
     opened_at_ms: Option<u64>,
     /// The restart a reboot command asked for, waiting for its ack to be
-    /// acknowledged.
+    /// acknowledged and the strike to lock.
     restart: Option<PendingRestart>,
     /// The firmware update downloading, if any.
     install: Option<Install>,
@@ -245,12 +245,12 @@ impl Door {
                 door.door_moved(device, open);
                 door
             }
-            Some(Event::Delivered { message_id }) => door.delivered(device, message_id),
+            Some(Event::Delivered { message_id }) => door.delivered(message_id),
             Some(Event::Download(transfer)) => door.transfer(device, transfer)?,
             // The wait ran out. `Stop` ends the loop before it gets here.
             None | Some(Event::Stop) => door,
         };
-        Ok(Phase::Door(Box::new(door)))
+        Ok(Phase::Door(Box::new(door.restart_when_ready(device))))
     }
 
     pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
@@ -268,9 +268,10 @@ impl Door {
     }
 
     /// Connects again once the pause is over, reports telemetry when it is
-    /// time, lets the keypad side catch up with the time, restarts once a
-    /// reboot has waited long enough or a new image or configuration has
-    /// not come online in time, and tries new credentials again.
+    /// time, lets the keypad side catch up with the time, stops a reboot
+    /// waiting for the acknowledgement of its ack once it has waited long
+    /// enough, restarts once a new image or configuration has not come
+    /// online in time, and tries new credentials again.
     fn when_due(mut self, device: &Device<'_>) -> Result<Door, RunError> {
         if self.gate.expire(device, &self.config) {
             self.since_start.check_lost();
@@ -283,8 +284,7 @@ impl Door {
                 Level::Warn,
                 "the ack of the reboot was not acknowledged in time",
             );
-            self.restart = None;
-            command::restart(device);
+            self.restart = self.restart.map(PendingRestart::through);
         }
         if device.is_due(self.boot.revert_at()) {
             self.boot = Boot::Settled;
@@ -310,15 +310,34 @@ impl Door {
             .and_then(|rotation| rotation.retry_at)
     }
 
-    /// When a reboot restarts without the acknowledgement of its ack.
+    /// When a reboot stops waiting for the acknowledgement of its ack.
     fn restart_at(&self) -> Option<u64> {
-        self.restart.as_ref().map(|restart| restart.deadline)
+        self.restart.as_ref().and_then(PendingRestart::ack_deadline)
     }
 
-    /// Restarts when the broker acknowledges the ack of a reboot.
-    fn delivered(self, device: &Device<'_>, message_id: u16) -> Door {
+    /// Takes the broker's acknowledgement of the ack of a reboot as the
+    /// ack being through.
+    fn delivered(self, message_id: u16) -> Door {
         let awaited = self.restart.as_ref();
         if !awaited.is_some_and(|restart| restart.acknowledged_by(message_id)) {
+            return self;
+        }
+        Door {
+            restart: self.restart.map(PendingRestart::through),
+            ..self
+        }
+    }
+
+    /// Restarts for the reboot asked for once its ack is through and the
+    /// strike is locked, so that a release the reboot came after, such as
+    /// the one that accepted a reboot typed at the keypad, runs its course
+    /// first.
+    fn restart_when_ready(self, device: &Device<'_>) -> Door {
+        let through = self
+            .restart
+            .as_ref()
+            .is_some_and(|restart| restart.ack_deadline().is_none());
+        if !through || self.gate.strike_released() {
             return self;
         }
         command::restart(device);

@@ -320,3 +320,13 @@ topic. The ack `detail` of a failed update is one of `checksum mismatch`,
 in time, or `interrupted: restarted before the install finished` when a
 crash, a reset, or a power cut ended the download or the install before the
 new image was set to boot.
+
+A check carries the entry as typed, the digits and any `*` with what
+follows it; the door reads nothing into it, and keypad commands, their
+opcodes, and who may give them are the server's to decide.
+
+A `reboot` restarts the door once the broker has acknowledged its ack, or
+five seconds after it was sent without that, and once the strike is
+locked: a strike released, such as by the reply that accepted a reboot
+typed at the keypad, runs out its release, or locks as the door opens,
+before the door restarts. The strike stays locked through the restart.

@@ -16,7 +16,7 @@ pub(crate) enum Order {
     Open { strike_ms: u64 },
     /// Hand over to these credentials.
     Rotate(Credentials),
-    /// Restart once the ack is acknowledged.
+    /// Restart once the ack is through and the strike is locked.
     Restart(PendingRestart),
     /// Install the firmware the command names.
     Update(Command),
@@ -24,19 +24,37 @@ pub(crate) enum Order {
     Nothing,
 }
 
-/// A restart waiting for the broker to acknowledge the ack of its command.
+/// A restart a reboot command asked for. It waits for the broker to
+/// acknowledge the ack of its command, for at most a while, and then for
+/// the strike to lock again.
 pub(crate) struct PendingRestart {
-    /// The number the broker's acknowledgement of the ack quotes.
-    message_id: u16,
-    /// When the restart goes ahead without the acknowledgement.
-    pub(crate) deadline: u64,
+    /// The number the broker's acknowledgement of the ack quotes; `None`
+    /// once the ack is through: acknowledged, waited for long enough, or
+    /// never sent.
+    message_id: Option<u16>,
+    /// When the restart stops waiting for the acknowledgement.
+    deadline: u64,
 }
 
 impl PendingRestart {
     /// Whether the broker's acknowledgement of `message_id` is the one
     /// this restart waits for.
     pub(crate) fn acknowledged_by(&self, message_id: u16) -> bool {
-        self.message_id == message_id
+        self.message_id == Some(message_id)
+    }
+
+    /// When the restart stops waiting for the acknowledgement of its ack;
+    /// `None` once the ack is through.
+    pub(crate) fn ack_deadline(&self) -> Option<u64> {
+        self.message_id.map(|_| self.deadline)
+    }
+
+    /// This restart with its ack through.
+    pub(crate) fn through(self) -> PendingRestart {
+        PendingRestart {
+            message_id: None,
+            ..self
+        }
     }
 }
 
@@ -76,13 +94,10 @@ pub(crate) fn receive(device: &Device<'_>, door_id: u64, payload: &[u8]) -> Orde
     }
 }
 
-/// Acks the reboot, and restarts once the broker has the ack, or at once
-/// when the ack could not be published.
+/// Acks the reboot, and restarts once the broker has the ack, or without
+/// waiting for it when the ack could not be published.
 fn reboot(device: &Device<'_>, door_id: u64, id: &str) -> Order {
-    let Some(message_id) = ack(device, door_id, id, protocol::ACK_DONE, "") else {
-        restart(device);
-        return Order::Nothing;
-    };
+    let message_id = ack(device, door_id, id, protocol::ACK_DONE, "");
     Order::Restart(PendingRestart {
         message_id,
         deadline: device.now_ms() + ACKNOWLEDGEMENT_WAIT_MS,
