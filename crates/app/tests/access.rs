@@ -504,20 +504,20 @@ fn a_submit_key_from_an_older_server_is_ignored_and_the_hash_still_submits() {
 
 #[test]
 fn an_entry_with_a_keypad_command_is_checked_with_the_star_and_the_command() {
-    let connectors = StubConnectors::online(typed(10, "4211234*00130#"));
+    let connectors = StubConnectors::online(typed(10, "4211234*130#"));
 
     app::run(&connectors).unwrap();
 
     assert_eq!(
         checks(&connectors),
-        vec![check("0000000000000000", "4211234*00130")]
+        vec![check("0000000000000000", "4211234*130")]
     );
 }
 
 #[test]
 fn an_entry_whose_code_is_shorter_than_the_shortest_code_is_discarded_unasked() {
     let mut events = typed(10, "123#");
-    events.extend(typed(20, "123*00130#"));
+    events.extend(typed(20, "123*130#"));
     events.extend(typed(30, "1234#"));
     let connectors = StubConnectors::online(events);
 

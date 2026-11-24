@@ -81,9 +81,9 @@ STEPS=(
     "3 sensor, sensor-opened, sensor-closed, sensor-forced: the server sees the door closed, opened by hand, and closed again; GET /events records, newer than the step's start, an opening, a closing whose open_ms is more than 0 and no longer than the step watched, and a forced open alarm; sensor-forced SKIPs when the door's timeline holds it open (open mode or an open override) as it opens, while the opening and the closing are still checked"
     "4 open: POST open logs an allowed event, and the person sees the strike release and lock again"
     "5 code, code-opened, code-closed, code-unforced, wrong-code: the user's code is allowed, the strike releases, the server sees the door open and close, and the strike locks; GET /events records a newer opening, a newer closing with a plausible open_ms, and no forced open alarm; a wrong code is denied and the strike stays locked; code, code-opened, code-closed, code-unforced, and wrong-code SKIP when the door's timeline holds it open (open mode or an open override) at the step"
-    "6 locked-command, open-command: *0021 makes a locked override that denies the user's code, *000 ends it; *0011 makes an open override in which a key releases the strike, and ending it locks the door"
+    "6 locked-command, open-command: *21 makes a locked override that denies the user's code, *0 ends it; *11 makes an open override in which a key releases the strike, and ending it locks the door"
     "7 free-memory: free_bytes at the end is at most 10% below the start"
-    "8 reboot, reboot-started: POST reboot; the door is online again within twice the timeout and the strike stayed locked; GET /events records a newer start, a restart its firmware asked for"
+    "8 reboot, reboot-started, keypad-reboot: POST reboot; the door is online again within twice the timeout and the strike stayed locked; GET /events records a newer start, a restart its firmware asked for; the commander's *9 is allowed and logged as a keypad reboot, the strike releases and locks, and the door is online again"
 )
 
 if $DRY_RUN; then
@@ -651,7 +651,7 @@ ended() { [ -z "$(ours "$1")" ]; }
 
 step_locked_command() {
     local id check
-    say "Keypad command: lock the door for one minute. Type the commander's code:   $COMMANDER_CODE * 0021 #"
+    say "Keypad command: lock the door for one minute. Type the commander's code:   $COMMANDER_CODE * 21 #"
     mark_events
     ready locked-command "Typed it?" || return
     typed locked-command allowed || return
@@ -666,20 +666,20 @@ step_locked_command() {
     typed locked-command denied || return
     check="$(described)"
     saw locked-command "Did the strike stay locked?" || return
-    say "End the lock. Type:   $COMMANDER_CODE * 000 #"
+    say "End the lock. Type:   $COMMANDER_CODE * 0 #"
     mark_events
     ready locked-command "Typed it?" || return
     typed locked-command allowed || return
     if ! eventually ended locked; then
-        fail locked-command "*000 did not end override $id"
+        fail locked-command "*0 did not end override $id"
         return
     fi
-    pass locked-command "*0021 locked the door (override $id), the code was then $check, and *000 ended it"
+    pass locked-command "*21 locked the door (override $id), the code was then $check, and *0 ended it"
 }
 
 step_open_command() {
     local id
-    say "Keypad command: open mode for one minute. Type:   $COMMANDER_CODE * 0011 #" \
+    say "Keypad command: open mode for one minute. Type:   $COMMANDER_CODE * 11 #" \
         "In open mode any key releases the strike without asking the server."
     mark_events
     ready open-command "Typed it?" || return
@@ -698,7 +698,7 @@ step_open_command() {
     fi
     say "Wait a few seconds, then press one key again."
     saw open-command "Did the strike stay locked this time?" || return
-    pass open-command "*0011 put the door in open mode (override $id), a key released the strike, and ending it locked the door"
+    pass open-command "*11 put the door in open mode (override $id), a key released the strike, and ending it locked the door"
 }
 
 step_commands() {
@@ -743,6 +743,24 @@ step_reboot() {
     else
         pass reboot-started "$(described): $detail"
     fi
+    step_keypad_reboot
+}
+
+step_keypad_reboot() {
+    local seen
+    say "Keypad reboot. Type the commander's code:   $COMMANDER_CODE * 9 #" \
+        "The strike must release as for any accepted command, lock again, and stay locked while the door restarts."
+    ready keypad-reboot "Reboot the door from its keypad now?" || return
+    seen="$(last_seen)"
+    mark_events
+    typed keypad-reboot allowed || return
+    recorded keypad-reboot command "keypad reboot" || return
+    if ! within $((2 * TIMEOUT)) back_online "$seen"; then
+        fail keypad-reboot "the door is not online again: $(door_state .)"
+        return
+    fi
+    saw keypad-reboot "Did the strike release, then lock and stay locked through the restart?" || return
+    pass keypad-reboot "*9 was allowed, logged as a keypad reboot, and the door is online again"
 }
 
 # --- 7 health ---------------------------------------------------------------

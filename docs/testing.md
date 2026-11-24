@@ -112,21 +112,25 @@ they are kept.
     `GET /api/v1/doors/{id}/telemetry`.
 11. **door-event**: opening and closing the door on the host shows in the
     server's door state.
-12. **override**: with the user a door commander, `<code>*00130` puts the
+12. **override**: with the user a door commander, `<code>*130` puts the
     door in open mode. A keypad command typed in open mode never reaches
     the server, so that override is ended through the API; then
-    `<code>*0021` locks the door and `<code>*000` ends the locked override.
-13. **rotate**: after `POST /api/v1/doors/{id}/credentials/rotate` the door
+    `<code>*21` locks the door and `<code>*0` ends the locked override.
+13. **keypad-reboot**: the door commander's `<code>*9` is logged as an
+    allowed command, the server logs a `keypad reboot` naming the user,
+    the door logs a start after it and is connected again, and a second
+    `<code>*9` at once is denied as `reboot too soon`.
+14. **rotate**: after `POST /api/v1/doors/{id}/credentials/rotate` the door
     connects with its new credentials, the old ones are revoked, and the
     door stays online.
-14. **firmware-upload**: a small image of a new version is uploaded,
+15. **firmware-upload**: a small image of a new version is uploaded,
     unsigned, as every release is.
-15. **update**: once the host's configuration carries the server's
+16. **update**: once the host's configuration carries the server's
     `firmware_signing_key`, the image is chosen as the door's own and
     sent; the host checks the signature the server appended when it
     served the image with that key, installs it, restarts on the new
     version, and the door reports it.
-16. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke` the
+17. **revoke**: after `POST /api/v1/doors/{id}/credentials/revoke` the
     controller enrolls again.
 
 The server sends firmware only while `device_url` is set: update commands
@@ -510,10 +514,10 @@ before it fails, naming the event it looked after.
    open mode or under an open override, a key opens the door without
    asking the server, so `code`, `code-opened`, `code-closed`,
    `code-unforced`, and `wrong-code` print `SKIP` with the span instead.
-6. **locked-command**: the commander's `<code>*0021#` makes a one-minute
+6. **locked-command**: the commander's `<code>*21#` makes a one-minute
    locked override; the user's code is then denied and the strike stays
-   locked; `<code>*000#` ends the override. **open-command**:
-   `<code>*0011#` makes a one-minute open override, in which any key
+   locked; `<code>*0#` ends the override. **open-command**:
+   `<code>*11#` makes a one-minute open override, in which any key
    releases the strike; ending it through the API locks the door again.
    A keypad command typed in open mode never reaches the server.
 7. **free-memory**: `free_bytes` at the end is at most 10% below the start.
@@ -521,7 +525,11 @@ before it fails, naming the event it looked after.
    again on a new connection within twice `DOORCODE_TIMEOUT_S`, and the
    strike stayed locked through it. **reboot-started**: the events record
    a start newer than the door's newest event before the command, whose
-   detail says a restart the firmware asked for.
+   detail says a restart the firmware asked for. **keypad-reboot**: the
+   commander's `<code>*9#` is allowed and logged as a `keypad reboot`, the
+   door is online again on a new connection within twice
+   `DOORCODE_TIMEOUT_S`, and the person saw the strike release, lock, and
+   stay locked through the restart.
 
 On any exit the script ends every override it made, leaving any that was
 in force before the run, puts the door's configuration overrides back, and

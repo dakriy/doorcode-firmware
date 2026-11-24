@@ -403,13 +403,13 @@ keypad_command() {
 }
 
 # A keypad command typed in open mode never reaches the server, so the
-# open override ends through the API, and *000 is tried on a locked one.
+# open override ends through the API, and *0 is tried on a locked one.
 step_override() {
     local problem override
     api_ok PUT "/groups/$GROUP_ID" \
         "{\"slug\":\"$NAME\",\"name\":\"$NAME\",\"roles\":[\"door-commander\"]}" ||
         { fail override "making the user a door commander $(reason)"; return; }
-    if ! problem="$(keypad_command 00130 open)"; then
+    if ! problem="$(keypad_command 130 open)"; then
         fail override "$problem"
         return
     fi
@@ -418,10 +418,56 @@ step_override() {
         fail override "no open override to end: $(reason)"
     elif ! eventually is normal host_state .mode; then
         fail override "the mode stayed $(host_state .mode) after ending override $override"
-    elif ! problem="$(keypad_command 0021 locked)" || ! problem="$(keypad_command 000 normal)"; then
+    elif ! problem="$(keypad_command 21 locked)" || ! problem="$(keypad_command 0 normal)"; then
         fail override "$problem"
     else
-        pass override "*00130 put the door in open mode until ended; *0021 locked it and *000 ended that"
+        pass override "*130 put the door in open mode until ended; *21 locked it and *0 ended that"
+    fi
+}
+
+# newest_id QUERY: the id of the door's newest event the events query
+# QUERY selects, 0 when there is none.
+newest_id() {
+    api_ok GET "/events?door=$DOOR_ID&$1" && answer '.events[0].id // 0'
+}
+
+# logged_why REQUEST OUTCOME REASON: whether the server logged the check
+# REQUEST with OUTCOME and REASON.
+logged_why() {
+    api_ok GET "/events?door=$DOOR_ID&type=check&per_page=50" &&
+        [ "$(answer ".events[] | select(.request_id == \"$1\") | .outcome + \"/\" + .reason")" = "$2/$3" ]
+}
+
+# rebooted_by_user: whether the server logged a keypad reboot of the door
+# naming the user.
+rebooted_by_user() {
+    api_ok GET "/events?door=$DOOR_ID&type=command&reason=keypad+reboot" &&
+        [ "$(answer '.events[0].user.id')" = "$USER_ID" ]
+}
+
+# started_after ID: whether the door's newest start is newer than event ID.
+started_after() { [ "$(newest_id reason=started)" -gt "$1" ]; }
+
+# With the user a door commander, *9 is allowed and the door restarts and
+# comes back; a second *9 at once is refused as too soon.
+step_keypad_reboot() {
+    local before request again
+    before="$(newest_id per_page=1)" || { fail keypad-reboot "reading the events $(reason)"; return; }
+    request="$(type_entry "${CODE}*9")" || { fail keypad-reboot "*9 sent no check"; return; }
+    if ! eventually logged_why "$request" allowed command; then
+        fail keypad-reboot "no allowed command check $request in GET /events"
+    elif ! eventually rebooted_by_user; then
+        fail keypad-reboot "no keypad reboot event naming user $USER_ID"
+    elif ! eventually started_after "$before"; then
+        fail keypad-reboot "the door logged no start after the keypad reboot"
+    elif ! eventually door_ready; then
+        fail keypad-reboot "the host did not come back connected: $(host GET /state | head -c 300)"
+    elif ! again="$(type_entry "${CODE}*9")"; then
+        fail keypad-reboot "the second *9 sent no check"
+    elif ! eventually logged_why "$again" denied "reboot too soon"; then
+        fail keypad-reboot "the second *9 ($again) was not denied as too soon"
+    else
+        pass keypad-reboot "*9 ($request) restarted the door, logged under user $USER_ID; *9 again ($again) was refused as too soon"
     fi
 }
 
@@ -551,6 +597,7 @@ step_open
 step_telemetry
 step_door_event
 step_override
+step_keypad_reboot
 step_rotate
 step_firmware
 step_revoke

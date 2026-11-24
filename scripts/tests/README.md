@@ -47,7 +47,7 @@ good with an ordinary delete.
 Checks the controller contract end to end with one `doorcode-host` door,
 through the server's API and the host's control API: provisioning,
 enrollment and approval, door codes allowed and denied, the open command,
-telemetry, door events, keypad overrides, credential rotation and
+telemetry, door events, keypad overrides and reboot, credential rotation and
 revocation, and a firmware update the server signs, checked with the key
 the server sends in the configuration.
 
