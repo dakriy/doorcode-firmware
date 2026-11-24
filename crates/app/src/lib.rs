@@ -191,7 +191,7 @@ impl Phase {
                 let door = door::start(device, credentials, broker, since_start, running)?;
                 Phase::Door(Box::new(door))
             }
-            None => Phase::Enrolling(enrollment::start(device, broker, since_start)),
+            None => Phase::Enrolling(enrollment::start(device, broker, since_start)?),
         };
         Ok(phase)
     }

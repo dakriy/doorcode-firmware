@@ -592,11 +592,8 @@ impl Door {
                 self.credentials.door_id
             ),
         );
-        Ok(Phase::Enrolling(enrollment::start(
-            device,
-            self.broker,
-            self.since_start,
-        )))
+        let enrolling = enrollment::start(device, self.broker, self.since_start)?;
+        Ok(Phase::Enrolling(enrolling))
     }
 
     /// Stores the new credentials beside the old and hands over to them.
@@ -661,6 +658,8 @@ impl Door {
         Ok(self)
     }
 
+    /// Keeps the enrollment account a configuration carries, whatever
+    /// becomes of the configuration: the broker accepts that account now.
     /// Runs with a configuration received at once when it changes nothing
     /// of how the door connects, and stores it. Tries it on the next start
     /// instead when it does, or when the configuration running is on trial
@@ -676,6 +675,7 @@ impl Door {
                 return Ok(self);
             }
         };
+        enrollment::keep(device, &config);
         let digest = trial::digest(payload);
         if self.settled_by_trial(device, &digest)? {
             return Ok(self);

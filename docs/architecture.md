@@ -34,7 +34,8 @@ keypad is scanned every 50 ms, and nothing the loop does takes longer than
 that, so a keypress is handled promptly.
 
 The application moves through two phases. **Enrolling**, it connects with
-the provisioned enrollment credentials, announces its hardware id, and
+the enrollment credentials it holds (the provisioned ones until a
+configuration carries others), announces its hardware id, and
 waits for the server to send door credentials. **Door**, it connects as its
 door, follows the stored configuration and timeline, checks codes, obeys
 commands, reports telemetry and door events, rotates credentials, and

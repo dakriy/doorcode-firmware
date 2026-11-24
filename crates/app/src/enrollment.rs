@@ -9,7 +9,9 @@ use protocol::{Config, Credentials, Enrollment, Timeline};
 
 use crate::device::Device;
 use crate::telemetry::SinceStart;
-use crate::{door, stored, trial, Access, ConnectionState, Counters, Phase, RunError, RunReport};
+use crate::{
+    door, stored, trial, Access, Account, ConnectionState, Counters, Phase, RunError, RunReport,
+};
 
 /// The broker drops the connection after one and a half of these without a packet.
 const KEEP_ALIVE_S: u16 = 30;
@@ -21,8 +23,9 @@ const REANNOUNCE_AFTER_MS: u64 = 10 * 60 * 1000;
 const RECONNECT_PAUSE_MS: u64 = 1000;
 
 pub(crate) struct Enrolling {
-    /// The broker to enroll at.
+    /// The broker to enroll at, and the account to enroll with.
     broker: BrokerAddress,
+    account: Account,
     step: Step,
     /// What the controller did as a door since it started, carried on once
     /// it is a door again.
@@ -38,17 +41,45 @@ enum Step {
     Paused { reconnect_at: u64 },
 }
 
+/// Starts enrolling at `broker` with the enrollment account stored now.
 pub(crate) fn start(
     device: &Device<'_>,
     broker: BrokerAddress,
     since_start: SinceStart,
-) -> Enrolling {
+) -> Result<Enrolling, RunError> {
     device.log(Level::Info, &format!("enrolling as {}", device.hardware_id));
-    let step = connect(device, &broker);
-    Enrolling {
+    let account = stored::enrollment(device.connectors.storage())?;
+    let step = connect(device, &broker, &account);
+    Ok(Enrolling {
         broker,
+        account,
         step,
         since_start,
+    })
+}
+
+/// Keeps the enrollment account `config` carries to enroll with should
+/// the controller enroll again, when it carries one other than the one
+/// stored. A configuration without one keeps the stored account, and so
+/// does a store that fails, which is logged.
+pub(crate) fn keep(device: &Device<'_>, config: &Config) {
+    if config.enrollment_username.is_empty() || config.enrollment_password.is_empty() {
+        return;
+    }
+    let account = Account {
+        username: config.enrollment_username.clone(),
+        password: config.enrollment_password.clone(),
+    };
+    match stored::store_enrollment(device.connectors.storage(), &account) {
+        Ok(true) => device.log(
+            Level::Info,
+            &format!("keeping the enrollment credentials of {}", account.username),
+        ),
+        Ok(false) => {}
+        Err(error) => device.log(
+            Level::Warn,
+            &format!("could not keep the enrollment credentials: {error:?}"),
+        ),
     }
 }
 
@@ -124,7 +155,7 @@ impl Enrolling {
         match self.step {
             Step::Waiting { .. } => outcome(device, announce(device)),
             // Connecting has no deadline, so only a pause runs out here.
-            Step::Paused { .. } | Step::Connecting => connect(device, &self.broker),
+            Step::Paused { .. } | Step::Connecting => connect(device, &self.broker, &self.account),
         }
     }
 
@@ -153,23 +184,26 @@ impl Enrolling {
     }
 }
 
-fn connect(device: &Device<'_>, broker: &BrokerAddress) -> Step {
-    let options = connect_options(device, broker);
+fn connect(device: &Device<'_>, broker: &BrokerAddress, account: &Account) -> Step {
+    let options = connect_options(device, broker, account);
     match device.connectors.broker().connect(&options) {
         Ok(()) => Step::Connecting,
         Err(error) => pause(device, &error.to_string()),
     }
 }
 
-fn connect_options(device: &Device<'_>, broker: &BrokerAddress) -> ConnectOptions {
-    let enrollment = &device.provisioning.enrollment;
+fn connect_options(
+    device: &Device<'_>,
+    broker: &BrokerAddress,
+    account: &Account,
+) -> ConnectOptions {
     // Offline, and nothing else.
     let will = Enrollment::default();
     ConnectOptions {
         address: broker.clone(),
         client_id: device.hardware_id.clone(),
-        username: enrollment.username.clone(),
-        password: enrollment.password.clone(),
+        username: account.username.clone(),
+        password: account.password.clone(),
         keep_alive_s: KEEP_ALIVE_S,
         will: status(device, &will),
     }

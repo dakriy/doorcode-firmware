@@ -48,10 +48,7 @@ const PREVIOUS_TOKEN: &str = "previous_token";
 
 pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunError> {
     let broker = broker(storage)?;
-    let enrollment = Account {
-        username: required(storage, ENROLL_USERNAME)?,
-        password: required(storage, ENROLL_PASSWORD)?,
-    };
+    let enrollment = enrollment(storage)?;
     let wifi = WifiNetwork {
         ssid: optional(storage, WIFI_SSID)?,
         password: optional(storage, WIFI_PASSWORD)?,
@@ -62,6 +59,29 @@ pub(crate) fn provisioning(storage: &dyn Storage) -> Result<Provisioning, RunErr
         wifi,
         previous_token: optional(storage, PREVIOUS_TOKEN)?,
     })
+}
+
+/// The account the controller enrolls with: the provisioned one until a
+/// configuration carries another, which replaces it.
+pub(crate) fn enrollment(storage: &dyn Storage) -> Result<Account, RunError> {
+    Ok(Account {
+        username: required(storage, ENROLL_USERNAME)?,
+        password: required(storage, ENROLL_PASSWORD)?,
+    })
+}
+
+/// Keeps `account` to enroll with in place of the one stored, writing only
+/// the part that differs, and reports whether either did. Each part is
+/// one write, so a password changed alone is never stored half.
+pub(crate) fn store_enrollment(storage: &dyn Storage, account: &Account) -> Result<bool, RunError> {
+    let held = enrollment(storage)?;
+    if held.username != account.username {
+        store(storage, ENROLL_USERNAME, &account.username)?;
+    }
+    if held.password != account.password {
+        store(storage, ENROLL_PASSWORD, &account.password)?;
+    }
+    Ok(held != *account)
 }
 
 /// Forgets the token the board's previous firmware identified it with,

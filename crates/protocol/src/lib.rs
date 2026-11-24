@@ -171,6 +171,10 @@ pub struct Config {
     pub mesh_password: String,
     pub mesh_min_router_rssi: i32,
     pub mesh_max_layer: u64,
+    /// The enrollment account the broker accepts, which the door keeps to
+    /// enroll with; either one empty keeps the account it has.
+    pub enrollment_username: String,
+    pub enrollment_password: String,
 }
 
 impl Default for Config {
@@ -207,6 +211,8 @@ impl Default for Config {
             mesh_password: String::new(),
             mesh_min_router_rssi: -75,
             mesh_max_layer: 4,
+            enrollment_username: String::new(),
+            enrollment_password: String::new(),
         }
     }
 }
@@ -244,6 +250,8 @@ message! {
         mesh_password: always,
         mesh_min_router_rssi: always,
         mesh_max_layer: always,
+        enrollment_username: unless_default,
+        enrollment_password: unless_default,
     }
 }
 

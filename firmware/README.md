@@ -119,6 +119,13 @@ CBOR, the other keys are text):
   them. Run `scripts/firmware-provision.sh` inside the container without a
   port to only write the image, `target/provisioning-nvs.bin`.
 
+A door replaces the enrollment account with the one its configuration
+carries (`docs/protocol.md`), so a door holds the server's current one.
+A board that is not a door enrolls with the account it was built or
+provisioned with: after the server's enrollment credentials change,
+download the provisioning file again and rebuild or reprovision, since
+an image or NVS image made before cannot enroll.
+
 The partition table, `partitions.csv`, fills 4 MB flash with two OTA slots
 and no factory slot: `ota_0` of 0x200000 (2048 KB) at 0x10000 and `ota_1`
 of 0x1F0000 (1984 KB) at 0x210000. `nvs` (16 KB at 0x9000), `otadata`

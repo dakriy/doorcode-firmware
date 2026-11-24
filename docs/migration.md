@@ -26,7 +26,12 @@ This is the release script of `release.md` with four differences:
   meant for keep nothing in NVS that this firmware reads, so the embedded
   defaults are their broker, enrollment account, Wi-Fi network, and
   starting configuration. The image therefore carries those secrets; give
-  it only to the previous update server.
+  it only to the previous update server. A board enrolls with the
+  enrollment account built in, so once the server's enrollment password
+  or username changes, an image built before cannot enroll: build it
+  again with a provisioning file downloaded after the change, and replace
+  the image wherever it is served, before another board takes it. A board
+  that is already a door is sent the new account in its configuration.
 - The version must end in `-migrate`, so the doorcode server never takes
   it for a release to roll out, and the signed image must fit the old 1 MB
   slots. The script refuses either otherwise.

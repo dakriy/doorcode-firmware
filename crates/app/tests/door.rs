@@ -77,6 +77,8 @@ fn custom_config() -> Config {
         mesh_password: "mesh-secret".to_owned(),
         mesh_min_router_rssi: -80,
         mesh_max_layer: 6,
+        enrollment_username: String::new(),
+        enrollment_password: String::new(),
     }
 }
 
@@ -220,6 +222,8 @@ fn a_door_with_nothing_stored_runs_with_the_default_configuration_and_an_empty_t
                 mesh_password: String::new(),
                 mesh_min_router_rssi: -75,
                 mesh_max_layer: 4,
+                enrollment_username: String::new(),
+                enrollment_password: String::new(),
             },
             Timeline {
                 from: 0,

@@ -46,7 +46,8 @@ fn four_other_roots() -> String {
 }
 
 /// A configuration trusting `ca_pem`, with a connect timeout of a minute
-/// and its other text settings as long as a site's are.
+/// and its other text settings, the enrollment account among them, as
+/// long as a site's are.
 fn trusting(ca_pem: String) -> Config {
     Config {
         broker_ca_pem: ca_pem,
@@ -57,6 +58,8 @@ fn trusting(ca_pem: String) -> Config {
         firmware_signing_key: "a".repeat(128),
         mesh_ssid: "campus-doors-mesh".to_owned(),
         mesh_password: "m".repeat(63),
+        enrollment_username: "doorcode-enroll".to_owned(),
+        enrollment_password: "e".repeat(32),
         ..Config::default()
     }
 }
@@ -251,7 +254,7 @@ fn storage_holding_the_message_and_broker_ca_keeps_the_certificates_once_and_the
         [(10, config_for(7, &stored))],
     );
 
-    assert_eq!((before, after, resent.firmware.restarts()), (235, 122, 0));
+    assert_eq!((before, after, resent.firmware.restarts()), (238, 122, 0));
 }
 
 #[test]

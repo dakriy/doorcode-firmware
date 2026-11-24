@@ -4,7 +4,8 @@
 //! is one storage write, so the certificates and the settings that go with
 //! them change together. The certificates take a third less room than the
 //! PEM text they arrived as, and nothing else in storage holds them while
-//! a configuration carries them.
+//! a configuration carries them. A record leaves out the enrollment
+//! account a message carries, which storage keeps under its own keys.
 //!
 //! A value without the leading `RECORD` tag is the message as the server
 //! sent it, as a configuration without certificates, or with any that are
@@ -50,7 +51,8 @@ pub(crate) fn read(bytes: &[u8]) -> Result<Kept, String> {
     })
 }
 
-/// The record for `config`, which came in a message with `digest`. `None`
+/// The record for `config`, which came in a message with `digest`, without
+/// its enrollment account. `None`
 /// when `config` carries no certificates or any that are not PEM
 /// certificate blocks, for which the message itself is stored.
 pub(crate) fn record(config: &Config, digest: &str) -> Option<Vec<u8>> {
@@ -65,6 +67,8 @@ pub(crate) fn record(config: &Config, digest: &str) -> Option<Vec<u8>> {
     }
     let without = Config {
         broker_ca_pem: String::new(),
+        enrollment_username: String::new(),
+        enrollment_password: String::new(),
         ..config.clone()
     };
     bytes.extend_from_slice(&without.encode());
