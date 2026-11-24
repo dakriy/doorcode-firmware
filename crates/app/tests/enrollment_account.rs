@@ -178,3 +178,33 @@ fn a_configuration_put_on_trial_has_its_enrollment_account_kept_at_once() {
         (pair("enroll-2", "rotated"), true)
     );
 }
+
+#[test]
+fn a_configuration_differing_only_in_its_enrollment_account_is_run_at_once_on_the_same_connection()
+{
+    let running = Config {
+        broker_host: "broker2.example.org".to_owned(),
+        wifi_ssid: "lobby".to_owned(),
+        wifi_password: "lobby-secret".to_owned(),
+        ..Config::default()
+    };
+    let received = Config {
+        enrollment_username: "enroll-2".to_owned(),
+        enrollment_password: "rotated".to_owned(),
+        ..running.clone()
+    };
+    let connectors = StubConnectors::online_with(&running, [(1, config_for(7, &received))]);
+
+    let report = app::run(&connectors).unwrap();
+
+    let connections = connectors
+        .broker
+        .calls()
+        .into_iter()
+        .filter(|call| matches!(call, BrokerCall::Connect(_) | BrokerCall::Disconnect))
+        .count();
+    assert_eq!(
+        (report.config, connectors.firmware.restarts(), connections),
+        (received, 0, 1)
+    );
+}
