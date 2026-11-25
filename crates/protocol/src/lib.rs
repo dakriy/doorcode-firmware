@@ -314,15 +314,19 @@ message! {
     }
 }
 
-/// A door's periodic report of how it is doing. Every field is always sent.
-/// Counts are totals since the door started; the network stack's and the
+/// A door's periodic report of how it is doing. Every field is always sent
+/// except the latency, which is left out when there is no measurement to
+/// report. Counts are totals since the door started; the network stack's and the
 /// Wi-Fi station's may wrap around or start again from zero.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Telemetry {
     /// Signal strength now, in dBm.
     pub signal: i32,
-    /// The latest round trip to the server, in milliseconds.
-    pub latency_ms: u64,
+    /// The round trip of the report before, in milliseconds: from
+    /// publishing it to the broker's acknowledgement of it. `None` when
+    /// there was no report before on this connection, or the broker had not
+    /// acknowledged it by now.
+    pub latency_ms: Option<u64>,
     pub uptime_s: u64,
     pub free_bytes: u64,
     pub firmware_version: String,
@@ -369,7 +373,7 @@ pub struct Telemetry {
 message! {
     Telemetry {
         signal: always,
-        latency_ms: always,
+        latency_ms: unless_none,
         uptime_s: always,
         free_bytes: always,
         firmware_version: always,

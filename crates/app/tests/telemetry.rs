@@ -71,7 +71,7 @@ fn uptimes(connectors: &StubConnectors) -> Vec<u64> {
 fn quiet_report(uptime_s: u64) -> Telemetry {
     Telemetry {
         signal: -61,
-        latency_ms: 0,
+        latency_ms: None,
         uptime_s,
         free_bytes: 180_000,
         firmware_version: "2.0.0".to_owned(),
@@ -264,7 +264,7 @@ fn the_report_is_encoded_with_the_contract_field_names() {
     assert_eq!(
         connectors.broker.published_payloads().last(),
         Some(&hex(concat!(
-            "b7",
+            "b6",
             "617601",
             "65627373696460",
             "656f70656e7300",
@@ -276,7 +276,6 @@ fn the_report_is_encoded_with_the_contract_field_names() {
             "69646f6f725f6f70656ef4",
             "697463705f64726f707300",
             "6a667265655f62797465731a0002bf20",
-            "6a6c6174656e63795f6d7300",
             "6a6d6573685f6c6179657200",
             "6a7265636f6e6e6563747300",
             "6a776966695f64726f707300",
@@ -364,28 +363,105 @@ fn the_mesh_layer_parent_and_children_come_from_the_radio() {
     );
 }
 
-#[test]
-fn the_latency_is_the_round_trip_of_the_last_answered_check() {
-    let reply = Reply {
-        request_id: "0000000000000000".to_owned(),
-        allow: false,
-        strike_ms: 0,
-    };
-    let mut events = typed(1500, "1234#");
-    events.push((1620, reply_for(7, &reply)));
-    let connectors = online_until(61_001, events);
+/// What each report said of the round trip of the report before, in order.
+fn latencies(connectors: &StubConnectors) -> Vec<Option<u64>> {
+    reports(connectors)
+        .iter()
+        .map(|report| report.latency_ms)
+        .collect()
+}
 
-    let report = app::run(&connectors).unwrap();
+#[test]
+fn the_next_report_carries_how_long_the_broker_took_to_acknowledge_the_one_before() {
+    // The online status is publication 1, started 2, the first report 3.
+    let connectors = online_until(121_001, [(1012, Event::Delivered { message_id: 3 })]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(latencies(&connectors), vec![None, Some(12), None]);
+}
+
+#[test]
+fn every_acknowledged_report_is_timed_for_the_report_after_it() {
+    // The second report, at 61 s, is publication 4.
+    let events = [
+        (1012, Event::Delivered { message_id: 3 }),
+        (61_040, Event::Delivered { message_id: 4 }),
+    ];
+    let connectors = online_until(121_001, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(latencies(&connectors), vec![None, Some(12), Some(40)]);
+}
+
+#[test]
+fn an_acknowledgement_of_another_publication_times_no_report() {
+    let connectors = online_until(61_001, [(1012, Event::Delivered { message_id: 2 })]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(latencies(&connectors), vec![None, None]);
+}
+
+#[test]
+fn an_acknowledgement_of_a_report_that_comes_after_the_next_report_times_neither() {
+    let connectors = online_until(121_001, [(61_005, Event::Delivered { message_id: 3 })]);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(latencies(&connectors), vec![None, None, None]);
+}
+
+#[test]
+fn the_first_report_after_a_reconnect_carries_no_round_trip_of_the_connection_before() {
+    // Connected again, the online status is publication 4 and the report 5.
+    let events = [
+        (1012, Event::Delivered { message_id: 3 }),
+        (30_000, Event::Disconnected),
+        (32_000, Event::Connected),
+    ];
+    let connectors = online_until(33_001, events);
+
+    app::run(&connectors).unwrap();
+
+    assert_eq!(latencies(&connectors), vec![None, None]);
+}
+
+#[test]
+fn a_report_with_a_latency_is_encoded_with_the_contract_field_names() {
+    let connectors = online_until(61_001, [(1012, Event::Delivered { message_id: 3 })]);
+
+    app::run(&connectors).unwrap();
 
     assert_eq!(
-        (
-            reports(&connectors)
-                .iter()
-                .map(|report| report.latency_ms)
-                .collect::<Vec<_>>(),
-            report.counters.latency_ms
-        ),
-        (vec![0, 120], 120)
+        connectors.broker.published_payloads().last(),
+        Some(&hex(concat!(
+            "b7",
+            "617601",
+            "65627373696460",
+            "656f70656e7300",
+            "65726f616d7300",
+            "667369676e616c383c",
+            "676368616e6e656c00",
+            "687463705f73656e7400",
+            "68757074696d655f73183d",
+            "69646f6f725f6f70656ef4",
+            "697463705f64726f707300",
+            "6a667265655f62797465731a0002bf20",
+            "6a6c6174656e63795f6d730c",
+            "6a6d6573685f6c6179657200",
+            "6a7265636f6e6e6563747300",
+            "6a776966695f64726f707300",
+            "6b636865636b735f6c6f737400",
+            "6b636865636b735f73656e7400",
+            "6b6d6573685f706172656e7460",
+            "6d636f6e6669675f64696765737460",
+            "6d6d6573685f6368696c6472656e00",
+            "6f7463705f72657472616e736d69747300",
+            "706669726d776172655f76657273696f6e65322e302e30",
+            "70776966695f64726f705f726561736f6e00"
+        )))
     );
 }
 
@@ -969,7 +1045,6 @@ fn nothing_from_while_disconnected_is_sent_later_and_the_reconnect_is_counted() 
             Counters {
                 opens: 1,
                 reconnects: 1,
-                latency_ms: 0,
                 checks_sent: 0,
                 checks_lost: 0,
                 tcp_sent: 0,

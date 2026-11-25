@@ -237,8 +237,10 @@ and to limit its checks.
 ## Telemetry
 
 Published on `doorcode/doors/<id>/telemetry` every `telemetry_interval_s`
-while connected, the first about a second after the door comes online.
-Every field is always sent. Nothing is kept to send later. Every count is
+while connected, the first about a second after the door comes online,
+QoS 1, not retained. Every field is always sent except `latency_ms`,
+which is left out when there is no measurement to report (Latency
+below). Nothing is kept to send later. Every count is
 a total since the door started, so each report's count is at least the one
 before, except for the counts the network stack and the Wi-Fi station keep:
 `tcp_sent`, `tcp_retransmits`, `tcp_drops`, `wifi_drops`, and `roams` are
@@ -249,7 +251,7 @@ are 0 on a door whose network stack keeps no TCP counters.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `signal` | int | Signal strength now, in dBm: the access point joined, or the parent door's soft-AP in the mesh. |
-| `latency_ms` | uint | The round trip of the latest answered check, in milliseconds. |
+| `latency_ms` | uint | The round trip of the report before, in milliseconds: until the broker acknowledged it. Left out when there was no report before on this connection or the broker had not acknowledged it by now. |
 | `uptime_s` | uint | Seconds since the door started. |
 | `free_bytes` | uint | Free heap bytes. |
 | `firmware_version` | text | The version the door runs. |
@@ -270,6 +272,25 @@ are 0 on a door whose network stack keeps no TCP counters.
 | `bssid` | text | The access point joined now, 12 lowercase hex digits; empty with no link. |
 | `channel` | uint | The Wi-Fi channel of the access point joined now; 0 with no link. |
 | `config_digest` | text | The digest of the configuration in use, 16 lowercase hex digits (Configuration digest above); empty while the door runs with the defaults. |
+
+### Latency
+
+`latency_ms` is the round trip of the door's last report, on the door's
+monotonic clock, in whole milliseconds: from the moment the door handed
+that report to its MQTT client to the moment it handled the broker's
+PUBACK for that publication's packet id. It covers the time the report
+waited in the client's outbox, the network both ways, and the broker; the
+server's application is not in it. Each measurement is reported once, in
+the next report.
+
+Only the PUBACK of the report before counts. One for any other
+publication, one from an earlier connection, or one that arrives after
+the next report has gone out measures nothing. The field is therefore
+left out of the first report after the door starts or connects again, of
+a report whose predecessor was not sent, and of a report whose
+predecessor the broker had not acknowledged by then. A round trip of
+0 ms is a measurement, so a reader that needs to tell a left-out field
+from a measured one checks for the key rather than for 0.
 
 ## Door events
 

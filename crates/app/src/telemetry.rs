@@ -57,22 +57,19 @@ impl SinceStart {
         self.checks_lost += 1;
     }
 
-    /// What a report would count now, with the latest round trip
-    /// `latency_ms`.
-    pub(crate) fn counters(&self, device: &Device<'_>, latency_ms: u64) -> Counters {
+    /// What a report would count now.
+    pub(crate) fn counters(&self, device: &Device<'_>) -> Counters {
         let radio = device.connectors.radio();
-        self.counted(latency_ms, radio.tcp_counters(), radio.wifi_link())
+        self.counted(radio.tcp_counters(), radio.wifi_link())
     }
 
-    /// What a report counts with the latest round trip `latency_ms` and the
-    /// radio's counts `tcp` and `wifi`, as the radio keeps them. Without TCP
-    /// counters the TCP counts are zero.
-    fn counted(&self, latency_ms: u64, tcp: Option<TcpCounters>, wifi: WifiLink) -> Counters {
+    /// What a report counts with the radio's counts `tcp` and `wifi`, as
+    /// the radio keeps them. Without TCP counters the TCP counts are zero.
+    fn counted(&self, tcp: Option<TcpCounters>, wifi: WifiLink) -> Counters {
         let tcp = tcp.unwrap_or_default();
         Counters {
             opens: self.opens,
             reconnects: self.connections.saturating_sub(1),
-            latency_ms,
             checks_sent: self.checks_sent,
             checks_lost: self.checks_lost,
             tcp_sent: tcp.segments_sent.into(),
@@ -83,23 +80,25 @@ impl SinceStart {
         }
     }
 
-    /// Publishes a report, naming the configuration in use by its digest
-    /// `config_digest`.
+    /// Publishes a report with the round trip `latency_ms` of the report
+    /// before, naming the configuration in use by its digest
+    /// `config_digest`, and returns the probe that times this report: from
+    /// now to the broker's acknowledgement.
     pub(crate) fn report(
         &self,
         device: &Device<'_>,
         door_id: u64,
-        latency_ms: u64,
+        latency_ms: Option<u64>,
         config_digest: &str,
-    ) {
+    ) -> Probe {
         let radio = device.connectors.radio();
         let wifi = radio.wifi_link();
-        let counters = self.counted(latency_ms, radio.tcp_counters(), wifi);
+        let counters = self.counted(radio.tcp_counters(), wifi);
         let access_point = wifi.access_point;
         let mesh = radio.mesh();
         let telemetry = Telemetry {
             signal: device.signal_dbm(),
-            latency_ms: counters.latency_ms,
+            latency_ms,
             uptime_s: device.now_ms() / 1000,
             free_bytes: radio.free_bytes().into(),
             firmware_version: device.firmware_version(),
@@ -121,8 +120,56 @@ impl SinceStart {
             channel: access_point.map_or(0, |joined| joined.channel.into()),
             config_digest: config_digest.to_owned(),
         };
-        if let Err(error) = device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
-            device.log(Level::Warn, &format!("telemetry was not sent: {error}"));
+        match device.publish(door_id, protocol::LEAF_TELEMETRY, telemetry.encode()) {
+            Ok(message_id) => Probe::Awaiting {
+                message_id,
+                sent_at: device.now_ms(),
+            },
+            Err(error) => {
+                device.log(Level::Warn, &format!("telemetry was not sent: {error}"));
+                Probe::Unmeasured
+            }
+        }
+    }
+}
+
+/// The round trip of the last report on this connection: from publishing it
+/// to the broker's acknowledgement of that publication.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) enum Probe {
+    /// No report on this connection yet, or the last one was not sent.
+    #[default]
+    Unmeasured,
+    /// The last report, published as `message_id` at `sent_at`, waits for
+    /// the broker's acknowledgement.
+    Awaiting { message_id: u16, sent_at: u64 },
+    /// The broker acknowledged the last report `round_trip_ms` after it was
+    /// published.
+    Measured { round_trip_ms: u64 },
+}
+
+impl Probe {
+    /// This probe once the broker has acknowledged publication
+    /// `message_id` at `now`: measured when that is the report awaited,
+    /// unchanged otherwise.
+    pub(crate) fn delivered(self, message_id: u16, now: u64) -> Probe {
+        match self {
+            Probe::Awaiting {
+                message_id: awaited,
+                sent_at,
+            } if awaited == message_id => Probe::Measured {
+                round_trip_ms: now.saturating_sub(sent_at),
+            },
+            other => other,
+        }
+    }
+
+    /// The round trip measured; `None` while the last report is not
+    /// acknowledged, or there was none.
+    pub(crate) fn round_trip_ms(self) -> Option<u64> {
+        match self {
+            Probe::Measured { round_trip_ms } => Some(round_trip_ms),
+            Probe::Unmeasured | Probe::Awaiting { .. } => None,
         }
     }
 }

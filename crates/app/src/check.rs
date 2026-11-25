@@ -8,16 +8,8 @@ use crate::device::Device;
 /// A check sent and not answered yet.
 pub(crate) struct Outstanding {
     pub(crate) check: Check,
-    /// When the check was published.
-    sent_at: u64,
     /// When the door stops waiting for the reply.
     pub(crate) deadline: u64,
-}
-
-/// A reply to the outstanding check, and how long it took to come.
-pub(crate) struct Answer {
-    pub(crate) reply: Reply,
-    pub(crate) round_trip_ms: u64,
 }
 
 /// Publishes a check for `digits` on door `door_id`'s check topic, with a
@@ -37,11 +29,9 @@ pub(crate) fn send(
         device.log(Level::Warn, &format!("an entry was not checked: {error}"));
         return None;
     }
-    let sent_at = device.now_ms();
     Some(Outstanding {
         check,
-        sent_at,
-        deadline: sent_at + reply_timeout_ms,
+        deadline: device.now_ms() + reply_timeout_ms,
     })
 }
 
@@ -55,7 +45,7 @@ pub(crate) fn answer(
     device: &Device<'_>,
     outstanding: Option<&Outstanding>,
     payload: &[u8],
-) -> Option<Answer> {
+) -> Option<Reply> {
     let reply = match Reply::decode(payload) {
         Ok(reply) => reply,
         Err(error) => {
@@ -64,16 +54,13 @@ pub(crate) fn answer(
         }
     };
     let awaited =
-        outstanding.filter(|outstanding| outstanding.check.request_id == reply.request_id);
-    let Some(outstanding) = awaited else {
+        outstanding.is_some_and(|outstanding| outstanding.check.request_id == reply.request_id);
+    if !awaited {
         device.log(
             Level::Info,
             &format!("ignored a reply to {}, not awaited", reply.request_id),
         );
         return None;
-    };
-    Some(Answer {
-        round_trip_ms: device.now_ms() - outstanding.sent_at,
-        reply,
-    })
+    }
+    Some(reply)
 }

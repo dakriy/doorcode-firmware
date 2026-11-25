@@ -15,7 +15,7 @@ use crate::access::{Gate, Situation};
 use crate::command::{self, Order, PendingRestart};
 use crate::device::Device;
 use crate::rotation::Rotation;
-use crate::telemetry::{self, SinceStart};
+use crate::telemetry::{self, Probe, SinceStart};
 use crate::trial::{self, Running, Trial};
 use crate::update::{self, Boot, Install};
 use crate::{
@@ -70,8 +70,8 @@ enum Link {
     /// A connection was asked for; the broker has not answered yet.
     Connecting,
     /// Subscribed, and the online status published; reports telemetry at
-    /// the given time.
-    Online { report_at: u64 },
+    /// `report_at`, with the round trip `probe` of the report before.
+    Online { report_at: u64, probe: Probe },
     /// Not connected; connects again at the given time.
     Paused { reconnect_at: u64 },
 }
@@ -88,7 +88,7 @@ impl Link {
     /// When the door reports telemetry next; `None` unless it is online.
     fn report_at(&self) -> Option<u64> {
         match self {
-            Link::Online { report_at } => Some(*report_at),
+            Link::Online { report_at, .. } => Some(*report_at),
             Link::Connecting | Link::Paused { .. } => None,
         }
     }
@@ -245,7 +245,7 @@ impl Door {
                 door.door_moved(device, open);
                 door
             }
-            Some(Event::Delivered { message_id }) => door.delivered(message_id),
+            Some(Event::Delivered { message_id }) => door.delivered(device, message_id),
             Some(Event::Download(transfer)) => door.transfer(device, transfer)?,
             // The wait ran out. `Stop` ends the loop before it gets here.
             None | Some(Event::Stop) => door,
@@ -255,7 +255,7 @@ impl Door {
 
     pub(crate) fn report(self, device: &Device<'_>) -> RunReport {
         let connection = self.link.connection();
-        let counters = self.since_start.counters(device, self.gate.latency_ms());
+        let counters = self.since_start.counters(device);
         RunReport::new(
             device,
             Some(self.credentials),
@@ -276,8 +276,10 @@ impl Door {
         if self.gate.expire(device, &self.config) {
             self.since_start.check_lost();
         }
-        if device.is_due(self.link.report_at()) {
-            self.report_telemetry(device);
+        if let Link::Online { report_at, probe } = self.link {
+            if device.is_due(Some(report_at)) {
+                self.report_telemetry(device, probe);
+            }
         }
         if device.is_due(self.restart_at()) {
             device.log(
@@ -315,9 +317,16 @@ impl Door {
         self.restart.as_ref().and_then(PendingRestart::ack_deadline)
     }
 
-    /// Takes the broker's acknowledgement of the ack of a reboot as the
-    /// ack being through.
-    fn delivered(self, message_id: u16) -> Door {
+    /// Takes the broker's acknowledgement of publication `message_id` as
+    /// the round trip of the last report when it is that report's, and as
+    /// the ack of a reboot being through when it is that ack's.
+    fn delivered(mut self, device: &Device<'_>, message_id: u16) -> Door {
+        if let Link::Online { report_at, probe } = self.link {
+            self.link = Link::Online {
+                report_at,
+                probe: probe.delivered(message_id, device.now_ms()),
+            };
+        }
         let awaited = self.restart.as_ref();
         if !awaited.is_some_and(|restart| restart.acknowledged_by(message_id)) {
             return self;
@@ -360,15 +369,18 @@ impl Door {
         Ok(self)
     }
 
-    /// Reports telemetry, and the next report one interval later.
-    fn report_telemetry(&mut self, device: &Device<'_>) {
+    /// Reports telemetry with the round trip `probe` of the report before,
+    /// and the next report one interval later.
+    fn report_telemetry(&mut self, device: &Device<'_>, probe: Probe) {
         let door_id = self.credentials.door_id;
-        let latency_ms = self.gate.latency_ms();
-        self.since_start
+        let latency_ms = probe.round_trip_ms();
+        let probe = self
+            .since_start
             .report(device, door_id, latency_ms, &self.config_digest);
         let interval_ms = self.config.telemetry_interval_s.max(1) * 1000;
         self.link = Link::Online {
             report_at: device.now_ms() + interval_ms,
+            probe,
         };
     }
 
@@ -478,6 +490,7 @@ impl Door {
         let door = Door {
             link: Link::Online {
                 report_at: device.now_ms() + telemetry::FIRST_REPORT_AFTER_MS,
+                probe: Probe::Unmeasured,
             },
             failures: 0,
             ..self

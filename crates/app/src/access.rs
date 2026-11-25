@@ -29,8 +29,6 @@ pub(crate) struct Gate {
     last_check: Option<SentCheck>,
     /// The last reply that answered a check.
     last_reply: Option<ReceivedReply>,
-    /// The round trip of the last check that was answered; 0 until one is.
-    latency_ms: u64,
 }
 
 impl Gate {
@@ -93,12 +91,10 @@ impl Gate {
     /// Releases the strike for the reply to the outstanding check when it
     /// allows; a reply to anything else is ignored.
     pub(crate) fn reply(&mut self, device: &Device<'_>, payload: &[u8], config: &Config) {
-        let Some(answer) = check::answer(device, self.check.as_ref(), payload) else {
+        let Some(reply) = check::answer(device, self.check.as_ref(), payload) else {
             return;
         };
         self.check = None;
-        self.latency_ms = answer.round_trip_ms;
-        let reply = answer.reply;
         self.last_reply = Some(ReceivedReply {
             request_id: reply.request_id.clone(),
             allow: reply.allow,
@@ -131,11 +127,6 @@ impl Gate {
     /// Locks the strike when the door stops being a door.
     pub(crate) fn lock(&mut self, device: &Device<'_>) {
         self.latch.lock(device);
-    }
-
-    /// The round trip of the last check that was answered; 0 until one is.
-    pub(crate) fn latency_ms(&self) -> u64 {
-        self.latency_ms
     }
 
     /// Whether the door is unlocked now; see `Latch::is_unlocked`.

@@ -77,8 +77,6 @@ pub struct Counters {
     pub opens: u64,
     /// How often the door connected again.
     pub reconnects: u64,
-    /// The round trip of the last check that was answered; 0 until one is.
-    pub latency_ms: u64,
     /// Checks sent.
     pub checks_sent: u64,
     /// Checks whose reply did not come in time.
