@@ -82,3 +82,12 @@ CONFIG_LWIP_STATS=y
 # empties what an earlier firmware's drivers stored.
 # CONFIG_ESP_WIFI_NVS_ENABLED is not set
 # CONFIG_ESP_PHY_CALIBRATION_AND_DATA_STORAGE is not set
+
+# MQTT: esp-mqtt's task sends what the application queued only between
+# waits for incoming data, and nothing wakes it when a message is queued,
+# so the wait bounds how long a check, an ack, or a report sits in the
+# outbox: 20 ms instead of the default second. Every other option under
+# the custom configuration keeps its default; the buffer and the task's
+# stack are set per client (src/mqtt/client.rs).
+CONFIG_MQTT_USE_CUSTOM_CONFIG=y
+CONFIG_MQTT_POLL_READ_TIMEOUT_MS=20
